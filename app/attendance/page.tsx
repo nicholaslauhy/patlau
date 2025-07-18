@@ -211,6 +211,7 @@ export default function AttendancePage() {
         .update({
           attendance_records: [],
           weeks_completed: 0,
+          paid: false,
           updated_at: new Date().toISOString()
         })
         .eq('student_id', studentId)
@@ -392,16 +393,18 @@ export default function AttendancePage() {
             <div className="table-container">
               <table>
                 <thead>
-                  <tr>
-                    <th>Student ID</th>
-                    <th>Name</th>
-                    <th>Day</th>
-                    <th>Timeslot</th>
-                    <th>Level</th>
-                    <th>Weeks Completed</th>
-                    <th>Attendance Actions</th>
-                    <th>Attendance History</th>
-                  </tr>
+                    <tr>
+                      <th>Student ID</th>
+                      <th>Name</th>
+                      <th>Day</th>
+                      <th>Timeslot</th>
+                      <th>Level</th>
+                      <th>Price (S$)</th>
+                      <th>Total Weeks</th>
+                      <th>Weeks Completed</th>
+                      <th>Attendance Actions</th>
+                      <th>Attendance History</th>
+                    </tr>
                 </thead>
                 <tbody>
                   {searchResults.map((student) => (
@@ -516,7 +519,85 @@ export default function AttendancePage() {
                         </select>
                       </td>
                       <td>
-                        {student.weeks_completed || 0}/{student.total_weeks}
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={student.price || 0}
+                          aria-label="Price in SGD"
+                          title="Price in SGD"
+                          placeholder="Price"
+                          onChange={async (e) => {
+                            const newPrice = parseFloat(e.target.value);
+                            try {
+                              const { error } = await supabase
+                                .from('students')
+                                .update({ 
+                                  price: newPrice,
+                                  updated_at: new Date().toISOString()
+                                })
+                                .eq('student_id', student.student_id);
+                              
+                              if (error) throw error;
+                              
+                              setSearchResults(prev => prev.map(s => 
+                                s.student_id === student.student_id ? {
+                                  ...s,
+                                  price: newPrice,
+                                  updated_at: new Date().toISOString()
+                                } : s
+                              ));
+                            } catch (error) {
+                              console.error('Error updating price:', error);
+                              alert(`Failed to update price: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                            }
+                          }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="1"
+                          value={student.total_weeks || 1}
+                          aria-label="Total weeks"
+                          title="Total weeks"
+                          placeholder="Weeks"
+                          onChange={async (e) => {
+                            const newTotalWeeks = parseInt(e.target.value);
+                            try {
+                              const updates: Partial<Student> = {
+                                total_weeks: newTotalWeeks,
+                                updated_at: new Date().toISOString()
+                              };
+                              
+                              // If reducing total weeks below completed weeks, also update completed weeks
+                              if (newTotalWeeks < (student.weeks_completed || 0)) {
+                                updates.weeks_completed = newTotalWeeks;
+                              }
+
+                              const { error } = await supabase
+                                .from('students')
+                                .update(updates)
+                                .eq('student_id', student.student_id);
+                              
+                              if (error) throw error;
+                              
+                              setSearchResults(prev => prev.map(s => 
+                                s.student_id === student.student_id ? {
+                                  ...s,
+                                  ...updates,
+                                  updated_at: new Date().toISOString()
+                                } : s
+                              ));
+                            } catch (error) {
+                              console.error('Error updating total weeks:', error);
+                              alert(`Failed to update total weeks: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                            }
+                          }}
+                        />
+                      </td>
+                      <td>
+                        {student.weeks_completed || 0}/{student.total_weeks || 1}
                       </td>
                       <td>
                         <div style={{display: 'flex', gap: '10px', flexDirection: 'column'}}>
@@ -545,7 +626,13 @@ export default function AttendancePage() {
                           </button>
                           {student.weeks_completed >= student.total_weeks && (
                             <button
-                              onClick={() => handleResetCourse(student.student_id)}
+                              onClick={() => {
+                                if (!student.paid) {
+                                  alert(`${student.student_name} has not paid yet`);
+                                  return;
+                                }
+                                handleResetCourse(student.student_id);
+                              }}
                               className="reset-btn"
                             >
                               Reset Course

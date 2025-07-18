@@ -6,6 +6,7 @@ import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
 import { v4 as uuidv4 } from 'uuid';
 import './../styles.css';
+import './add.css';
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,7 +22,7 @@ export default function AddStudent() {
     student_levelofplay: 'Beginner',
     price: 0,
     total_weeks: 1,
-    weeks_completed: []
+    weeks_completed: 0
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -77,94 +78,99 @@ export default function AddStudent() {
         <form onSubmit={handleSubmit} className="student-form">
           {error && <p className="error-message">{error}</p>}
 
-          <div className="form-group">
-            <label htmlFor="student_name">Student Name</label>
-            <input
-              type="text"
-              id="student_name"
-              name="student_name"
-              value={formData.student_name}
-              onChange={handleChange}
-              required
-            />
+          <div className="form-grid">
+            <div className="form-group">
+              <label htmlFor="student_name">Student Name</label>
+              <input
+                type="text"
+                id="student_name"
+                name="student_name"
+                value={formData.student_name}
+                onChange={handleChange}
+                required
+                placeholder="Enter student name"
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="student_day">Day</label>
+              <select
+                id="student_day"
+                name="student_day"
+                value={formData.student_day}
+                onChange={handleChange}
+                required
+              >
+                <option value="Saturday">Saturday</option>
+                <option value="Sunday">Sunday</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="student_timeslot">Timeslot</label>
+              <select
+                id="student_timeslot"
+                name="student_timeslot"
+                value={formData.student_timeslot}
+                onChange={handleChange}
+                required
+              >
+                <option value="8-10am">8-10am</option>
+                <option value="10-12pm">10-12pm</option>
+                <option value="1-3pm">1-3pm</option>
+                <option value="2-4pm">2-4pm</option>
+                <option value="3-5pm">3-5pm</option>
+                <option value="4-6pm">4-6pm</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="student_levelofplay">Level</label>
+              <select
+                id="student_levelofplay"
+                name="student_levelofplay"
+                value={formData.student_levelofplay}
+                onChange={handleChange}
+                required
+              >
+                <option value="Beginner">Beginner</option>
+                <option value="Intermediate">Intermediate</option>
+                <option value="Advanced">Advanced</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="price">Price (S$)</label>
+              <input
+                type="number"
+                id="price"
+                name="price"
+                value={formData.price}
+                onChange={handleChange}
+                min="0"
+                step="0.01"
+                required
+                placeholder="0.00"
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="total_weeks">Total Weeks</label>
+              <input
+                type="number"
+                id="total_weeks"
+                name="total_weeks"
+                value={formData.total_weeks}
+                onChange={handleChange}
+                min="1"
+                required
+                placeholder="1"
+              />
+            </div>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="student_day">Day</label>
-            <select
-              id="student_day"
-              name="student_day"
-              value={formData.student_day}
-              onChange={handleChange}
-              required
-            >
-              <option value="Saturday">Saturday</option>
-              <option value="Sunday">Sunday</option>
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="student_timeslot">Timeslot</label>
-            <select
-              id="student_timeslot"
-              name="student_timeslot"
-              value={formData.student_timeslot}
-              onChange={handleChange}
-              required
-            >
-              <option value="8-10am">8-10am</option>
-              <option value="10-12pm">10-12pm</option>
-              <option value="1-3pm">1-3pm</option>
-              <option value="2-4pm">2-4pm</option>
-              <option value="3-5pm">3-5pm</option>
-              <option value="4-6pm">4-6pm</option>
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="student_levelofplay">Level</label>
-            <select
-              id="student_levelofplay"
-              name="student_levelofplay"
-              value={formData.student_levelofplay}
-              onChange={handleChange}
-              required
-            >
-              <option value="Beginner">Beginner</option>
-              <option value="Intermediate">Intermediate</option>
-              <option value="Advanced">Advanced</option>
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="price">Price (S$)</label>
-            <input
-              type="number"
-              id="price"
-              name="price"
-              value={formData.price}
-              onChange={handleChange}
-              min="0"
-              step="0.01"
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="total_weeks">Total Weeks</label>
-            <input
-              type="number"
-              id="total_weeks"
-              name="total_weeks"
-              value={formData.total_weeks}
-              onChange={handleChange}
-              min="1"
-              required
-            />
-          </div>
-
-          <button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Adding...' : 'Add Student'}
+          <button type="submit" className="submit-btn" disabled={isSubmitting}>
+            {isSubmitting ? 'Adding Student...' : 'Add Student'}
           </button>
         </form>
       </main>
