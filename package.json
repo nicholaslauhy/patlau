@@ -1,0 +1,38 @@
+{
+  "name": "patlau",
+  "version": "1.0.0",
+  "description": "A website designed to be able to track students and ensure prompt payments with an alert system.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nicholaslauhy/patlau.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/nicholaslauhy/patlau/issues"
+  },
+  "homepage": "https://github.com/nicholaslauhy/patlau#readme",
+  "dependencies": {
+    "@supabase/auth-helpers-nextjs": "^0.10.0",
+    "@supabase/ssr": "^0.6.1",
+    "@supabase/supabase-js": "^2.52.0",
+    "@types/node": "^24.0.14",
+    "@types/uuid": "^10.0.0",
+    "next": "^15.4.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "^5.8.3",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.8"
+  }
+}
