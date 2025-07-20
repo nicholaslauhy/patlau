@@ -19,6 +19,15 @@ export default function PaymentPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<Student[]>([]);
+  const [paidCount, setPaidCount] = useState(0);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [trackingPeriod, setTrackingPeriod] = useState(() => {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + 3);
+    return { start, end };
+  });
   
   const [selectedDay, setSelectedDay] = useState('all');
   const [selectedTimeslot, setSelectedTimeslot] = useState('all');
@@ -28,9 +37,108 @@ export default function PaymentPage() {
   const timeslots = ['all', '8-10am', '10-12pm', '1-3pm', '2-4pm', '3-5pm', '4-6pm'];
   const levels = ['all', 'Beginner', 'Intermediate', 'Advanced'];
 
+  const [paymentHistory, setPaymentHistory] = useState<Record<string, number>>({});
+
+  const sendPeriodSummary = async (totalAmount: number, startDate: Date, endDate: Date) => {
+    try {
+      // Get all payment records for the period
+      const { data: payments } = await supabase
+        .from('payment_history')
+        .select('student_id, amount, recorded_at')
+        .gte('recorded_at', startDate.toISOString())
+        .lte('recorded_at', endDate.toISOString())
+        .order('recorded_at', { ascending: true });
+
+      // Get student names for each payment
+      const paymentDetails = await Promise.all(
+        (payments || []).map(async (payment) => {
+          const { data: student } = await supabase
+            .from('students')
+            .select('student_name')
+            .eq('student_id', payment.student_id)
+            .single();
+          return {
+            ...payment,
+            student_name: student?.student_name || 'Unknown'
+          };
+        })
+      );
+
+      // Format payment details for message
+      const paymentLines = paymentDetails.map(p => 
+        `- ${p.student_name}: S$${Math.abs(p.amount).toFixed(2)} (${new Date(p.recorded_at).toLocaleDateString()})`
+      ).join('\n');
+
+      const message = `📊 Payment Period Summary 📊\n\n` +
+        `Period: ${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}\n` +
+        `Total Collected: S$${totalAmount.toFixed(2)}\n\n` +
+        `Payment Details:\n${paymentLines}\n\n` +
+        `Starting new tracking period from today.`;
+
+      const response = await fetch('/api/telegram-reminder', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to send Telegram notification');
+      }
+
+      // Reset all paid statuses to false (does not affect attendance)
+      const { error: updateError } = await supabase
+        .from('students')
+        .update({ paid: false })
+        .neq('paid', false);
+
+      if (updateError) throw updateError;
+
+    } catch (error) {
+      console.error('Error sending period summary:', error);
+    }
+  };
+
+  const fetchPaidCount = async () => {
+    try {
+      // Get all payments from history table (never resets)
+      const { data, error } = await supabase
+        .from('payment_history')
+        .select('amount, recorded_at')
+        .gte('recorded_at', trackingPeriod.start.toISOString())
+        .lte('recorded_at', trackingPeriod.end.toISOString());
+
+      if (error) throw error;
+      
+      const totalAmount = data?.reduce((sum, record) => 
+        sum + record.amount, 0) || 0;
+      
+      setPaidCount(totalAmount);
+      setLastUpdated(`Total collected: S$${totalAmount.toFixed(2)} (as of ${new Date().toLocaleDateString()})`);
+
+      // Check if period has ended
+      if (new Date() > trackingPeriod.end) {
+        await sendPeriodSummary(totalAmount, trackingPeriod.start, trackingPeriod.end);
+        
+        // Start new tracking period
+        const today = new Date();
+        const newStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const newEnd = new Date(newStart);
+        newEnd.setMonth(newEnd.getMonth() + 3);
+        
+        setTrackingPeriod({ start: newStart, end: newEnd });
+        await fetchPaidCount(); // Refresh with new period
+      }
+    } catch (error) {
+      console.error('Error fetching paid count:', error);
+    }
+  };
+
   const fetchData = async () => {
     setIsLoading(true);
     setSearchResults([]);
+    await fetchPaidCount();
 
     try {
       let query = supabase
@@ -72,23 +180,69 @@ export default function PaymentPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const { error } = await supabase
+      // Get current student data
+      const student = searchResults.find(s => s.student_id === studentId);
+      if (!student) throw new Error('Student not found');
+
+      const now = new Date();
+      const studentAmount = student.price * student.total_weeks;
+      const newAmount = newPaidStatus 
+        ? paidCount + studentAmount 
+        : paidCount - studentAmount;
+
+      // Update student paid status
+      const { error: updateError } = await supabase
         .from('students')
         .update({
           paid: newPaidStatus,
-          updated_at: new Date().toISOString()
+          updated_at: now.toISOString()
         })
         .eq('student_id', studentId);
 
-      if (error) throw error;
+      if (updateError) throw updateError;
 
-      setSearchResults(prev => prev.map(student => 
-        student.student_id === studentId ? {
-          ...student,
+      // First ensure payment_history table exists
+      const { data: { session } } = await supabase.auth.getSession();
+      const createTableResponse = await fetch('/api/create-payment-table', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`
+        }
+      });
+      
+      if (!createTableResponse.ok) {
+        const errorData = await createTableResponse.json();
+        throw new Error(errorData.error || 'Failed to create payment table');
+      }
+
+      // Record payment adjustment in history table
+      const { error: historyError } = await supabase
+        .from('payment_history')
+        .insert({
+          student_id: studentId,
+          amount: newPaidStatus ? studentAmount : -studentAmount,
+          recorded_at: now.toISOString()
+        });
+
+      if (historyError) {
+        console.error('Payment history insert error:', historyError);
+        throw new Error('Failed to record payment history');
+      }
+
+      // Immediate UI update
+      setPaidCount(newAmount);
+      setSearchResults(prev => prev.map(s => 
+        s.student_id === studentId ? {
+          ...s,
           paid: newPaidStatus,
-          updated_at: new Date().toISOString()
-        } : student
+          updated_at: now.toISOString()
+        } : s
       ));
+      
+      setLastUpdated(`Payment recorded at ${now.toLocaleString()}`);
+      
+      // Refresh data to confirm sync with database
+      setTimeout(fetchPaidCount, 500);
     } catch (error) {
       console.error('Payment status update failed:', error);
       alert(`Failed to update payment status: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -138,8 +292,8 @@ export default function PaymentPage() {
               onChange={async (e) => {
                 const searchTerm = e.target.value.trim();
                 
-                if (searchTerm) {
-                  try {
+                try {
+                  if (searchTerm) {
                     const response = await fetch('/api/payment-search', {
                       method: 'POST',
                       headers: {
@@ -154,18 +308,14 @@ export default function PaymentPage() {
                     }
 
                     const data = await response.json();
-                    
-                    if (data.results) {
-                      setSearchResults(data.results);
-                    } else {
-                      setSearchResults([]);
-                    }
-                  } catch (error) {
-                    console.error('Search error:', error);
-                    setSearchResults([]);
+                    setSearchResults(data.results || []);
+                  } else {
+                    // Reset to show all students when search is cleared
+                    await fetchData();
                   }
-                } else {
-                  fetchData();
+                } catch (error) {
+                  console.error('Search error:', error);
+                  setSearchResults([]);
                 }
               }}
             />
@@ -240,6 +390,152 @@ export default function PaymentPage() {
             >
               Apply Filters
             </button>
+          </div>
+        </div>
+
+        <div className="payment-summary">
+          <div className="summary-card">
+            <h3>Total Payments Collected</h3>
+            <p className="amount">S${paidCount.toFixed(2)}</p>
+            <p className="timestamp">
+              Tracking Period: {trackingPeriod.start.toLocaleDateString()} - {trackingPeriod.end.toLocaleDateString()}
+            </p>
+            <p className="timestamp">Updated: {new Date().toLocaleString()}</p>
+            
+            <div className="payment-actions">
+              <button 
+                className="payment-action-btn danger"
+                onClick={async () => {
+                  if (confirm('Are you sure you want to reset the total? This will send a summary and start a new tracking period.')) {
+                      try {
+                        // Get current total before resetting
+                        const { data } = await supabase
+                          .from('payment_history')
+                          .select('amount')
+                          .gte('recorded_at', trackingPeriod.start.toISOString())
+                          .lte('recorded_at', trackingPeriod.end.toISOString());
+                        
+                        const totalAmount = data?.reduce((sum, record) => sum + record.amount, 0) || 0;
+                        
+                        // Send summary notification
+                        await sendPeriodSummary(totalAmount, trackingPeriod.start, trackingPeriod.end);
+
+                        // Uncheck all paid statuses
+                        const { error: updateError } = await supabase
+                          .from('students')
+                          .update({ paid: false })
+                          .neq('paid', false);
+
+                        if (updateError) throw updateError;
+
+                        // Delete all payment history rows
+                        const { error: deleteError } = await supabase
+                          .from('payment_history')
+                          .delete()
+                          .neq('id', 0);
+
+                        if (deleteError) throw deleteError;
+                        
+                        // Start new tracking period at today's 12am
+                        const today = new Date();
+                        const newStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                        const newEnd = new Date(newStart);
+                        newEnd.setMonth(newEnd.getMonth() + 3);
+                        
+                        setTrackingPeriod({
+                          start: newStart,
+                          end: newEnd
+                        });
+                        
+                        // Refresh data to get new total
+                        await fetchData();
+                        setLastUpdated('Summary sent. All payments reset. New tracking period started');
+                    } catch (error) {
+                      console.error('Reset failed:', error);
+                      if (error instanceof Error) {
+                        alert(`Reset failed: ${error.message}`);
+                      } else {
+                        alert('Reset failed: Please check your internet connection and try again');
+                      }
+                      fetchData(); // Refresh data to restore consistent state
+                    }
+                  }
+                }}
+              >
+                Reset Total
+              </button>
+              
+              <button 
+                className="payment-action-btn warning"
+                onClick={async () => {
+                  try {
+                    // First get the last payment record details
+                    const { data: lastPayment } = await supabase
+                      .from('payment_history')
+                      .select('student_id, amount, recorded_at')
+                      .order('recorded_at', { ascending: false })
+                      .limit(1)
+                      .single();
+
+                    if (!lastPayment) {
+                      throw new Error('No payment found to undo');
+                    }
+
+                    // Get student name for notification
+                    const { data: student } = await supabase
+                      .from('students')
+                      .select('student_name')
+                      .eq('student_id', lastPayment.student_id)
+                      .single();
+
+                    // Update student's paid status to false
+                    const { error: updateError } = await supabase
+                      .from('students')
+                      .update({ paid: false })
+                      .eq('student_id', lastPayment.student_id);
+
+                    if (updateError) throw updateError;
+
+                    // Delete the payment history record
+                    const { error: deleteError } = await supabase
+                      .from('payment_history')
+                      .delete()
+                      .eq('recorded_at', lastPayment.recorded_at);
+
+                    if (deleteError) throw deleteError;
+
+                    // Send Telegram notification
+                    const message = `↩️ Payment Undone ↩️\n\n` +
+                      `Student: ${student?.student_name || 'Unknown'}\n` +
+                      `Amount: S$${Math.abs(lastPayment.amount).toFixed(2)}\n` +
+                      `Recorded at: ${new Date(lastPayment.recorded_at).toLocaleString()}\n` +
+                      `Status: Marked as unpaid`;
+
+                    await fetch('/api/telegram-reminder', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({ message }),
+                    });
+
+                    // Refresh data to get new total
+                    await fetchData();
+                    setLastUpdated('Undid last payment. Notification sent.');
+                  } catch (error) {
+                    console.error('Undo failed:', error);
+                    if (error instanceof Error) {
+                      alert(`Undo failed: ${error.message}`);
+                    } else {
+                      alert('Undo failed: Please check your internet connection and try again');
+                    }
+                    fetchData(); // Refresh data to restore consistent state
+                  }
+                }}
+              >
+                Undo Add 
+              </button>
+            </div>
           </div>
         </div>
 

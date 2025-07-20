@@ -1,0 +1,80 @@
+.summary-card {
+  background: white;
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.1);
+  width: 100%;
+  max-width: 550px;
+  margin: 0 auto;
+  border: 1px solid #f0f0f0;
+}
+
+.summary-card h3 {
+  font-size: 1.5rem;
+  margin-bottom: 16px;
+  color: #333;
+  text-align: center;
+}
+
+.amount {
+  font-size: 3rem;
+  font-weight: bold;
+  color: #2e7d32;
+  text-align: center;
+  margin: 24px 0;
+  letter-spacing: 1px;
+}
+
+.timestamp {
+  color: #666;
+  font-size: 0.9rem;
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.payment-actions {
+  display: flex;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.payment-action-btn {
+  padding: 14px 24px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  gap: 8px;
+}
+
+.payment-action-btn.danger {
+  background-color: #ff4444;
+  color: white;
+  box-shadow: 0 2px 4px rgba(255, 68, 68, 0.3);
+}
+
+.payment-action-btn.danger:hover {
+  background-color: #d32f2f;
+  transform: translateY(-1px);
+}
+
+.payment-action-btn.warning {
+  background-color: #ffbb33;
+  color: #333;
+  box-shadow: 0 2px 4px rgba(255, 187, 51, 0.3);
+}
+
+.payment-action-btn.warning:hover {
+  background-color: #ffa000;
+  transform: translateY(-1px);
+}
+
+.payment-action-btn:active {
+  transform: translateY(0);
+}

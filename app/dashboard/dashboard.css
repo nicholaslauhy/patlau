@@ -163,3 +163,63 @@
   margin-left: 15px;
   min-width: 120px;
 }
+
+.payment-summary {
+  margin-bottom: 20px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.summary-card {
+  background: white;
+  padding: 15px;
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.summary-card h3 {
+  margin: 0 0 10px 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.summary-card .amount {
+  font-size: 2rem;
+  font-weight: bold;
+  color: #28a745;
+  margin: 0;
+}
+
+.summary-card .date-range {
+  font-size: 1rem;
+  color: #212529;
+  margin: 0 0 10px 0;
+  font-weight: 600;
+}
+
+.summary-card .amount {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #28a745;
+  margin: 10px 0;
+}
+
+.summary-card .timestamp {
+  font-size: 0.8rem;
+  color: #6c757d;
+  margin: 5px 0 0 0;
+  font-style: italic;
+}
+
+.summary-card .timestamp {
+  font-size: 0.8rem;
+  color: #6c757d;
+  margin: 5px 0 0 0;
+}
+
+.summary-card .timestamp {
+  font-size: 0.9rem;
+  color: #6c757d;
+  margin: 5px 0 0 0;
+}

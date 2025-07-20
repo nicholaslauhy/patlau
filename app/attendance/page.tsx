@@ -206,13 +206,23 @@ export default function AttendancePage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
+      // First get current student data to preserve payment amount
+      const { data: currentStudent } = await supabase
+        .from('students')
+        .select('price, total_weeks, paid')
+        .eq('student_id', studentId)
+        .single();
+
       const { data: updatedStudent, error } = await supabase
         .from('students')
         .update({
           attendance_records: [],
           weeks_completed: 0,
-          paid: false,
-          updated_at: new Date().toISOString()
+          paid: false,  // Uncheck paid status
+          updated_at: new Date().toISOString(),
+          // Preserve the payment amount fields
+          price: currentStudent?.price,
+          total_weeks: currentStudent?.total_weeks
         })
         .eq('student_id', studentId)
         .select()
@@ -418,23 +428,26 @@ export default function AttendancePage() {
                           onChange={async (e) => {
                             const newDay = e.target.value;
                             try {
-                              const { error } = await supabase
-                                .from('students')
-                                .update({ 
-                                  student_day: newDay,
-                                  updated_at: new Date().toISOString()
-                                })
-                                .eq('student_id', student.student_id);
-                              
-                              if (error) throw error;
-                              
-                              setSearchResults(prev => prev.map(s => 
-                                s.student_id === student.student_id ? {
-                                  ...s,
-                                  student_day: newDay,
-                                  updated_at: new Date().toISOString()
-                                } : s
-                              ));
+      const { error } = await supabase
+        .from('students')
+        .update({
+          weeks_completed: 0,
+          updated_at: new Date().toISOString()
+        })
+        .eq('student_id', student.student_id);
+
+      if (error) throw error;
+
+      setSearchResults(prev => prev.map(s => 
+        s.student_id === student.student_id ? {
+          ...s,
+          weeks_completed: 0,
+          updated_at: new Date().toISOString()
+        } : s
+      ));
+
+      // Explicitly do NOT update payment count here
+      // Payment count should only change when manually toggling paid status
                             } catch (error) {
                               console.error('Error updating day:', error);
                               alert(`Failed to update day: ${error instanceof Error ? error.message : 'Unknown error'}`);
