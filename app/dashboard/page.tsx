@@ -25,6 +25,7 @@ export default function DashboardPage() {
   const [selectedLevel, setSelectedLevel] = useState('all');
   const [userName, setUserName] = useState('');
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [userRole, setUserRole] = useState<'superuser' | 'admin' | 'member' | null>(null);
 
   const days = ['all', 'Saturday', 'Sunday'];
   const timeslots = ['all', '8-10am', '10-12pm', '1-3pm', '2-4pm', '3-5pm', '4-6pm'];
@@ -44,6 +45,23 @@ export default function DashboardPage() {
     };
     loadUserName();
   }, []);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          router.push('/');
+          return;
+        }
+        const role = (user.user_metadata?.role as 'superuser' | 'admin' | 'member') || 'member';
+        setUserRole(role);
+      } catch (err) {
+        router.push('/');
+      }
+    };
+    checkAuth();
+  }, [router]);
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -292,7 +310,7 @@ export default function DashboardPage() {
               {showAccountMenu && (
                   <div className="account-menu">
                     <p className="account-name">{userName || 'User'}</p>
-                    <p className="account-role">Admin</p>
+                    <p className="account-role">{userRole?.toUpperCase() || 'MEMBER'}</p>
                     <Link href="/settings" className="account-menu-link" onClick={() => setShowAccountMenu(false)}>
                       ⚙️ Settings
                     </Link>
@@ -303,9 +321,15 @@ export default function DashboardPage() {
           </div>
 
           <div className="user-controls">
-            <Link href="/attendance" className="btn share-btn">Attendance</Link>
-            <Link href="/payment" className="btn share-btn">Payment</Link>
-            <Link href="/add" className="btn share-btn">Add Student</Link>
+            {(userRole === 'admin' || userRole === 'superuser') && (
+                <Link href="/attendance" className="btn share-btn">Attendance</Link>
+            )}
+            {(userRole === 'admin' || userRole === 'superuser') && (
+                <Link href="/payment" className="btn share-btn">Payment</Link>
+            )}
+            {(userRole === 'admin' || userRole === 'superuser') && (
+                <Link href="/add" className="btn share-btn">Add Student</Link>
+            )}
             <button
                 className="btn share-btn logout"
                 onClick={async () => {

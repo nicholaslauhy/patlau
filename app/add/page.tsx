@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
@@ -16,6 +16,29 @@ const supabase = createBrowserClient(
 
 export default function AddStudent() {
   const router = useRouter();
+  const [userRole, setUserRole] = useState<'superuser' | 'admin' | 'member' | null>(null);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          router.push('/');
+          return;
+        }
+        const role = (user.user_metadata?.role as 'superuser' | 'admin' | 'member') || 'member';
+        if (role === 'member' || role === null) {
+          router.push('/dashboard');
+          return;
+        }
+        setUserRole(role);
+      } catch (err) {
+        router.push('/');
+      }
+    };
+    checkAuth();
+  }, [router]);
+
   const [formData, setFormData] = useState({
     student_name: '',
     student_day: 'Saturday',
