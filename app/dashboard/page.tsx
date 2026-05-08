@@ -293,6 +293,9 @@ export default function DashboardPage() {
                   <div className="account-menu">
                     <p className="account-name">{userName || 'User'}</p>
                     <p className="account-role">Admin</p>
+                    <Link href="/settings" className="account-menu-link" onClick={() => setShowAccountMenu(false)}>
+                      ⚙️ Settings
+                    </Link>
                   </div>
               )}
             </div>

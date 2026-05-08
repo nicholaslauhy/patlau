@@ -365,3 +365,18 @@ th.col-weeks {
   font-size: 0.85rem;
   color: var(--text-secondary);
 }
+
+.account-menu-link {
+  display: block;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.account-menu-link:hover {
+  color: #226bc9;
+}
