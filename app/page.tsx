@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
-import type { PostgrestError } from '@supabase/supabase-js';
 import './styles.css';
 
 export default function Login() {
@@ -11,157 +10,135 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const router = useRouter();
 
-  console.log('Supabase URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
-  console.log('Supabase Key:', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
-  
   const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ 
-        email, 
-        password 
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
-      
-      if (error) {
-        console.error('Full login error:', {
-          message: error.message,
-          name: error.name,
-          stack: error.stack,
-          cause: error.cause,
-          status: error.status,
-          raw: error
-        });
 
-        let errorMessage = 'Login failed: ' + error.message;
-        if (error.message.includes('email not confirmed')) {
-          errorMessage = 'Please confirm your email first (check your inbox)';
-        } else if (error.message.includes('Invalid login credentials')) {
-          errorMessage = 'Invalid email or password';
-        } else if (error.message.includes('rate limit')) {
-          errorMessage = 'Too many attempts - please try again later';
-        } else if (error.message.includes('email')) {
-          errorMessage = 'Invalid email format';
-        } else if (error.message.includes('password')) {
-          errorMessage = 'Password too weak (min 6 characters)';
-        }
-        throw new Error(errorMessage);
+      if (error) {
+        // Friendly, concise error messages for users
+        let msg = 'Login failed';
+        if (error.message.includes('Invalid login credentials')) msg = 'Invalid email or password.';
+        else if (error.message.includes('email not confirmed')) msg = 'Please confirm your email first.';
+        else if (error.message.toLowerCase().includes('rate limit')) msg = 'Too many attempts — try again later.';
+        else msg = error.message || msg;
+
+        alert(msg);
+        return;
       }
 
       if (!data.user) {
-        throw new Error('Login failed - no user data returned');
+        alert('Login failed — please try again.');
+        return;
       }
 
-      // Basic profile data to use if table operations fail
-      let profileData = {
-        id: data.user.id,
-        name: data.user.email?.split('@')[0] || 'User'
-      };
-
+      // Best-effort: create a minimal profile if needed, but ignore failures
       try {
-        // First verify the profiles table exists
-        const { error: tableError } = await supabase
-          .from('profiles')
-          .select('*')
-          .limit(1);
-        
-        if (tableError) {
-          console.log('Profiles table not accessible, skipping profile operations');
-        } else {
-          // Table exists, proceed with profile operations
-          const { data: existingProfile, error: profileError } = await supabase
+        const { data: existing } = await supabase
             .from('profiles')
-            .select('*')
+            .select('id')
             .eq('id', data.user.id)
             .maybeSingle();
 
-          if (!profileError && !existingProfile) {
-            console.log('Creating new profile');
-            const { error: createError } = await supabase
-              .from('profiles')
-              .insert({
-                id: data.user.id,
-                name: profileData.name,
-                created_at: new Date().toISOString()
-              });
-            
-            if (createError) {
-              console.log('Profile creation skipped (non-critical)');
-            }
-          }
+        if (!existing) {
+          await supabase.from('profiles').insert({
+            id: data.user.id,
+            name: data.user.email?.split('@')[0] || 'User',
+            created_at: new Date().toISOString(),
+          });
         }
-      } catch (error) {
-        console.log('Profile operations skipped due to error:', error);
+      } catch {
+        // ignore profile write errors
       }
 
-      // Store session
-      await supabase.auth.setSession({
-        access_token: data.session?.access_token || '',
-        refresh_token: data.session?.refresh_token || ''
-      });
+      // Store session tokens (if available)
+      if (data.session) {
+        await supabase.auth.setSession({
+          access_token: data.session.access_token || '',
+          refresh_token: data.session.refresh_token || '',
+        });
+      }
 
       router.push('/dashboard');
-    } catch (error) {
-      console.error('Full login process error:', {
-        error,
-        timestamp: new Date().toISOString(),
-        userAgent: navigator?.userAgent,
-        url: window.location.href
-      });
-      const errorMessage = error instanceof Error ? 
-        error.message : 
-        'Login failed - see console for technical details';
-      alert(errorMessage);
+    } catch (err) {
+      console.error('Login error', err);
+      alert('Login failed — please try again.');
     }
   };
 
   return (
-    <div className="container">
-      <header>
-                    <h1>RedSquare</h1>
-        <div className="user-controls">
-          <button className="share-btn" onClick={() => router.push('/signup')}>
-            Sign Up
-          </button>
-        </div>
-      </header>
-
-      <main>
-        <p className="welcome">Welcome back!</p>
-        <div className="login-form">
-          <form onSubmit={handleLogin}>
-            <div className="form-group">
-              <label htmlFor="email">Email</label>
-              <input
-                type="email"
-                id="email"
-                className="form-input"
-                placeholder="Enter your email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="password">Password</label>
-              <input
-                type="password"
-                id="password"
-                className="form-input"
-                placeholder="Enter your password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-              />
-            </div>
-            <button type="submit" className="share-btn login-btn">
-              Login
+      <div className="container">
+        <header>
+          <h1 style={{ margin: 0 }}>PatLau</h1>
+          <div className="user-controls">
+            <button
+                className="share-btn"
+                onClick={() => router.push('/signup')}
+                aria-label="Sign up"
+            >
+              Sign up
             </button>
-          </form>
-        </div>
-      </main>
-    </div>
+          </div>
+        </header>
+
+        <main>
+          <p className="welcome">Welcome back</p>
+
+          <div className="login-form" role="region" aria-label="Sign in">
+            <form onSubmit={handleLogin} noValidate>
+              <div className="form-group">
+                <label htmlFor="email">Email</label>
+                <input
+                    required
+                    type="email"
+                    id="email"
+                    className="form-input"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    autoComplete="username"
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="password">Password</label>
+                <input
+                    required
+                    type="password"
+                    id="password"
+                    className="form-input"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                />
+              </div>
+
+              <button type="submit" className="login-btn">
+                Sign in
+              </button>
+
+              <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>
+                <button
+                    type="button"
+                    onClick={() => router.push('/signup')}
+                    className="icon-button"
+                    style={{ padding: '0.5rem 0.75rem', borderRadius: '6px' }}
+                >
+                  Need an account?
+                </button>
+              </div>
+            </form>
+          </div>
+        </main>
+      </div>
   );
 }

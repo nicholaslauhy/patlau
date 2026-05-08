@@ -691,3 +691,60 @@ table tbody tr:hover {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* -- UI tidy overrides (append to end of file) -- */
+
+.container {
+  max-width: 720px;
+  padding: 1.25rem;
+  margin-top: 1rem;
+  min-height: calc(100vh - 48px);
+}
+
+header {
+  height: 56px;
+  padding: 0.5rem 0;
+  align-items: center;
+}
+
+header h1 {
+  font-size: 1.125rem;
+  letter-spacing: 0.2px;
+}
+
+.welcome {
+  font-size: 1.25rem;
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+
+.login-form {
+  padding: 1.25rem;
+  max-width: 420px;
+  margin: 0.25rem auto 0;
+}
+
+.login-form .form-input {
+  padding: 0.65rem 0.9rem;
+  font-size: 0.98rem;
+}
+
+.login-btn {
+  padding: 0.7rem;
+  font-size: 1rem;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.share-btn {
+  padding: 0.45rem 0.9rem;
+  font-size: 0.95rem;
+}
+
+.icon-button {
+  border-radius: 6px;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+}
