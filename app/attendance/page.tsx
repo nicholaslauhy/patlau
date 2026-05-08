@@ -16,6 +16,8 @@ const supabase = createBrowserClient(
 export default function AttendancePage() {
   const router = useRouter();
   const [userRole, setUserRole] = useState<'superuser' | 'admin' | 'member' | null>(null);
+  const [userName, setUserName] = useState('');
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -37,6 +39,21 @@ export default function AttendancePage() {
     };
     checkAuth();
   }, [router]);
+
+  useEffect(() => {
+    const loadUserInfo = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setUserName(user.user_metadata?.name || user.email || 'User');
+        }
+      } catch (err) {
+        console.error('Failed to load user info:', err);
+      }
+    };
+
+    loadUserInfo();
+  }, []);
 
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -309,8 +326,31 @@ export default function AttendancePage() {
 
   return (
       <div className="container">
-        <header>
-          <h1>Attendance</h1>
+        <header className="dashboard-header">
+          <div className="header-left">
+            <div className="brand" style={{ position: 'relative' }}>
+              <button
+                  className="account-avatar-btn"
+                  onClick={() => setShowAccountMenu(!showAccountMenu)}
+                  title="View account"
+              >
+                👤
+              </button>
+
+              {showAccountMenu && (
+                  <div className="account-menu">
+                    <p className="account-name">{userName || 'User'}</p>
+                    <p className="account-role">{userRole?.toUpperCase() || 'MEMBER'}</p>
+                    <Link href="/settings" className="account-menu-link" onClick={() => setShowAccountMenu(false)}>
+                      ⚙️ Settings
+                    </Link>
+                  </div>
+              )}
+            </div>
+
+            <h1 className="page-title">Attendance</h1>
+          </div>
+
           <div className="user-controls">
             <Link href="/dashboard" className="btn share-btn">Dashboard</Link>
             <Link href="/payment" className="btn share-btn">Payment</Link>

@@ -37,7 +37,6 @@ export default function SettingsPage() {
     const [newUserEmail, setNewUserEmail] = useState('');
     const [newUserName, setNewUserName] = useState('');
     const [newUserRole, setNewUserRole] = useState<UserRole>('member');
-    const [newUserPassword, setNewUserPassword] = useState('');
 
     useEffect(() => {
         loadUserInfo();
@@ -83,8 +82,8 @@ export default function SettingsPage() {
         setError('');
         setSuccess('');
 
-        if (!newUserEmail || !newUserName || !newUserPassword) {
-            setError('All fields are required');
+        if (!newUserEmail || !newUserName) {
+            setError('Email and name are required');
             return;
         }
 
@@ -95,7 +94,6 @@ export default function SettingsPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     email: newUserEmail,
-                    password: newUserPassword,
                     name: newUserName,
                     role: newUserRole
                 })
@@ -109,7 +107,6 @@ export default function SettingsPage() {
             setSuccess(`User ${newUserName} created successfully`);
             setNewUserEmail('');
             setNewUserName('');
-            setNewUserPassword('');
             setNewUserRole('member');
 
             // Reload users list
@@ -200,18 +197,6 @@ export default function SettingsPage() {
                                         value={newUserEmail}
                                         onChange={(e) => setNewUserEmail(e.target.value)}
                                         placeholder="Enter user's email"
-                                        disabled={isLoading}
-                                    />
-                                </div>
-
-                                <div className="form-group">
-                                    <label htmlFor="password">Password *</label>
-                                    <input
-                                        type="password"
-                                        id="password"
-                                        value={newUserPassword}
-                                        onChange={(e) => setNewUserPassword(e.target.value)}
-                                        placeholder="Minimum 6 characters"
                                         disabled={isLoading}
                                     />
                                 </div>

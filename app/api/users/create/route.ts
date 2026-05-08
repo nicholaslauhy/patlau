@@ -8,40 +8,80 @@ const supabaseAdmin = createClient(
 
 export async function POST(request: NextRequest) {
     try {
-        const { email, password, name, role } = await request.json();
+        const { email, name, role } = await request.json();
 
-        if (!email || !password || !name || !role) {
+        if (!email || !name || !role) {
+            return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+        }
+
+        const redirectTo = `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`;
+
+        // 1) Primary: invitation email
+        const { data: inviteData, error: inviteError } =
+            await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+                redirectTo,
+                data: { name, role }
+            });
+
+        if (!inviteError) {
+            return NextResponse.json({
+                message: 'Invite email sent successfully',
+                user: inviteData.user ?? null
+            });
+        }
+
+        // 2) Fallback: ensure user exists, then send recovery email
+        const { data: existingUsers, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+        if (listError) {
+            console.error('listUsers failed:', listError);
             return NextResponse.json(
-                { error: 'Missing required fields' },
-                { status: 400 }
+                { error: `Invite failed; list users failed: ${listError.message}` },
+                { status: 500 }
             );
         }
 
-        const { data, error } = await supabaseAdmin.auth.admin.createUser({
-            email,
-            password,
-            user_metadata: {
-                name,
-                role
+        const existingUser = (existingUsers?.users || []).find((u) => u.email?.toLowerCase() === email.toLowerCase());
+
+        if (!existingUser) {
+            const { error: createError } = await supabaseAdmin.auth.admin.createUser({
+                email,
+                email_confirm: false,
+                user_metadata: { name, role }
+            });
+
+            if (createError) {
+                console.error('createUser fallback failed:', createError);
+                return NextResponse.json(
+                    { error: `Invite failed and fallback create failed: ${createError.message}` },
+                    { status: 500 }
+                );
             }
+        }
+
+        const { error: recoveryError } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
+            redirectTo
         });
 
-        if (error) {
+        if (recoveryError) {
+            console.error('recovery fallback failed:', recoveryError);
             return NextResponse.json(
-                { error: error.message },
-                { status: 400 }
+                {
+                    error: 'Both invite and fallback email failed',
+                    details: {
+                        invite: inviteError.message,
+                        fallback: recoveryError.message
+                    }
+                },
+                { status: 500 }
             );
         }
 
         return NextResponse.json({
-            message: 'User created successfully',
-            user: data.user
+            message: 'Invite failed, fallback recovery email sent',
+            warning: inviteError.message
         });
     } catch (error) {
         console.error('Create user error:', error);
-        return NextResponse.json(
-            { error: 'Internal server error' },
-            { status: 500 }
-        );
+        return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
 }

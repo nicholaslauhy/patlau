@@ -79,13 +79,7 @@ export default function Login() {
         <header>
           <h1 style={{ margin: 0 }}>PatLau</h1>
           <div className="user-controls">
-            <button
-                className="share-btn"
-                onClick={() => router.push('/signup')}
-                aria-label="Sign up"
-            >
-              Sign up
-            </button>
+            {/* Removed sign up button here */}
           </div>
         </header>
 
@@ -127,14 +121,18 @@ export default function Login() {
               </button>
 
               <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>
-                <button
-                    type="button"
-                    onClick={() => router.push('/signup')}
+                <span
                     className="icon-button"
-                    style={{ padding: '0.5rem 0.75rem', borderRadius: '6px' }}
+                    title="If you need to create an account, please contact the admin at nicholaslauhongyi@gmail.com"
+                    style={{
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: '6px',
+                      cursor: 'default',
+                      display: 'inline-block'
+                    }}
                 >
                   Need an account?
-                </button>
+                </span>
               </div>
             </form>
           </div>

@@ -16,6 +16,8 @@ const supabase = createBrowserClient(
 
 export default function AddStudent() {
   const router = useRouter();
+  const [userName, setUserName] = useState('');
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [userRole, setUserRole] = useState<'superuser' | 'admin' | 'member' | null>(null);
 
   useEffect(() => {
@@ -37,6 +39,24 @@ export default function AddStudent() {
       }
     };
     checkAuth();
+  }, [router]);
+
+  useEffect(() => {
+    const loadUserInfo = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setUserName(user.user_metadata?.name || user.email || 'User');
+        } else {
+          router.push('/');
+        }
+      } catch (err) {
+        console.error('Failed to load user info:', err);
+        router.push('/');
+      }
+    };
+
+    loadUserInfo();
   }, [router]);
 
   const [formData, setFormData] = useState({
@@ -89,8 +109,31 @@ export default function AddStudent() {
 
   return (
       <div className="container">
-        <header>
-          <h1>Add New Student</h1>
+        <header className="dashboard-header">
+          <div className="header-left">
+            <div className="brand" style={{ position: 'relative' }}>
+              <button
+                  className="account-avatar-btn"
+                  onClick={() => setShowAccountMenu(!showAccountMenu)}
+                  title="View account"
+              >
+                👤
+              </button>
+
+              {showAccountMenu && (
+                  <div className="account-menu">
+                    <p className="account-name">{userName || 'User'}</p>
+                    <p className="account-role">{userRole?.toUpperCase() || 'MEMBER'}</p>
+                    <Link href="/settings" className="account-menu-link" onClick={() => setShowAccountMenu(false)}>
+                      ⚙️ Settings
+                    </Link>
+                  </div>
+              )}
+            </div>
+
+            <h1 className="page-title">Add New Student</h1>
+          </div>
+
           <div className="user-controls">
             <Link href="/dashboard" className="btn share-btn">Dashboard</Link>
             <Link href="/attendance" className="btn share-btn">Attendance</Link>
