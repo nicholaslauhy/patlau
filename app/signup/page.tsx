@@ -1,29 +1,32 @@
-'use client';
-
 'use client'
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
-import type { PostgrestError } from '@supabase/supabase-js';
+import Link from 'next/link';
 import './../styles.css';
+import './signup.css';
 
 export default function SignUp() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
   const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
     try {
-      // First sign up the user
       const signUpOptions = {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
         data: {
           name: name,
           email: email
@@ -31,9 +34,8 @@ export default function SignUp() {
       };
 
       if (!process.env.NEXT_PUBLIC_SITE_URL) {
-        throw new Error('Production URL not configured - set NEXT_PUBLIC_SITE_URL environment variable');
+        throw new Error('Production URL not configured');
       }
-      signUpOptions.emailRedirectTo = `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`;
 
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
@@ -42,46 +44,34 @@ export default function SignUp() {
       });
 
       if (authError) {
-        console.error('Full signup error:', {
-          message: authError.message,
-          name: authError.name,
-          stack: authError.stack,
-          cause: authError.cause,
-          status: authError.status,
-          raw: authError
-        });
-        
-        let errorMessage = 'Signup failed: ' + authError.message;
-        if (authError.message.includes('email')) {
-          errorMessage = 'Invalid email format';
+        if (authError.message.toLowerCase().includes('rate limit')) {
+          setError('Too many signup attempts. Please wait and try again.');
+        } else if (authError.message.includes('email')) {
+          setError('Invalid email format');
         } else if (authError.message.includes('password')) {
-          errorMessage = 'Password too weak (min 6 characters)';
+          setError('Password too weak (minimum 6 characters)');
         } else if (authError.message.includes('exists')) {
-          errorMessage = 'Email already registered';
-        } else if (authError.message.includes('rate limit')) {
-          errorMessage = 'Too many attempts - please try again later';
+          setError('Email already registered');
+        } else {
+          setError(authError.message || 'Signup failed');
         }
-        throw new Error(errorMessage);
+        return;
       }
 
       if (!authData.user) {
-        console.log('Auth data:', authData);
-        throw new Error('Please check your email to complete signup');
+        setError('Please check your email to complete signup');
+        return;
       }
 
-      // Always require email confirmation
       if (!authData.user?.email_confirmed_at) {
-        alert('Please check your email for a confirmation link before logging in');
+        alert('Please check your email for a confirmation link to complete your signup');
         router.push('/');
         return;
       }
 
-      // Create profile via API endpoint (only after email confirmation)
       const profileResponse = await fetch('/api/create-profile', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: authData.user?.id,
           name: name
@@ -91,87 +81,100 @@ export default function SignUp() {
       if (!profileResponse.ok) {
         const errorData = await profileResponse.json();
         console.error('Profile creation error:', errorData.error);
-        
-        // Attempt to delete the user if profile creation failed
+
         try {
           await supabase.auth.admin.deleteUser(authData.user?.id || '');
         } catch (deleteError) {
-          console.error('Failed to delete user after profile creation failure:', deleteError);
+          console.error('Failed to delete user:', deleteError);
         }
 
-        throw new Error('Failed to create profile - please contact support');
+        setError('Failed to create profile. Please contact support.');
+        return;
       }
 
       router.push('/dashboard');
-    } catch (error) {
-      console.error('Full signup process error:', {
-        error,
-        timestamp: new Date().toISOString(),
-        userAgent: navigator?.userAgent,
-        url: window.location.href
-      });
-      const errorMessage = error instanceof Error ? 
-        error.message : 
-        'Signup failed - see console for technical details';
-      alert(errorMessage);
-      console.error('Full error object:', error);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Signup failed';
+      setError(errorMessage);
+      console.error('Signup error:', err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="container">
-      <header>
-        <h1>RedSquare</h1>
-        <div className="user-controls">
-          <button className="share-btn" onClick={() => router.push('/')}>
-            Login
-          </button>
-        </div>
-      </header>
+      <div className="container">
+        <header className="dashboard-header">
+          <h1 className="page-title">Sign Up</h1>
 
-      <main>
-        <p className="welcome">Create your account</p>
-        <div className="login-form">
-          <form onSubmit={handleSignUp}>
-            <div className="form-group">
-              <label htmlFor="name">Name</label>
-              <input
-                type="text"
-                id="name"
-                className="form-input"
-                placeholder="Enter your name"
-                value={name}
-                onChange={e => setName(e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="email">Email</label>
-              <input
-                type="email"
-                id="email"
-                className="form-input"
-                placeholder="Enter your email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="password">Password</label>
-              <input
-                type="password"
-                id="password"
-                className="form-input"
-                placeholder="Enter your password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-              />
-            </div>
-            <button type="submit" className="share-btn login-btn">
-              Sign Up
-            </button>
-          </form>
-        </div>
-      </main>
-    </div>
+          <div className="user-controls">
+            <Link href="/" className="btn share-btn">Login</Link>
+          </div>
+        </header>
+
+        <main>
+          <div className="form-card">
+            <h2>Create Your Account</h2>
+
+            <form onSubmit={handleSignUp} className="signup-form">
+              {error && <div className="error-message">{error}</div>}
+
+              <div className="form-group">
+                <label htmlFor="name">Full Name *</label>
+                <input
+                    type="text"
+                    id="name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    placeholder="Enter your full name"
+                    disabled={isLoading}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="email">Email *</label>
+                <input
+                    type="email"
+                    id="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    placeholder="Enter your email"
+                    disabled={isLoading}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="password">Password *</label>
+                <input
+                    type="password"
+                    id="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    placeholder="Minimum 6 characters"
+                    disabled={isLoading}
+                />
+              </div>
+
+              <div className="form-actions">
+                <Link href="/" className="cancel-btn">Back to Login</Link>
+                <button
+                    type="submit"
+                    className="submit-btn"
+                    disabled={isLoading}
+                >
+                  {isLoading ? 'Creating Account...' : 'Sign Up'}
+                </button>
+              </div>
+            </form>
+
+            <p className="form-footer">
+              Already have an account? <Link href="/" className="link">Login here</Link>
+            </p>
+          </div>
+        </main>
+      </div>
   );
 }

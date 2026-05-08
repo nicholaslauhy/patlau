@@ -23,10 +23,27 @@ export default function DashboardPage() {
   const [selectedDay, setSelectedDay] = useState('all');
   const [selectedTimeslot, setSelectedTimeslot] = useState('all');
   const [selectedLevel, setSelectedLevel] = useState('all');
+  const [userName, setUserName] = useState('');
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
 
   const days = ['all', 'Saturday', 'Sunday'];
   const timeslots = ['all', '8-10am', '10-12pm', '1-3pm', '2-4pm', '3-5pm', '4-6pm'];
   const levels = ['all', 'Beginner', 'Intermediate', 'Advanced'];
+
+  // Fetch user info on mount
+  useEffect(() => {
+    const loadUserName = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.user_metadata?.name) {
+          setUserName(user.user_metadata.name);
+        }
+      } catch (err) {
+        console.error('Failed to load user name:', err);
+      }
+    };
+    loadUserName();
+  }, []);
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -66,7 +83,6 @@ export default function DashboardPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // Using service role like before — consider moving to server route later.
       const serviceRoleClient = createBrowserClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL!,
           process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -225,7 +241,6 @@ export default function DashboardPage() {
     }
   };
 
-  // debounce searchTerm -> remote search
   useEffect(() => {
     const handler = setTimeout(async () => {
       const term = searchTerm.trim();
@@ -256,21 +271,30 @@ export default function DashboardPage() {
     }, 300);
 
     return () => clearTimeout(handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm]);
 
   useEffect(() => {
     fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDay, selectedTimeslot, selectedLevel]);
 
   return (
       <div className="container">
         <header className="dashboard-header">
           <div className="header-left">
-            <div className="brand">
-              <span className="brand-mark">PL</span>
-              <span className="brand-text">PatLau</span>
+            <div className="brand" style={{ position: 'relative' }}>
+              <button
+                  className="account-avatar-btn"
+                  onClick={() => setShowAccountMenu(!showAccountMenu)}
+                  title="View account"
+              >
+                👤
+              </button>
+              {showAccountMenu && (
+                  <div className="account-menu">
+                    <p className="account-name">{userName || 'User'}</p>
+                    <p className="account-role">Admin</p>
+                  </div>
+              )}
             </div>
             <h1 className="page-title">Dashboard</h1>
           </div>
@@ -379,7 +403,6 @@ export default function DashboardPage() {
                       return (
                           <tr key={student.student_id}>
                             <td>{student.student_name}</td>
-
                             <td>
                               <select
                                   aria-label="Change day"
@@ -404,7 +427,6 @@ export default function DashboardPage() {
                                 <option value="Sunday">Sunday</option>
                               </select>
                             </td>
-
                             <td>
                               <select
                                   aria-label="Change timeslot"
@@ -433,7 +455,6 @@ export default function DashboardPage() {
                                 <option value="4-6pm">4-6pm</option>
                               </select>
                             </td>
-
                             <td>
                               <select
                                   aria-label="Change level"
@@ -459,11 +480,9 @@ export default function DashboardPage() {
                                 <option value="Advanced">Advanced</option>
                               </select>
                             </td>
-
                             <td className="lessons-count" title={`${attendanceCount} lessons attended`}>
                               {attendanceCount}
                             </td>
-
                             <td className="actions-cell">
                               <div className="btn-group">
                                 <button className="attendance-btn" onClick={() => handleAttendanceClick(student.student_id)}>Mark</button>

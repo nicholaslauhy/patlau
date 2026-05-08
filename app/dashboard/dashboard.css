@@ -317,3 +317,51 @@ th.col-weeks {
   font-weight: 700;
   color: var(--text-primary);
 }
+
+/* Account avatar button */
+.account-avatar-btn {
+  width: 40px;
+  height: 40px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 1.25rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: 0.2s;
+}
+
+.account-avatar-btn:hover {
+  opacity: 0.9;
+}
+
+/* Dropdown menu */
+.account-menu {
+  position: absolute;
+  top: 60px;
+  left: 0;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  z-index: 100;
+  min-width: 150px;
+}
+
+.account-name {
+  margin: 0 0 4px 0;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.account-role {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
