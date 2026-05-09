@@ -27,9 +27,9 @@ export async function POST(request: NextRequest) {
 
         // If it doesn't look like an email, search for user by username in metadata
         if (!emailOrUsername.includes('@')) {
-            const { data: { users }, error: searchError } = await supabaseAdmin.auth.admin.listUsers();
+            const { data, error: searchError } = await supabaseAdmin.auth.admin.listUsers();
 
-            if (searchError || !users) {
+            if (searchError || !data?.users) {
                 return NextResponse.json(
                     { error: 'User not found' },
                     { status: 404 }
@@ -37,8 +37,8 @@ export async function POST(request: NextRequest) {
             }
 
             // Find user by username (stored in user_metadata.name or custom username field)
-            const user = users.find(
-                u => u.user_metadata?.username === emailOrUsername ||
+            const user = data.users.find(
+                (u: any) => u.user_metadata?.username === emailOrUsername ||
                     u.user_metadata?.name === emailOrUsername
             );
 
