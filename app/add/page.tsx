@@ -122,12 +122,11 @@ export default function AddStudent() {
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
               <Link href="/dashboard" className="btn share-btn" style={{ display: 'inline-block' }}>Go to Dashboard</Link>
               <button
-                  className="btn share-btn"
+                  className="btn share-btn logout"  // Add 'logout' class
                   onClick={async () => {
                     await supabase.auth.signOut();
                     router.push('/');
                   }}
-                  style={{ display: 'inline-block' }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.background = '#dc2626 !important';
                   }}
@@ -175,12 +174,11 @@ export default function AddStudent() {
             <Link href="/attendance" className="btn share-btn">Attendance</Link>
             <Link href="/payment" className="btn share-btn">Payment</Link>
             <button
-                className="btn share-btn"
+                className="btn share-btn logout"  // Add 'logout' class
                 onClick={async () => {
                   await supabase.auth.signOut();
                   router.push('/');
                 }}
-                style={{ display: 'inline-block' }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.background = '#dc2626 !important';
                 }}

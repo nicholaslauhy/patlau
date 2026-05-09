@@ -390,20 +390,26 @@ export default function AttendancePage() {
           <div className="user-controls">
             <Link href="/dashboard" className="btn share-btn">Dashboard</Link>
 
-            {/* show Add Student only to superuser */}
+            <Link href="/payment" className="btn share-btn">Payment</Link>
+
             {userRole === 'superuser' && (
                 <Link href="/add" className="btn share-btn">Add Student</Link>
             )}
 
             <button
-                className="btn share-btn"
+                className="btn share-btn logout"
                 onClick={async () => {
-                  await supabase.auth.signOut();
-                  router.push('/');
+                  const { error } = await supabase.auth.signOut();
+                  if (error) {
+                    console.error('Logout error:', error);
+                    alert('Logout failed');
+                  } else {
+                    router.push('/');
+                  }
                 }}
                 style={{ display: 'inline-block' }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#dc2626';
+                  e.currentTarget.style.background = '#dc2626 !important';
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.background = '';

@@ -316,19 +316,20 @@ export default function PaymentPage() {
           <div className="user-controls">
             <Link href="/dashboard" className="btn share-btn">Dashboard</Link>
 
+            <Link href="/attendance" className="btn share-btn">Attendance</Link>
+
             {userRole === 'superuser' && (
                 <Link href="/add" className="btn share-btn">Add Student</Link>
             )}
 
             <button
-                className="btn share-btn"
+                className="btn share-btn logout"  // Add 'logout' class
                 onClick={async () => {
                   await supabase.auth.signOut();
                   router.push('/');
                 }}
-                style={{ display: 'inline-block' }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#dc2626';
+                  e.currentTarget.style.background = '#dc2626 !important';
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.background = '';
