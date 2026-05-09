@@ -28,14 +28,16 @@ export default function ResetPage() {
             setSuccess(null);
 
             try {
-                // parse tokens from hash (#...) or query (?...)
                 const { location } = window;
                 let params = new URLSearchParams();
 
-                if (location.hash && location.hash.includes('access_token')) {
-                    params = new URLSearchParams(location.hash.replace(/^#/, '?'));
-                } else if (location.search) {
+                // First try query string (more reliable on mobile email apps)
+                if (location.search) {
                     params = new URLSearchParams(location.search);
+                }
+                // Fallback to hash if no query string
+                else if (location.hash && location.hash.includes('access_token')) {
+                    params = new URLSearchParams(location.hash.replace(/^#/, '?'));
                 }
 
                 const access_token = params.get('access_token');
@@ -65,9 +67,7 @@ export default function ResetPage() {
 
                     setHasSession(Boolean(data?.session));
                     setSuccess('Link is valid — choose a new password.');
-                    // remove tokens from URL
                     window.history.replaceState({}, document.title, location.pathname);
-                    // focus password input once rendered
                     setTimeout(() => passRef.current?.focus(), 200);
                 } else {
                     setError('No valid session tokens found in the link. Open the exact link from your email.');
