@@ -6,8 +6,10 @@ import { createBrowserClient } from '@supabase/ssr';
 import './styles.css';
 
 export default function Login() {
-  const [email, setEmail] = useState('');
+  const [emailOrUsername, setEmailOrUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
   const supabase = createBrowserClient(
@@ -17,30 +19,42 @@ export default function Login() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      // Call our custom login endpoint
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          emailOrUsername,
+          password,
+        }),
       });
 
-      if (error) {
-        // Friendly, concise error messages for users
-        let msg = 'Login failed';
-        if (error.message.includes('Invalid login credentials')) msg = 'Invalid email or password.';
-        else if (error.message.includes('email not confirmed')) msg = 'Please confirm your email first.';
-        else if (error.message.toLowerCase().includes('rate limit')) msg = 'Too many attempts — try again later.';
-        else msg = error.message || msg;
+      const data = await response.json();
 
-        alert(msg);
+      if (!response.ok) {
+        let msg = data.error || 'Login failed';
+        if (msg.includes('Invalid login credentials')) msg = 'Invalid email/username or password.';
+        else if (msg.includes('email not confirmed')) msg = 'Please confirm your email first.';
+        else if (msg.toLowerCase().includes('rate limit')) msg = 'Too many attempts — try again later.';
+        else if (msg.includes('User not found')) msg = 'User not found.';
+
+        setError(msg);
         return;
       }
 
-      if (!data.user) {
-        alert('Login failed — please try again.');
-        return;
+      // Set session from response
+      if (data.session) {
+        await supabase.auth.setSession({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        });
       }
 
-      // Best-effort: create a minimal profile if needed, but ignore failures
+      // Ensure user profile exists
       try {
         const { data: existing } = await supabase
             .from('profiles')
@@ -56,21 +70,15 @@ export default function Login() {
           });
         }
       } catch {
-        // ignore profile write errors
-      }
-
-      // Store session tokens (if available)
-      if (data.session) {
-        await supabase.auth.setSession({
-          access_token: data.session.access_token || '',
-          refresh_token: data.session.refresh_token || '',
-        });
+        // ignore profile errors
       }
 
       router.push('/dashboard');
     } catch (err) {
       console.error('Login error', err);
-      alert('Login failed — please try again.');
+      setError('Login failed — please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -88,16 +96,18 @@ export default function Login() {
 
           <div className="login-form" role="region" aria-label="Sign in">
             <form onSubmit={handleLogin} noValidate>
+              {error && <div className="error-message">{error}</div>}
+
               <div className="form-group">
-                <label htmlFor="email">Email</label>
+                <label htmlFor="emailOrUsername">Email or Username</label>
                 <input
                     required
-                    type="email"
-                    id="email"
+                    type="text"
+                    id="emailOrUsername"
                     className="form-input"
-                    placeholder="you@example.com"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
+                    placeholder="you@example.com or username"
+                    value={emailOrUsername}
+                    onChange={e => setEmailOrUsername(e.target.value)}
                     autoComplete="username"
                 />
               </div>
@@ -116,8 +126,8 @@ export default function Login() {
                 />
               </div>
 
-              <button type="submit" className="login-btn">
-                Sign in
+              <button type="submit" className="login-btn" disabled={isLoading}>
+                {isLoading ? 'Signing in...' : 'Sign in'}
               </button>
 
               <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>

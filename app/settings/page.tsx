@@ -90,13 +90,17 @@ export default function SettingsPage() {
 
         try {
             setIsLoading(true);
+
+            // If current user is admin, force role to 'member' to prevent creating privileged accounts
+            const roleToSend = userRole === 'admin' ? 'member' : newUserRole;
+
             const response = await fetch('/api/users/create', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     email: newUserEmail,
                     name: newUserName,
-                    role: newUserRole,
+                    role: roleToSend,
                     password: newUserPassword || undefined
                 })
             });
@@ -121,8 +125,14 @@ export default function SettingsPage() {
         }
     };
 
-    const handleDeleteUser = async (userId: string, email: string) => {
+    const handleDeleteUser = async (userId: string, email: string, targetRole?: UserRole) => {
         if (!confirm(`Delete user ${email}? This cannot be undone.`)) return;
+
+        // Frontend protection: admins are allowed to delete only 'member' accounts.
+        if (userRole === 'admin' && targetRole && targetRole !== 'member') {
+            setError('Admins can only delete member accounts.');
+            return;
+        }
 
         try {
             const response = await fetch(`/api/users/delete`, {
@@ -141,6 +151,51 @@ export default function SettingsPage() {
             setError(err instanceof Error ? err.message : 'Failed to delete user');
         }
     };
+
+    // call server to update a user's role (superuser only)
+    const updateUserRole = async (userId: string, newRole: UserRole) => {
+        setError('');
+        setSuccess('');
+        setIsLoading(true);
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const token = session?.access_token;
+
+            if (!token) {
+                setError('No session found. Please log in again.');
+                setIsLoading(false);
+                return;
+            }
+
+            const response = await fetch('/api/users/update', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ userId, role: newRole })
+            });
+
+            if (!response.ok) {
+                const err = await response.json().catch(() => null);
+                throw new Error(err?.error || 'Failed to update user role');
+            }
+
+            setSuccess('User role updated');
+            setError(''); // explicitly clear error on success
+            setUsers(prev => prev.map(u => u.id === userId ? { ...u, user_metadata: { ...(u.user_metadata || {}), role: newRole } } : u));
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to update user role');
+            setSuccess('');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // Determine which users to show to the current viewer:
+    const visibleUsers = userRole === 'admin'
+        ? users.filter(u => (u.user_metadata?.role || 'member') === 'member')
+        : users;
 
     return (
         <div className="container">
@@ -182,8 +237,8 @@ export default function SettingsPage() {
                     </section>
 
                     {/* Add New User */}
-                    {/* Only superuser may add/manage users */}
-                    {userRole === 'superuser' && (
+                    {/* Admins and superusers can add new users. Admins can only create 'member' accounts. */}
+                    {(userRole === 'superuser' || userRole === 'admin') && (
                         <section className="settings-card">
                             <h2>Add New User</h2>
 
@@ -229,16 +284,24 @@ export default function SettingsPage() {
 
                                 <div className="form-group">
                                     <label htmlFor="role">Role *</label>
-                                    <select
-                                        id="role"
-                                        value={newUserRole}
-                                        onChange={(e) => setNewUserRole(e.target.value as UserRole)}
-                                        disabled={isLoading}
-                                    >
-                                        <option value="member">Member</option>
-                                        {userRole === 'superuser' && <option value="admin">Admin</option>}
-                                        {userRole === 'superuser' && <option value="superuser">Superuser</option>}
-                                    </select>
+
+                                    {/* If current user is admin, only show member and disable changing */}
+                                    {userRole === 'admin' ? (
+                                        <select id="role" value={'member'} disabled>
+                                            <option value="member">Member</option>
+                                        </select>
+                                    ) : (
+                                        <select
+                                            id="role"
+                                            value={newUserRole}
+                                            onChange={(e) => setNewUserRole(e.target.value as UserRole)}
+                                            disabled={isLoading}
+                                        >
+                                            <option value="member">Member</option>
+                                            <option value="admin">Admin</option>
+                                            <option value="superuser">Superuser</option>
+                                        </select>
+                                    )}
                                 </div>
 
                                 <button type="submit" className="submit-btn" disabled={isLoading}>
@@ -249,13 +312,13 @@ export default function SettingsPage() {
                     )}
 
                     {/* Users List (manage) */}
-                    {userRole === 'superuser' && (
+                    {(userRole === 'superuser' || userRole === 'admin') && (
                         <section className="settings-card">
                             <h2>Manage Users</h2>
 
                             {isLoading ? (
                                 <p>Loading users...</p>
-                            ) : users.length === 0 ? (
+                            ) : visibleUsers.length === 0 ? (
                                 <p>No users found</p>
                             ) : (
                                 <div className="users-table">
@@ -269,23 +332,64 @@ export default function SettingsPage() {
                                         </tr>
                                         </thead>
                                         <tbody>
-                                        {users.map((user) => (
+                                        {visibleUsers.map((user) => (
                                             <tr key={user.id}>
                                                 <td>{user.user_metadata?.name || 'N/A'}</td>
                                                 <td>{user.email}</td>
                                                 <td>
-                                    <span className={`role-badge ${user.user_metadata?.role || 'member'}`}>
-                                      {(user.user_metadata?.role || 'member').toUpperCase()}
-                                    </span>
+                                                    {userRole === 'superuser' ? (
+                                                        <select
+                                                            className="role-select"
+                                                            value={(user.user_metadata?.role as UserRole) || 'member'}
+                                                            onChange={async (e) => {
+                                                                const selected = e.target.value as UserRole;
+                                                                setError('');
+                                                                setSuccess('');
+
+                                                                if (user.user_metadata?.role !== selected && !confirm(`Change role from ${(user.user_metadata?.role || 'member').toUpperCase()} to ${selected.toUpperCase()}?`)) {
+                                                                    setUsers(prev => [...prev]);
+                                                                    return;
+                                                                }
+                                                                await updateUserRole(user.id, selected);
+                                                            }}
+                                                            onChangeCapture={(e) => {
+                                                                const target = e.currentTarget as HTMLSelectElement;
+                                                                target.setAttribute('data-role', target.value);
+                                                            }}
+                                                            disabled={isLoading}
+                                                        >
+                                                            <option value="member">Member</option>
+                                                            <option value="admin">Admin</option>
+                                                            <option value="superuser">Superuser</option>
+                                                        </select>
+                                                    ) : (
+                                                        <span className={`role-badge ${user.user_metadata?.role || 'member'}`}>
+                                                          {(user.user_metadata?.role || 'member').toUpperCase()}
+                                                        </span>
+                                                    )}
                                                 </td>
+
                                                 <td>
-                                                    <button
-                                                        onClick={() => handleDeleteUser(user.id, user.email)}
-                                                        className="delete-btn-small"
-                                                        disabled={isLoading}
-                                                    >
-                                                        Delete
-                                                    </button>
+                                                    {/* Superuser can delete any user.
+                                                        Admin can delete only members (disabled otherwise). */}
+                                                    {userRole === 'superuser' ? (
+                                                        <button
+                                                            onClick={() => handleDeleteUser(user.id, user.email, user.user_metadata?.role as UserRole)}
+                                                            className="delete-btn-small"
+                                                            disabled={isLoading}
+                                                        >
+                                                            Delete
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => handleDeleteUser(user.id, user.email, user.user_metadata?.role as UserRole)}
+                                                            className="delete-btn-small"
+                                                            disabled={isLoading || (user.user_metadata?.role !== 'member')}
+                                                            title={user.user_metadata?.role !== 'member' ? 'Admins can only delete member accounts' : undefined}
+                                                        >
+                                                            Delete
+                                                        </button>
+                                                    )}
                                                 </td>
                                             </tr>
                                         ))}

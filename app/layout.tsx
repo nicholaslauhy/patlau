@@ -1,18 +1,19 @@
+import type { Metadata } from 'next'
 import './styles.css'
 
-export const metadata = {
-  title: 'PatLau',
-  description: 'Attendance and payment tracking for students.',
+export const metadata: Metadata = {
+    title: 'PatLau',
+    description: 'Attendance and payment tracking for students.',
 }
 
 export default function RootLayout({
-                                     children,
+                                       children,
                                    }: {
-  children: React.ReactNode
+    children: React.ReactNode
 }) {
-  return (
-      <html lang="en">
-      <body>{children}</body>
-      </html>
-  )
+    return (
+        <html lang="en">
+        <body>{children}</body>
+        </html>
+    )
 }

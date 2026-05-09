@@ -840,3 +840,162 @@ header h1 {
   cursor: not-allowed;
   transform: none;
 }
+
+/* ---- settings layout overrides: put at end of app/styles.css ---- */
+
+/* Main app container: make it slightly wider and not forced to full viewport height */
+.container {
+  max-width: 720px !important;   /* adjust to taste: 720/920/1024 */
+  width: 100%;
+  padding: 1.25rem;
+  margin: 1rem auto;
+  height: auto !important;       /* avoid fixed 100vh shrinkage issues */
+  min-height: calc(100vh - 56px);
+}
+
+/* Settings area: center content and let cards grow to container width */
+.settings-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  align-items: stretch;          /* cards fill available width */
+  width: 100%;
+}
+
+/* Cards used on the settings page */
+.settings-card,
+.form-card {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 22px;
+}
+
+/* Ensure forms stretch to match card width */
+.user-form,
+.student-form {
+  width: 100%;
+}
+
+/* Users table: keep table responsive without forcing wider layout */
+.users-table {
+  width: 100%;
+  overflow-x: auto;              /* allows horizontal scroll inside the box */
+}
+.users-table table {
+  width: 100%;
+  /* if you want table columns to respect widths: use table-layout: auto; */
+  table-layout: auto;
+  min-width: 0;              /* guarantees readable layout; remove or lower as desired */
+}
+
+/* Keep form controls fluid */
+.input,
+.form-input,
+.price-input,
+.weeks-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Optional: a little extra breathing room for the settings page */
+.settings-container > section {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+/* Role select dropdown - styled like badges with color-coded options */
+.role-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 8px 28px 8px 12px;
+  border-radius: 16px;
+  border: none;
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  min-width: 120px;
+  transition: var(--transition);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-position: right 8px center;
+  background-repeat: no-repeat;
+  background-size: 16px 16px;
+}
+
+/* Default styling (blue for member) */
+.role-select {
+  background-color: #dbeafe;
+  color: #2563eb;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%232563eb'%3e%3cpath fill-rule='evenodd' d='M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z' clip-rule='evenodd'/%3e%3c/svg%3e");
+}
+
+.role-select:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.role-select:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* When select is disabled */
+.role-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Style the dropdown options with their respective colors */
+.role-select option {
+  background-color: #fff;
+  color: #1f2937;
+  font-weight: 600;
+  padding: 10px 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Member option - blue */
+.role-select option[value="member"] {
+  background-color: #dbeafe;
+  color: #2563eb;
+}
+
+/* Admin option - blue */
+.role-select option[value="admin"] {
+  background-color: #dbeafe;
+  color: #2563eb;
+}
+
+/* Superuser option - red/pink */
+.role-select option[value="superuser"] {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+
+.role-select option:checked {
+  font-weight: 600;
+}
+
+/* When superuser is selected - red/pink background */
+.role-select[data-role="superuser"] {
+  background-color: #fee2e2;
+  color: #dc2626;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23dc2626'%3e%3cpath fill-rule='evenodd' d='M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z' clip-rule='evenodd'/%3e%3c/svg%3e");
+}
+
+/* When admin is selected - blue background */
+.role-select[data-role="admin"] {
+  background-color: #dbeafe;
+  color: #2563eb;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%232563eb'%3e%3cpath fill-rule='evenodd' d='M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z' clip-rule='evenodd'/%3e%3c/svg%3e");
+}
+
+/* When member is selected - blue background */
+.role-select[data-role="member"] {
+  background-color: #dbeafe;
+  color: #2563eb;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%232563eb'%3e%3cpath fill-rule='evenodd' d='M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z' clip-rule='evenodd'/%3e%3c/svg%3e");
+}
