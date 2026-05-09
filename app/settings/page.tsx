@@ -36,6 +36,7 @@ export default function SettingsPage() {
     // Form state
     const [newUserEmail, setNewUserEmail] = useState('');
     const [newUserName, setNewUserName] = useState('');
+    const [newUserPassword, setNewUserPassword] = useState('');
     const [newUserRole, setNewUserRole] = useState<UserRole>('member');
 
     useEffect(() => {
@@ -95,7 +96,8 @@ export default function SettingsPage() {
                 body: JSON.stringify({
                     email: newUserEmail,
                     name: newUserName,
-                    role: newUserRole
+                    role: newUserRole,
+                    password: newUserPassword || undefined
                 })
             });
 
@@ -107,6 +109,7 @@ export default function SettingsPage() {
             setSuccess(`User ${newUserName} created successfully`);
             setNewUserEmail('');
             setNewUserName('');
+            setNewUserPassword('');
             setNewUserRole('member');
 
             // Reload users list
@@ -143,8 +146,18 @@ export default function SettingsPage() {
         <div className="container">
             <header className="dashboard-header">
                 <h1 className="page-title">Settings</h1>
+
                 <div className="user-controls">
                     <Link href="/dashboard" className="btn share-btn">Back to Dashboard</Link>
+
+                    {/* Only superusers see Attendance and Payment links */}
+                    {userRole === 'superuser' && (
+                        <>
+                            <Link href="/attendance" className="btn share-btn">Attendance</Link>
+                            <Link href="/payment" className="btn share-btn">Payment</Link>
+                        </>
+                    )}
+
                     <button
                         className="btn share-btn logout"
                         onClick={async () => {
@@ -169,7 +182,8 @@ export default function SettingsPage() {
                     </section>
 
                     {/* Add New User */}
-                    {(userRole === 'superuser' || userRole === 'admin') && (
+                    {/* Only superuser may add/manage users */}
+                    {userRole === 'superuser' && (
                         <section className="settings-card">
                             <h2>Add New User</h2>
 
@@ -202,6 +216,18 @@ export default function SettingsPage() {
                                 </div>
 
                                 <div className="form-group">
+                                    <label htmlFor="password">Initial password (optional)</label>
+                                    <input
+                                        type="password"
+                                        id="password"
+                                        value={newUserPassword}
+                                        onChange={(e) => setNewUserPassword(e.target.value)}
+                                        placeholder="Temporary password (optional)"
+                                        disabled={isLoading}
+                                    />
+                                </div>
+
+                                <div className="form-group">
                                     <label htmlFor="role">Role *</label>
                                     <select
                                         id="role"
@@ -222,8 +248,8 @@ export default function SettingsPage() {
                         </section>
                     )}
 
-                    {/* Users List */}
-                    {(userRole === 'superuser' || userRole === 'admin') && (
+                    {/* Users List (manage) */}
+                    {userRole === 'superuser' && (
                         <section className="settings-card">
                             <h2>Manage Users</h2>
 

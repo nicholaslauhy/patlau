@@ -29,15 +29,20 @@ export default function PaymentPage() {
           return;
         }
         const role = (user.user_metadata?.role as 'superuser' | 'admin' | 'member') || 'member';
-        if (role === 'member') {
-          router.push('/dashboard');
+
+        // Block members and admins, allow superusers
+        if (role === 'member' || role === 'admin') {
+          setUserRole(role);
           return;
         }
+
         setUserRole(role);
       } catch (err) {
+        console.error('Auth check failed:', err);
         router.push('/');
       }
     };
+
     checkAuth();
   }, [router]);
 
@@ -248,6 +253,39 @@ export default function PaymentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  if (userRole === 'admin' || userRole === 'member') {
+    return (
+        <div className="container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '3rem 1rem' }}>
+          <div className="form-card" style={{ maxWidth: 600, width: '100%', textAlign: 'center' }}>
+            <h1 style={{ fontSize: '3rem', margin: '0 0 1rem', color: '#dc2626' }}>403</h1>
+            <h2 style={{ fontSize: '1.5rem', margin: '0 0 1rem', color: '#374151' }}>Forbidden</h2>
+            <p style={{ margin: '0 0 1.5rem', color: '#6b7280', lineHeight: 1.6 }}>
+              You do not have permission to access this page. Only superusers can view Payment details.
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <Link href="/dashboard" className="btn share-btn" style={{ display: 'inline-block' }}>Go to Dashboard</Link>
+              <button
+                  className="btn share-btn"
+                  onClick={async () => {
+                    await supabase.auth.signOut();
+                    router.push('/');
+                  }}
+                  style={{ display: 'inline-block' }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#dc2626';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '';
+                  }}
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+    );
+  }
+
   return (
       <div className="container">
         <header className="dashboard-header">
@@ -277,18 +315,23 @@ export default function PaymentPage() {
 
           <div className="user-controls">
             <Link href="/dashboard" className="btn share-btn">Dashboard</Link>
-            <Link href="/attendance" className="btn share-btn">Attendance</Link>
-            <Link href="/add" className="btn share-btn">Add Student</Link>
+
+            {userRole === 'superuser' && (
+                <Link href="/add" className="btn share-btn">Add Student</Link>
+            )}
+
             <button
-                className="btn share-btn logout"
+                className="btn share-btn"
                 onClick={async () => {
-                  const { error } = await supabase.auth.signOut();
-                  if (error) {
-                    console.error('Logout error:', error);
-                    alert('Logout failed');
-                  } else {
-                    router.push('/');
-                  }
+                  await supabase.auth.signOut();
+                  router.push('/');
+                }}
+                style={{ display: 'inline-block' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#dc2626';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '';
                 }}
             >
               Logout

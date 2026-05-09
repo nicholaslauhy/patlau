@@ -748,3 +748,95 @@ header h1 {
   background: transparent;
   color: var(--text-primary);
 }
+
+/* Small UI helpers to match rest of app */
+.form-card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 22px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+  border: 1px solid #eef2f7;
+}
+
+.page-title { font-size: 1.25rem; color: #111827; }
+
+.input {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #e6edf3;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #374151; }
+
+.submit-btn {
+  background: #2563eb; /* fallback */
+  color: white;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cancel-btn {
+  background: #fff;
+  color: #374151;
+  border: 1px solid #e6edf3;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.success-message {
+  background: #e6ffef;
+  color: #065f46;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border-left: 4px solid #10b981;
+}
+
+.error-message {
+  background: #fff1f2;
+  color: #9f1239;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border-left: 4px solid #ef4444;
+}
+
+.hint { color: #6b7280; font-size: .9rem; margin-top: 6px; display: block; }
+
+/* Request Reset button: grey default, red on hover */
+.request-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #f3f4f6;           /* light grey default */
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+  box-shadow: none;
+}
+
+.request-reset-btn:hover:not(:disabled) {
+  background: var(--error);      /* red on hover */
+  border-color: var(--error);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.request-reset-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.request-reset-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
