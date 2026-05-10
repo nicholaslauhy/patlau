@@ -1,3 +1,4 @@
+// DEBUGGING: enhanced logging version
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -12,69 +13,54 @@ const supabaseClient = createClient(
 );
 
 export async function POST(request: NextRequest) {
+    // log request arrival (do not log secrets in prod)
     try {
-        const { emailOrUsername, password } = await request.json();
+        const body = await request.json();
 
+
+        const { emailOrUsername, password } = body;
         if (!emailOrUsername || !password) {
-            return NextResponse.json(
-                { error: 'Email/username and password are required' },
-                { status: 400 }
-            );
+            return NextResponse.json({ error: 'Email/username and password are required' }, { status: 400 });
         }
 
-        // First, try direct email login
         let loginEmail = emailOrUsername;
-
-        // If it doesn't look like an email, search for user by username in metadata
         if (!emailOrUsername.includes('@')) {
-            const { data, error: searchError } = await supabaseAdmin.auth.admin.listUsers();
+            const listRes = await supabaseAdmin.auth.admin.listUsers();
 
-            if (searchError || !data?.users) {
-                return NextResponse.json(
-                    { error: 'User not found' },
-                    { status: 404 }
-                );
+            if (listRes.error || !listRes.data?.users) {
+                return NextResponse.json({ error: 'User not found' }, { status: 404 });
             }
 
-            // Find user by username (stored in user_metadata.name or custom username field)
-            const user = data.users.find(
-                (u: any) => u.user_metadata?.username === emailOrUsername ||
-                    u.user_metadata?.name === emailOrUsername
+            const user = listRes.data.users.find((u: any) =>
+                u.user_metadata?.username === emailOrUsername || u.user_metadata?.name === emailOrUsername
             );
 
-            if (!user || !user.email) {
-                return NextResponse.json(
-                    { error: 'User not found' },
-                    { status: 404 }
-                );
-            }
-
+            if (!user || !user.email) return NextResponse.json({ error: 'User not found' }, { status: 404 });
             loginEmail = user.email;
         }
 
-        // Now attempt login with the resolved email
-        const { data, error } = await supabaseClient.auth.signInWithPassword({
+        const signInRes = await supabaseClient.auth.signInWithPassword({
             email: loginEmail,
             password,
         });
 
-        if (error) {
-            return NextResponse.json(
-                { error: error.message || 'Login failed' },
-                { status: 401 }
-            );
+        if (signInRes.error) {
+            // return the error message so client gets a friendly reason during dev
+            return NextResponse.json({ error: signInRes.error.message || 'Login failed' }, { status: 401 });
         }
+
+        // Ensure session shape
+        const session = signInRes.data?.session ?? null;
 
         return NextResponse.json({
             message: 'Login successful',
-            session: data.session,
-            user: data.user
+            session: signInRes.data?.session ?? null,
+            user: signInRes.data?.user ?? null,
         });
-    } catch (error) {
-        console.error('Login route error:', error);
-        return NextResponse.json(
-            { error: 'Internal server error' },
-            { status: 500 }
-        );
+    } catch (err: any) {
+        // log the full stack so you can paste it here
+        console.error('[auth/login] unexpected error:', err?.stack ?? err);
+        // in dev we can return the error message to aid debugging (remove for prod)
+        return NextResponse.json({ error: err?.message ?? 'Internal server error' }, { status: 500 });
     }
 }

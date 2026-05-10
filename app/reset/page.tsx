@@ -14,11 +14,18 @@ const supabase = createBrowserClient(
 export default function ResetPage() {
     const router = useRouter();
     const [loading, setLoading] = useState(true);
+
+    const [resetMode, setResetMode] = useState<'link' | 'code' | 'password'>('code');
     const [hasSession, setHasSession] = useState(false);
+
+    const [email, setEmail] = useState('');
+    const [code, setCode] = useState('');
     const [newPassword, setNewPassword] = useState('');
+
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
+
     const passRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
@@ -31,11 +38,11 @@ export default function ResetPage() {
                 const { location } = window;
                 let params = new URLSearchParams();
 
-                // First try query string (more reliable on mobile email apps)
+                // Try query string first
                 if (location.search) {
                     params = new URLSearchParams(location.search);
                 }
-                // Fallback to hash if no query string
+                // Fallback to hash
                 else if (location.hash && location.hash.includes('access_token')) {
                     params = new URLSearchParams(location.hash.replace(/^#/, '?'));
                 }
@@ -46,37 +53,41 @@ export default function ResetPage() {
 
                 if (errDesc) {
                     setError(decodeURIComponent(errDesc));
-                    setHasSession(false);
+                    setResetMode('code');
                     window.history.replaceState({}, document.title, location.pathname);
+                    setLoading(false);
                     return;
                 }
 
                 if (access_token && refresh_token) {
                     const { data, error: setErr } = await supabase.auth.setSession({
                         access_token,
-                        refresh_token
+                        refresh_token,
                     });
 
                     if (setErr) {
                         console.error('setSession error:', setErr);
                         setError(`Failed to establish session: ${setErr.message}`);
-                        setHasSession(false);
+                        setResetMode('code');
                         window.history.replaceState({}, document.title, location.pathname);
+                        setLoading(false);
                         return;
                     }
 
                     setHasSession(Boolean(data?.session));
+                    setResetMode('password');
                     setSuccess('Link is valid — choose a new password.');
                     window.history.replaceState({}, document.title, location.pathname);
                     setTimeout(() => passRef.current?.focus(), 200);
                 } else {
-                    setError('No valid session tokens found in the link. Open the exact link from your email.');
-                    setHasSession(false);
+                    // No URL tokens found — show code form
+                    setResetMode('code');
+                    setError(null);
                 }
             } catch (err) {
                 console.error('Error processing reset link:', err);
                 setError('Error processing reset link.');
-                setHasSession(false);
+                setResetMode('code');
             } finally {
                 setLoading(false);
             }
@@ -84,8 +95,88 @@ export default function ResetPage() {
     }, []);
 
     const validatePassword = (pw: string) => pw.length >= 6;
+    const validateCode = (c: string) => /^\d{6}$/.test(c);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSendCode = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError(null);
+        setSuccess(null);
+
+        if (!email.trim()) {
+            setError('Please enter your email.');
+            return;
+        }
+
+        setBusy(true);
+        try {
+            const res = await fetch('/api/auth/send-reset-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email.trim() }),
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+                setError(data.error || 'Failed to send code');
+                return;
+            }
+
+            setSuccess('Code sent to your email. Check your inbox (and spam folder).');
+        } catch (err) {
+            console.error('Error requesting code:', err);
+            setError('Error requesting code. Try again.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const handleVerifyCode = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError(null);
+        setSuccess(null);
+
+        if (!email.trim() || !validateCode(code.trim())) {
+            setError('Please enter your email and the 6-digit code.');
+            return;
+        }
+
+        setBusy(true);
+        try {
+            const res = await fetch('/api/auth/verify-reset-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email.trim(), code: code.trim() }),
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+                setError(data.error || 'Code verification failed');
+                return;
+            }
+
+            const { error: setErr } = await supabase.auth.setSession({
+                access_token: data.session.access_token,
+                refresh_token: data.session.refresh_token,
+            });
+
+            if (setErr) {
+                setError(`Failed to establish session: ${setErr.message}`);
+                return;
+            }
+
+            setHasSession(true);
+            setResetMode('password');
+            setSuccess('Code verified — choose a new password.');
+            setTimeout(() => passRef.current?.focus(), 200);
+        } catch (err) {
+            console.error('Error verifying code:', err);
+            setError('Error verifying code. Try again.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const handleSubmitPassword = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);
         setSuccess(null);
@@ -107,45 +198,10 @@ export default function ResetPage() {
             }
 
             setSuccess('Password updated. Signing you in and redirecting...');
-            // short pause so user sees success, then redirect to home
             setTimeout(() => router.push('/'), 800);
         } catch (err) {
             console.error('Unexpected error:', err);
             setError('Unexpected error. Please try again.');
-            setBusy(false);
-        }
-    };
-
-    // prompt-based request for a new reset email
-    const handleRequestNewReset = async () => {
-        setError(null);
-        setSuccess(null);
-
-        const email = window.prompt('Enter your email to receive a new password reset link:');
-        if (!email) return;
-
-        const emailTrim = email.trim();
-        const re = /\S+@\S+\.\S+/;
-        if (!re.test(emailTrim)) {
-            setError('Please enter a valid email address.');
-            return;
-        }
-
-        setBusy(true);
-        try {
-            const redirectTo = `${window.location.origin}/reset`;
-            const { error: resetErr } = await supabase.auth.resetPasswordForEmail(emailTrim, { redirectTo });
-
-            if (resetErr) {
-                console.error('resetPasswordForEmail error:', resetErr);
-                setError(`Failed to send reset email: ${resetErr.message}`);
-            } else {
-                setSuccess('Reset email sent. Check your inbox (and spam folder).');
-            }
-        } catch (err) {
-            console.error('Unexpected error sending reset email:', err);
-            setError('Unexpected error sending reset email.');
-        } finally {
             setBusy(false);
         }
     };
@@ -166,80 +222,96 @@ export default function ResetPage() {
                         {success && <div className="success-message" style={{ marginBottom: 12 }}>{success}</div>}
                         {error && <div className="error-message" style={{ marginBottom: 12 }}>{error}</div>}
 
-                        {hasSession ? (
-                            <form onSubmit={handleSubmit} className="student-form" style={{ gap: 12 }}>
+                        {resetMode === 'password' && hasSession ? (
+                            <form onSubmit={handleSubmitPassword} className="student-form" style={{ gap: 12 }}>
                                 <div className="form-group">
                                     <label htmlFor="new-password">New password</label>
-                                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                        <input
-                                            id="new-password"
-                                            ref={passRef}
-                                            type="password"
-                                            value={newPassword}
-                                            onChange={(e) => setNewPassword(e.target.value)}
-                                            placeholder="At least 6 characters"
-                                            className="input"
-                                            required
-                                            minLength={6}
-                                            style={{ flex: 1 }}
-                                        />
-                                    </div>
+                                    <input
+                                        id="new-password"
+                                        ref={passRef}
+                                        type="password"
+                                        value={newPassword}
+                                        onChange={(e) => setNewPassword(e.target.value)}
+                                        placeholder="At least 6 characters"
+                                        className="input"
+                                        required
+                                        minLength={6}
+                                        disabled={busy}
+                                    />
                                     <small className="hint">Use at least 6 characters. For security, choose a strong password.</small>
                                 </div>
 
-                                <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                                    <button
-                                        type="submit"
-                                        className="submit-btn home-btn"
-                                        disabled={busy}
-                                        style={{
-                                            flex: 1,
-                                            background: '#10B981',
-                                            border: 'none',
-                                            color: '#fff',
-                                            boxShadow: '0 2px 6px rgba(16,185,129,0.12)'
-                                        }}
-                                    >
-                                        {busy ? 'Saving...' : 'Set new password'}
-                                    </button>
-                                </div>
+                                <button
+                                    type="submit"
+                                    className="submit-btn home-btn"
+                                    disabled={busy}
+                                    style={{ background: '#10B981', color: '#fff', border: 'none' }}
+                                >
+                                    {busy ? 'Saving...' : 'Set new password'}
+                                </button>
                             </form>
                         ) : (
-                            <div style={{ padding: '1rem 0' }}>
-                                <p style={{ marginBottom: 12 }}>
-                                    The link is invalid or expired. Request a new password reset from the app or return to the home page.
-                                </p>
-
-                                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-start', alignItems: 'center' }}>
-                                    <Link
-                                        href="/"
-                                        className="share-btn home-btn"
-                                        style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: 8,
-                                            padding: '10px 14px'
-                                        }}
-                                    >
-                                        {/* small home icon */}
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden style={{ opacity: 0.95 }}>
-                                            <path d="M3 10.5L12 4l9 6.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                                            <path d="M5 11v7a2 2 0 0 0 2 2h3v-6h4v6h3a2 2 0 0 0 2-2v-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                                        </svg>
-                                        Back to Home
-                                    </Link>
+                            <div className="student-form" style={{ gap: 12 }}>
+                                <form onSubmit={handleSendCode} className="student-form" style={{ gap: 12 }}>
+                                    <div className="form-group">
+                                        <label htmlFor="reset-email">Email</label>
+                                        <input
+                                            id="reset-email"
+                                            type="email"
+                                            value={email}
+                                            onChange={(e) => setEmail(e.target.value)}
+                                            placeholder="your@email.com"
+                                            className="input"
+                                            required
+                                            disabled={busy}
+                                        />
+                                    </div>
 
                                     <button
-                                        type="button"
-                                        className="request-reset-btn"
-                                        onClick={handleRequestNewReset}
+                                        type="submit"
+                                        className="submit-btn"
                                         disabled={busy}
+                                        style={{ background: '#2563eb', color: '#fff', border: 'none' }}
                                     >
-                                        {busy ? 'Sending...' : 'Request reset'}
+                                        {busy ? 'Sending...' : 'Send Code'}
                                     </button>
-                                </div>
+                                </form>
+
+                                <form onSubmit={handleVerifyCode} className="student-form" style={{ gap: 12, marginTop: '1rem' }}>
+                                    <div className="form-group">
+                                        <label htmlFor="reset-code">Reset Code</label>
+                                        <input
+                                            id="reset-code"
+                                            type="text"
+                                            value={code}
+                                            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                            placeholder="000000"
+                                            className="input"
+                                            maxLength={6}
+                                            required
+                                            disabled={busy}
+                                            style={{ letterSpacing: '8px', textAlign: 'center', fontSize: '18px' }}
+                                        />
+                                        <small className="hint">Enter the 6-digit code from your email.</small>
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        className="submit-btn"
+                                        disabled={busy}
+                                        style={{ background: '#2563eb', color: '#fff', border: 'none' }}
+                                    >
+                                        {busy ? 'Verifying...' : 'Verify Code'}
+                                    </button>
+                                </form>
                             </div>
                         )}
+
+                        <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+                            <Link href="/" className="share-btn home-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px' }}>
+                                Back to Home
+                            </Link>
+                        </div>
                     </>
                 )}
             </div>

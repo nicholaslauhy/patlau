@@ -35,23 +35,36 @@ export default function Login() {
 
       const data = await response.json();
 
+      // friendly error mapping (preserve your current messages)
       if (!response.ok) {
-        let msg = data.error || 'Login failed';
+        let msg = data?.error || 'Login failed';
         if (msg.includes('Invalid login credentials')) msg = 'Invalid email/username or password.';
         else if (msg.includes('email not confirmed')) msg = 'Please confirm your email first.';
         else if (msg.toLowerCase().includes('rate limit')) msg = 'Too many attempts — try again later.';
         else if (msg.includes('User not found')) msg = 'User not found.';
 
+        console.error('Login failed response:', data);
         setError(msg);
         return;
       }
 
-      // Set session from response
-      if (data.session) {
+// Defensive: ensure a valid session object with tokens before calling setSession
+      const session = data?.session;
+      if (!session || !session.access_token || !session.refresh_token) {
+        console.error('Login route returned invalid session:', data);
+        setError('Login failed: missing session tokens. Please try again.');
+        return;
+      }
+
+      try {
         await supabase.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token,
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
         });
+      } catch (err) {
+        console.error('setSession error', err, data);
+        setError('Login failed (session error). Try again.');
+        return;
       }
 
       // Ensure user profile exists
@@ -62,13 +75,11 @@ export default function Login() {
             .eq('id', data.user.id)
             .maybeSingle();
 
-        if (!existing) {
-          await supabase.from('profiles').insert({
-            id: data.user.id,
-            name: data.user.email?.split('@')[0] || 'User',
-            created_at: new Date().toISOString(),
-          });
-        }
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          name: data.user.email?.split('@')[0] || 'User',
+          created_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
       } catch {
         // ignore profile errors
       }
