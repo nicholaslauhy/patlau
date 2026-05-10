@@ -194,6 +194,63 @@ export default function SettingsPage() {
         }
     };
 
+    const handleResendResetCode = async (
+        targetEmail: string,
+        targetRole?: UserRole
+    ) => {
+        setError('');
+        setSuccess('');
+
+        // Admins can only send reset codes to members
+        if (userRole === 'admin' && targetRole !== 'member') {
+            setError('Admins can only resend reset codes to member accounts.');
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+
+            const { data: { session } } = await supabase.auth.getSession();
+            const token = session?.access_token;
+
+            if (!token) {
+                setError('No session found. Please log in again.');
+                return;
+            }
+
+            const response = await fetch('/api/users/resend-reset-code', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    email: targetEmail
+                })
+            });
+
+            const text = await response.text();
+
+            let data: { error?: string; message?: string } = {};
+            try {
+                data = text ? JSON.parse(text) : {};
+            } catch {
+                console.error('Non-JSON response from resend-reset-code:', text);
+                throw new Error('Server returned HTML instead of JSON. Check that /api/users/resend-reset-code/route.ts exists.');
+            }
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to resend reset code');
+            }
+
+            setSuccess(`Reset code sent to ${targetEmail}`);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to resend reset code');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     // Determine which users to show to the current viewer:
     const visibleUsers = userRole === 'admin'
         ? users.filter(u => (u.user_metadata?.role || 'member') === 'member')
@@ -383,37 +440,79 @@ export default function SettingsPage() {
 
                                                     <td>
                                                         {userRole === 'superuser' ? (
-                                                            <button
-                                                                onClick={() => handleDeleteUser(
-                                                                    managedUser.id,
-                                                                    managedUser.email,
-                                                                    managedUser.user_metadata?.role as UserRole
-                                                                )}
-                                                                className="delete-btn-small"
-                                                                disabled={isLoading || isSelf}
-                                                                title={isSelf ? 'You cannot delete your own account' : undefined}
-                                                            >
-                                                                Delete
-                                                            </button>
+                                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                                <button
+                                                                    onClick={() => handleResendResetCode(
+                                                                        managedUser.email,
+                                                                        managedUser.user_metadata?.role as UserRole
+                                                                    )}
+                                                                    className="resend-btn-small"
+                                                                    disabled={isLoading}
+                                                                >
+                                                                    Reset Password
+                                                                </button>
+
+                                                                <button
+                                                                    onClick={() => handleDeleteUser(
+                                                                        managedUser.id,
+                                                                        managedUser.email,
+                                                                        managedUser.user_metadata?.role as UserRole
+                                                                    )}
+                                                                    className="delete-btn-small"
+                                                                    disabled={isLoading || isSelf}
+                                                                    title={isSelf ? 'You cannot delete your own account' : undefined}
+                                                                >
+                                                                    Delete
+                                                                </button>
+                                                            </div>
                                                         ) : (
-                                                            <button
-                                                                onClick={() => handleDeleteUser(
-                                                                    managedUser.id,
-                                                                    managedUser.email,
-                                                                    managedUser.user_metadata?.role as UserRole
-                                                                )}
-                                                                className="delete-btn-small"
-                                                                disabled={isLoading || managedUser.user_metadata?.role !== 'member' || isSelf}
-                                                                title={
-                                                                    isSelf
-                                                                        ? 'You cannot delete your own account'
-                                                                        : managedUser.user_metadata?.role !== 'member'
-                                                                            ? 'Admins can only delete member accounts'
-                                                                            : undefined
-                                                                }
-                                                            >
-                                                                Delete
-                                                            </button>
+                                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                                <button
+                                                                    onClick={() => handleResendResetCode(
+                                                                        managedUser.email,
+                                                                        managedUser.user_metadata?.role as UserRole
+                                                                    )}
+                                                                    className="resend-btn-small"
+                                                                    disabled={
+                                                                        isLoading ||
+                                                                        managedUser.user_metadata?.role !== 'member' ||
+                                                                        isSelf
+                                                                    }
+                                                                    style={{ background: '#2563eb' }}
+                                                                    title={
+                                                                        isSelf
+                                                                            ? 'You cannot resend reset code to yourself'
+                                                                            : managedUser.user_metadata?.role !== 'member'
+                                                                                ? 'Admins can only resend reset codes to member accounts'
+                                                                                : undefined
+                                                                    }
+                                                                >
+                                                                    Reset Password
+                                                                </button>
+
+                                                                <button
+                                                                    onClick={() => handleDeleteUser(
+                                                                        managedUser.id,
+                                                                        managedUser.email,
+                                                                        managedUser.user_metadata?.role as UserRole
+                                                                    )}
+                                                                    className="delete-btn-small"
+                                                                    disabled={
+                                                                        isLoading ||
+                                                                        managedUser.user_metadata?.role !== 'member' ||
+                                                                        isSelf
+                                                                    }
+                                                                    title={
+                                                                        isSelf
+                                                                            ? 'You cannot delete your own account'
+                                                                            : managedUser.user_metadata?.role !== 'member'
+                                                                                ? 'Admins can only delete member accounts'
+                                                                                : undefined
+                                                                    }
+                                                                >
+                                                                    Delete
+                                                                </button>
+                                                            </div>
                                                         )}
                                                     </td>
                                                 </tr>

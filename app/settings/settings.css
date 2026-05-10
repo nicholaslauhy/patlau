@@ -193,3 +193,28 @@
 .account-menu-link:hover {
     color: #226bc9;
 }
+
+.resend-btn-small {
+    background: #2563eb;
+    color: white;
+    border: none;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: background-color 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+}
+
+.resend-btn-small:hover:not(:disabled) {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+}
+
+.resend-btn-small:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.resend-btn-small:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

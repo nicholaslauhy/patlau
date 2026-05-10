@@ -1,20 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { jwtDecode } from 'jwt-decode';
 
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-interface JwtPayload {
-    user_metadata?: {
-        role?: string;
-    };
-    app_metadata?: {
-        role?: string;
-    };
-}
+const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+
+const supabaseAuthClient = createClient(supabaseUrl, anonKey);
+
+type UserRole = 'member' | 'admin' | 'superuser';
+
+const VALID_ROLES: UserRole[] = ['member', 'admin', 'superuser'];
 
 export async function POST(request: NextRequest) {
     try {
@@ -27,17 +24,16 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Validate role
-        if (!['member', 'admin', 'superuser'].includes(role)) {
+        if (!VALID_ROLES.includes(role as UserRole)) {
             return NextResponse.json(
                 { error: 'Invalid role' },
                 { status: 400 }
             );
         }
 
-        // Get the caller's token from Authorization header
         const authHeader = request.headers.get('authorization');
-        if (!authHeader) {
+
+        if (!authHeader?.startsWith('Bearer ')) {
             return NextResponse.json(
                 { error: 'Unauthorized' },
                 { status: 401 }
@@ -46,20 +42,21 @@ export async function POST(request: NextRequest) {
 
         const token = authHeader.replace('Bearer ', '');
 
-        // Decode the JWT to get caller's role
-        let callerRole: string | undefined;
-        try {
-            const decoded = jwtDecode<JwtPayload>(token);
-            // Check both user_metadata and app_metadata
-            callerRole = decoded.user_metadata?.role || decoded.app_metadata?.role;
-        } catch (err) {
+        // Verify token properly instead of only decoding it
+        const {
+            data: { user: caller },
+            error: authError
+        } = await supabaseAuthClient.auth.getUser(token);
+
+        if (authError || !caller) {
             return NextResponse.json(
-                { error: 'Invalid token' },
+                { error: 'Invalid or expired token' },
                 { status: 401 }
             );
         }
 
-        // Only superusers can update roles
+        const callerRole = caller.user_metadata?.role as UserRole | undefined;
+
         if (callerRole !== 'superuser') {
             return NextResponse.json(
                 { error: 'Only superusers can update user roles' },
@@ -67,9 +64,30 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Update the user's role in metadata
+        // Important: prevent self-demotion / self-role-change
+        if (caller.id === userId) {
+            return NextResponse.json(
+                { error: 'You cannot change your own role.' },
+                { status: 403 }
+            );
+        }
+
+        // Get target user first so we preserve existing metadata like name
+        const { data: targetData, error: targetError } =
+            await supabaseAdmin.auth.admin.getUserById(userId);
+
+        if (targetError || !targetData.user) {
+            return NextResponse.json(
+                { error: 'Target user not found' },
+                { status: 404 }
+            );
+        }
+
+        const existingMetadata = targetData.user.user_metadata || {};
+
         const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
             user_metadata: {
+                ...existingMetadata,
                 role
             }
         });
