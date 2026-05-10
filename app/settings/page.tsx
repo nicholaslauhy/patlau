@@ -32,6 +32,7 @@ export default function SettingsPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
+    const [currentUserId, setCurrentUserId] = useState('');
 
     // Form state
     const [newUserEmail, setNewUserEmail] = useState('');
@@ -48,6 +49,7 @@ export default function SettingsPage() {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
+                setCurrentUserId(user.id);
                 setUserName(user.user_metadata?.name || user.email || 'User');
                 setUserRole((user.user_metadata?.role as UserRole) || 'member');
             } else {
@@ -332,67 +334,91 @@ export default function SettingsPage() {
                                         </tr>
                                         </thead>
                                         <tbody>
-                                        {visibleUsers.map((user) => (
-                                            <tr key={user.id}>
-                                                <td>{user.user_metadata?.name || 'N/A'}</td>
-                                                <td>{user.email}</td>
-                                                <td>
-                                                    {userRole === 'superuser' ? (
-                                                        <select
-                                                            className="role-select"
-                                                            value={(user.user_metadata?.role as UserRole) || 'member'}
-                                                            onChange={async (e) => {
-                                                                const selected = e.target.value as UserRole;
-                                                                setError('');
-                                                                setSuccess('');
+                                        {visibleUsers.map((managedUser) => {
+                                            const isSelf = managedUser.id === currentUserId;
 
-                                                                if (user.user_metadata?.role !== selected && !confirm(`Change role from ${(user.user_metadata?.role || 'member').toUpperCase()} to ${selected.toUpperCase()}?`)) {
-                                                                    setUsers(prev => [...prev]);
-                                                                    return;
+                                            return (
+                                                <tr key={managedUser.id}>
+                                                    <td>{managedUser.user_metadata?.name || 'N/A'}</td>
+                                                    <td>{managedUser.email}</td>
+                                                    <td>
+                                                        {userRole === 'superuser' ? (
+                                                            <select
+                                                                className="role-select"
+                                                                value={(managedUser.user_metadata?.role as UserRole) || 'member'}
+                                                                onChange={async (e) => {
+                                                                    const selected = e.target.value as UserRole;
+                                                                    setError('');
+                                                                    setSuccess('');
+
+                                                                    if (isSelf) {
+                                                                        setError('You cannot change your own role.');
+                                                                        setUsers(prev => [...prev]);
+                                                                        return;
+                                                                    }
+
+                                                                    if (
+                                                                        managedUser.user_metadata?.role !== selected &&
+                                                                        !confirm(`Change role from ${(managedUser.user_metadata?.role || 'member').toUpperCase()} to ${selected.toUpperCase()}?`)
+                                                                    ) {
+                                                                        setUsers(prev => [...prev]);
+                                                                        return;
+                                                                    }
+
+                                                                    await updateUserRole(managedUser.id, selected);
+                                                                }}
+                                                                disabled={isLoading || isSelf}
+                                                                title={isSelf ? 'You cannot change your own role' : undefined}
+                                                            >
+                                                                <option value="member">Member</option>
+                                                                <option value="admin">Admin</option>
+                                                                <option value="superuser">Superuser</option>
+                                                            </select>
+                                                        ) : (
+                                                            <span className={`role-badge ${managedUser.user_metadata?.role || 'member'}`}>
+                        {(managedUser.user_metadata?.role || 'member').toUpperCase()}
+                    </span>
+                                                        )}
+                                                    </td>
+
+                                                    <td>
+                                                        {userRole === 'superuser' ? (
+                                                            <button
+                                                                onClick={() => handleDeleteUser(
+                                                                    managedUser.id,
+                                                                    managedUser.email,
+                                                                    managedUser.user_metadata?.role as UserRole
+                                                                )}
+                                                                className="delete-btn-small"
+                                                                disabled={isLoading || isSelf}
+                                                                title={isSelf ? 'You cannot delete your own account' : undefined}
+                                                            >
+                                                                Delete
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => handleDeleteUser(
+                                                                    managedUser.id,
+                                                                    managedUser.email,
+                                                                    managedUser.user_metadata?.role as UserRole
+                                                                )}
+                                                                className="delete-btn-small"
+                                                                disabled={isLoading || managedUser.user_metadata?.role !== 'member' || isSelf}
+                                                                title={
+                                                                    isSelf
+                                                                        ? 'You cannot delete your own account'
+                                                                        : managedUser.user_metadata?.role !== 'member'
+                                                                            ? 'Admins can only delete member accounts'
+                                                                            : undefined
                                                                 }
-                                                                await updateUserRole(user.id, selected);
-                                                            }}
-                                                            onChangeCapture={(e) => {
-                                                                const target = e.currentTarget as HTMLSelectElement;
-                                                                target.setAttribute('data-role', target.value);
-                                                            }}
-                                                            disabled={isLoading}
-                                                        >
-                                                            <option value="member">Member</option>
-                                                            <option value="admin">Admin</option>
-                                                            <option value="superuser">Superuser</option>
-                                                        </select>
-                                                    ) : (
-                                                        <span className={`role-badge ${user.user_metadata?.role || 'member'}`}>
-                                                          {(user.user_metadata?.role || 'member').toUpperCase()}
-                                                        </span>
-                                                    )}
-                                                </td>
-
-                                                <td>
-                                                    {/* Superuser can delete any user.
-                                                        Admin can delete only members (disabled otherwise). */}
-                                                    {userRole === 'superuser' ? (
-                                                        <button
-                                                            onClick={() => handleDeleteUser(user.id, user.email, user.user_metadata?.role as UserRole)}
-                                                            className="delete-btn-small"
-                                                            disabled={isLoading}
-                                                        >
-                                                            Delete
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => handleDeleteUser(user.id, user.email, user.user_metadata?.role as UserRole)}
-                                                            className="delete-btn-small"
-                                                            disabled={isLoading || (user.user_metadata?.role !== 'member')}
-                                                            title={user.user_metadata?.role !== 'member' ? 'Admins can only delete member accounts' : undefined}
-                                                        >
-                                                            Delete
-                                                        </button>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        ))}
+                                                            >
+                                                                Delete
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
                                         </tbody>
                                     </table>
                                 </div>
