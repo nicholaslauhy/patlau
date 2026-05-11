@@ -707,53 +707,74 @@ export default function DashboardPage() {
                             <td className="missed-count" title={`${missed} missed`}>{missed}</td>
 
                             <td className="actions-cell" style={{ width: userRole === 'superuser' ? 420 : 280 }}>
-                              <div className="btn-group">
-                                <button
-                                    className="attendance-btn"
-                                    onClick={() => handleAttendanceClick(student.student_id)}
-                                    disabled={finished}
-                                    title={finished ? 'Subscription lessons completed' : 'Mark attended'}
-                                >
-                                  Mark
-                                </button>
+                              <div style={{ display: 'flex', gap: 10, flexDirection: 'column' }}>
+                                {/* top row: inline buttons */}
+                                <div style={{ display: 'flex', gap: 10 }}>
+                                  <button
+                                      type="button"
+                                      className="attendance-btn"
+                                      onClick={() => handleAttendanceClick(student.student_id)}
+                                      disabled={finished}
+                                      title={finished ? 'Subscription lessons completed' : 'Mark attended'}
+                                  >
+                                    Mark
+                                  </button>
 
-                                <button
-                                    className="missed-btn"
-                                    onClick={() => handleMissed(student.student_id)}
-                                    disabled={finished}
-                                    title={finished ? 'Subscription lessons completed' : 'Mark missed'}
-                                >
-                                  Missed
-                                </button>
+                                  <button
+                                      type="button"
+                                      className="missed-btn"
+                                      onClick={() => handleMissed(student.student_id)}
+                                      disabled={finished}
+                                      title={finished ? 'Subscription lessons completed' : 'Mark missed'}
+                                  >
+                                    Missed
+                                  </button>
 
-                                <button
-                                    className="makeup-btn"
-                                    onClick={() => handleMakeupAttendance(student.student_id)}
-                                    disabled={finished || (student.missed ?? 0) <= 0}
-                                    title={(student.missed ?? 0) <= 0 ? 'No missed lessons to makeup' : 'Makeup (convert one missed to attended)'}
-                                >
-                                  Makeup
-                                </button>
+                                  <button
+                                      type="button"
+                                      className="makeup-btn"
+                                      onClick={() => handleMakeupAttendance(student.student_id)}
+                                      disabled={finished || (student.missed ?? 0) <= 0}
+                                      title={(student.missed ?? 0) <= 0 ? 'No missed lessons to makeup' : 'Makeup (convert one missed to attended)'}
+                                  >
+                                    Makeup
+                                  </button>
 
-                                <button
-                                    className="undo-btn"
-                                    onClick={() => handleDeleteLastAttendance(student.student_id)}
-                                    disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
-                                    title={(student.attended ?? 0) + (student.missed ?? 0) === 0 ? 'No actions to undo' : 'Undo last action you performed'}
-                                >
-                                  Undo
-                                </button>
+                                  <button
+                                      type="button"
+                                      className="undo-btn"
+                                      onClick={() => handleDeleteLastAttendance(student.student_id)}
+                                      disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
+                                      title={(student.attended ?? 0) + (student.missed ?? 0) === 0 ? 'No actions to undo' : 'Undo last action'}
+                                  >
+                                    Undo
+                                  </button>
+                                </div>
 
-                                {userRole === 'superuser' ? (
-                                    <>
-                                      <button className="reset-btn" onClick={() => handleResetCourse(student.student_id)}>
-                                        Reset
-                                      </button>
-                                      <button className="delete-btn" onClick={() => deleteStudent(student.student_id, student.student_name)}>
-                                        Delete
-                                      </button>
-                                    </>
-                                ) : null}
+                                {/* second row: full-width important actions (Makeup/Reset/Delete for superuser) */}
+                                <div style={{ display: 'flex', gap: 10, marginTop: 2 }}>
+
+                                  {userRole === 'superuser' ? (
+                                      <div style={{ display: 'flex', gap: 8 }}>
+                                        <button
+                                            type="button"
+                                            className="reset-btn"
+                                            onClick={() => handleResetCourse(student.student_id)}
+                                            style={{ backgroundColor: '#ef4444', color: 'white' }}
+                                        >
+                                          Reset
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="delete-btn"
+                                            onClick={() => deleteStudent(student.student_id, student.student_name)}
+                                            style={{ backgroundColor: '#dc2626', color: 'white' }}
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                  ) : null}
+                                </div>
                               </div>
                             </td>
                           </tr>

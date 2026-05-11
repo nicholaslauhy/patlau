@@ -472,3 +472,39 @@ th.col-weeks {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Add to dashboard.css (or global styles) */
+.actions-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap; /* allow wrap on small screens */
+}
+
+/* ensure individual buttons do not expand to full width unless you want them to */
+.actions-row .attendance-btn,
+.actions-row .missed-btn,
+.actions-row .makeup-btn,
+.actions-row .undo-btn,
+.actions-row .reset-btn,
+.actions-row .delete-btn {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* example color styling (tweak to match previous look) */
+.attendance-btn { background-color: #10b981; color: white; }
+.missed-btn     { background-color: #ef4444; color: white; }
+.makeup-btn     { background-color: #3b82f6; color: white; }
+.undo-btn       { background-color: #f59e0b; color: white; }
+.reset-btn      { background-color: #ef4444; color: white; }
+.delete-btn     { background-color: #dc2626; color: white; }
+
+/* optional: style disabled state */
+.actions-row button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
