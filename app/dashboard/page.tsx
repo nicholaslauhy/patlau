@@ -63,6 +63,26 @@ export default function DashboardPage() {
     checkAuth();
   }, [router]);
 
+  const logAuditAction = async (studentId: string, action: 'mark' | 'makeup' | 'undo' | 'delete' | 'reset') => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      if (!token) return;
+
+      await fetch('/api/audit/log-attendance', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ student_id: studentId, action })
+      });
+    } catch (err) {
+      console.error('Failed to log audit:', err);
+    }
+  };
+
   const fetchData = async () => {
     setIsLoading(true);
     setMessage(null);
@@ -98,20 +118,26 @@ export default function DashboardPage() {
   const deleteStudent = async (studentId: string, studentName?: string) => {
     if (!confirm(`Delete ${studentName ?? 'this student'}? This cannot be undone.`)) return;
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
 
-      const serviceRoleClient = createBrowserClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.SUPABASE_SERVICE_ROLE_KEY!
-      );
+      if (!token) throw new Error('Not authenticated');
 
-      const { error } = await serviceRoleClient
-          .from('students')
-          .delete()
-          .eq('student_id', studentId);
+      const response = await fetch('/api/students/delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ student_id: studentId })
+      });
 
-      if (error) throw error;
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Delete failed');
+      }
+
+      await logAuditAction(studentId, 'delete');
       fetchData();
     } catch (err: any) {
       alert(`Delete failed: ${err?.message ?? 'Unknown error'}`);
@@ -123,6 +149,10 @@ export default function DashboardPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
+      // Get current user's ID
+      const currentUserId = user.id;
+
+      // Fetch the student data
       const { data: studentData, error: fetchError } = await supabase
           .from('students')
           .select('*')
@@ -131,6 +161,32 @@ export default function DashboardPage() {
 
       if (fetchError || !studentData) throw fetchError || new Error('Student not found');
 
+      if (!studentData.attendance_records || studentData.attendance_records.length === 0) {
+        alert('No attendance records to undo.');
+        return;
+      }
+
+      // Check who performed the last mark/makeup action
+      const { data: auditLogs, error: auditError } = await supabase
+          .from('student_audit')
+          .select('*')
+          .eq('student_id', studentId)
+          .in('action', ['mark', 'makeup'])
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+      if (auditError) throw auditError;
+
+      // Check if there's an audit log and if current user performed it
+      if (auditLogs && auditLogs.length > 0) {
+        const lastAction = auditLogs[0];
+        if (lastAction.created_by !== currentUserId) {
+          alert('You can only undo actions you have committed.');
+          return;
+        }
+      }
+
+      // Perform the undo
       const updatedRecords = [...(studentData.attendance_records || [])];
       updatedRecords.pop();
 
@@ -148,6 +204,7 @@ export default function DashboardPage() {
       if (error || !updatedStudent) throw error || new Error('Update failed');
 
       setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
+      await logAuditAction(studentId, 'undo');
     } catch (err: any) {
       alert(`Failed to undo attendance: ${err?.message ?? 'Unknown error'}`);
     }
@@ -193,6 +250,7 @@ export default function DashboardPage() {
       if (error || !updatedStudent) throw error || new Error('Update failed');
 
       setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
+      await logAuditAction(studentId, 'mark');
     } catch (err: any) {
       alert(`Failed to record attendance: ${err?.message ?? 'Unknown error'}`);
     }
@@ -228,6 +286,7 @@ export default function DashboardPage() {
       if (error || !updatedStudent) throw error || new Error('Update failed');
 
       setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
+      await logAuditAction(studentId, 'makeup');
     } catch (err: any) {
       alert(`Failed to record makeup attendance: ${err?.message ?? 'Unknown error'}`);
     }
@@ -254,6 +313,7 @@ export default function DashboardPage() {
       if (error || !updatedStudent) throw error || new Error('Reset failed');
 
       setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
+      await logAuditAction(studentId, 'reset');
     } catch (err: any) {
       alert(`Failed to reset course: ${err?.message ?? 'Unknown error'}`);
     }
@@ -294,6 +354,10 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchData();
   }, [selectedDay, selectedTimeslot, selectedLevel]);
+
+  // Check if day/timeslot/level are editable based on user role
+  const canEditStudentFields = userRole === 'superuser';
+  const isSuperuser = userRole === 'superuser';
 
   return (
       <div className="container">
@@ -418,7 +482,7 @@ export default function DashboardPage() {
                       <th>Timeslot</th>
                       <th>Level</th>
                       <th className="lessons-header">Lessons</th>
-                      <th style={{ width: 260 }}>Actions</th>
+                      <th style={{ width: userRole === 'superuser' ? 340 : 220 }}>Actions</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -431,91 +495,134 @@ export default function DashboardPage() {
                           <tr key={student.student_id}>
                             <td>{student.student_name}</td>
                             <td>
-                              <select
-                                  aria-label="Change day"
-                                  value={student.student_day}
-                                  onChange={async (e) => {
-                                    const newDay = e.target.value;
-                                    try {
-                                      const { error } = await supabase
-                                          .from('students')
-                                          .update({ student_day: newDay, updated_at: new Date().toISOString() })
-                                          .eq('student_id', student.student_id);
+                              {canEditStudentFields ? (
+                                  <select
+                                      className="student-field-select"
+                                      aria-label="Change day"
+                                      value={student.student_day}
+                                      onChange={async (e) => {
+                                        const newDay = e.target.value;
+                                        try {
+                                          const { error } = await supabase
+                                              .from('students')
+                                              .update({ student_day: newDay, updated_at: new Date().toISOString() })
+                                              .eq('student_id', student.student_id);
 
-                                      if (error) throw error;
+                                          if (error) throw error;
 
-                                      setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_day: newDay, updated_at: new Date().toISOString() } : s));
-                                    } catch (err: any) {
-                                      alert(`Failed to update day: ${err?.message ?? 'Unknown error'}`);
-                                    }
-                                  }}
-                              >
-                                <option value="Saturday">Saturday</option>
-                                <option value="Sunday">Sunday</option>
-                              </select>
+                                          setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_day: newDay, updated_at: new Date().toISOString() } : s));
+                                        } catch (err: any) {
+                                          alert(`Failed to update day: ${err?.message ?? 'Unknown error'}`);
+                                        }
+                                      }}
+                                  >
+                                    <option value="Saturday">Saturday</option>
+                                    <option value="Sunday">Sunday</option>
+                                  </select>
+                              ) : (
+                                  <span title="Only superusers can change this" style={{ cursor: 'not-allowed', opacity: 0.7 }}>
+                                    {student.student_day}
+                                  </span>
+                              )}
                             </td>
                             <td>
-                              <select
-                                  aria-label="Change timeslot"
-                                  value={student.student_timeslot}
-                                  onChange={async (e) => {
-                                    const newTimeslot = e.target.value;
-                                    try {
-                                      const { error } = await supabase
-                                          .from('students')
-                                          .update({ student_timeslot: newTimeslot, updated_at: new Date().toISOString() })
-                                          .eq('student_id', student.student_id);
+                              {canEditStudentFields ? (
+                                  <select
+                                      className="student-field-select"
+                                      aria-label="Change timeslot"
+                                      value={student.student_timeslot}
+                                      onChange={async (e) => {
+                                        const newTimeslot = e.target.value;
+                                        try {
+                                          const { error } = await supabase
+                                              .from('students')
+                                              .update({ student_timeslot: newTimeslot, updated_at: new Date().toISOString() })
+                                              .eq('student_id', student.student_id);
 
-                                      if (error) throw error;
+                                          if (error) throw error;
 
-                                      setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_timeslot: newTimeslot, updated_at: new Date().toISOString() } : s));
-                                    } catch (err: any) {
-                                      alert(`Failed to update timeslot: ${err?.message ?? 'Unknown error'}`);
-                                    }
-                                  }}
-                              >
-                                <option value="8-10am">8-10am</option>
-                                <option value="10-12pm">10-12pm</option>
-                                <option value="1-3pm">1-3pm</option>
-                                <option value="2-4pm">2-4pm</option>
-                                <option value="3-5pm">3-5pm</option>
-                                <option value="4-6pm">4-6pm</option>
-                              </select>
+                                          setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_timeslot: newTimeslot, updated_at: new Date().toISOString() } : s));
+                                        } catch (err: any) {
+                                          alert(`Failed to update timeslot: ${err?.message ?? 'Unknown error'}`);
+                                        }
+                                      }}
+                                  >
+                                    <option value="8-10am">8-10am</option>
+                                    <option value="10-12pm">10-12pm</option>
+                                    <option value="1-3pm">1-3pm</option>
+                                    <option value="2-4pm">2-4pm</option>
+                                    <option value="3-5pm">3-5pm</option>
+                                    <option value="4-6pm">4-6pm</option>
+                                  </select>
+                              ) : (
+                                  <span title="Only superusers can change this" style={{ cursor: 'not-allowed', opacity: 0.7 }}>
+                                    {student.student_timeslot}
+                                  </span>
+                              )}
                             </td>
                             <td>
-                              <select
-                                  aria-label="Change level"
-                                  value={student.student_levelofplay}
-                                  onChange={async (e) => {
-                                    const newLevel = e.target.value;
-                                    try {
-                                      const { error } = await supabase
-                                          .from('students')
-                                          .update({ student_levelofplay: newLevel, updated_at: new Date().toISOString() })
-                                          .eq('student_id', student.student_id);
+                              {canEditStudentFields ? (
+                                  <select
+                                      className="student-field-select"
+                                      aria-label="Change level"
+                                      value={student.student_levelofplay}
+                                      onChange={async (e) => {
+                                        const newLevel = e.target.value;
+                                        try {
+                                          const { error } = await supabase
+                                              .from('students')
+                                              .update({ student_levelofplay: newLevel, updated_at: new Date().toISOString() })
+                                              .eq('student_id', student.student_id);
 
-                                      if (error) throw error;
+                                          if (error) throw error;
 
-                                      setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_levelofplay: newLevel, updated_at: new Date().toISOString() } : s));
-                                    } catch (err: any) {
-                                      alert(`Failed to update level: ${err?.message ?? 'Unknown error'}`);
-                                    }
-                                  }}
-                              >
-                                <option value="Beginner">Beginner</option>
-                                <option value="Intermediate">Intermediate</option>
-                                <option value="Advanced">Advanced</option>
-                              </select>
+                                          setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_levelofplay: newLevel, updated_at: new Date().toISOString() } : s));
+                                        } catch (err: any) {
+                                          alert(`Failed to update level: ${err?.message ?? 'Unknown error'}`);
+                                        }
+                                      }}
+                                  >
+                                    <option value="Beginner">Beginner</option>
+                                    <option value="Intermediate">Intermediate</option>
+                                    <option value="Advanced">Advanced</option>
+                                  </select>
+                              ) : (
+                                  <span title="Only superusers can change this" style={{ cursor: 'not-allowed', opacity: 0.7 }}>
+                                    {student.student_levelofplay}
+                                  </span>
+                              )}
                             </td>
                             <td className="lessons-count" title={`${attendanceCount} lessons attended`}>
                               {attendanceCount}
                             </td>
-                            <td className="actions-cell">
+                            <td className="actions-cell" style={{ width: userRole === 'superuser' ? 340 : 220 }}>
                               <div className="btn-group">
-                                <button className="attendance-btn" onClick={() => handleAttendanceClick(student.student_id)}>Mark</button>
-                                <button className="makeup-btn" onClick={() => handleMakeupAttendance(student.student_id)}>Makeup</button>
-                                <button className="reset-btn" onClick={() => handleResetCourse(student.student_id)}>Reset</button>
-                                <button className="delete-btn" onClick={() => deleteStudent(student.student_id, student.student_name)}>Delete</button>
+                                <button className="attendance-btn" onClick={() => handleAttendanceClick(student.student_id)}>
+                                  Mark
+                                </button>
+                                <button className="makeup-btn" onClick={() => handleMakeupAttendance(student.student_id)}>
+                                  Makeup
+                                </button>
+
+                                <button
+                                    className="undo-btn"
+                                    onClick={() => handleDeleteLastAttendance(student.student_id)}
+                                    disabled={attendanceCount === 0}
+                                    title={attendanceCount === 0 ? 'No attendance records to undo' : 'Undo last mark or makeup'}
+                                >
+                                  Undo
+                                </button>
+
+                                {userRole === 'superuser' ? (
+                                    <>
+                                      <button className="reset-btn" onClick={() => handleResetCourse(student.student_id)}>
+                                        Reset
+                                      </button>
+                                      <button className="delete-btn" onClick={() => deleteStudent(student.student_id, student.student_name)}>
+                                        Delete
+                                      </button>
+                                    </>
+                                ) : null}
                               </div>
                             </td>
                           </tr>

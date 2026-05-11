@@ -10,6 +10,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showAccountMessage, setShowAccountMessage] = useState(false);
   const router = useRouter();
 
   const supabase = createBrowserClient(
@@ -48,7 +49,7 @@ export default function Login() {
         return;
       }
 
-// Defensive: ensure a valid session object with tokens before calling setSession
+      // Defensive: ensure a valid session object with tokens before calling setSession
       const session = data?.session;
       if (!session || !session.access_token || !session.refresh_token) {
         console.error('Login route returned invalid session:', data);
@@ -141,19 +142,52 @@ export default function Login() {
                 {isLoading ? 'Signing in...' : 'Sign in'}
               </button>
 
-              <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>
-                <span
-                    className="icon-button"
-                    title="If you need to create an account, please contact the admin at nicholaslauhongyi@gmail.com"
+              <div style={{ marginTop: '1rem', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {/* Forgot Password Link */}
+                <button
+                    type="button"
+                    onClick={() => router.push('/reset')}
                     style={{
-                      padding: '0.5rem 0.75rem',
-                      borderRadius: '6px',
-                      cursor: 'default',
-                      display: 'inline-block'
+                      background: 'none',
+                      border: 'none',
+                      color: '#2563eb',
+                      cursor: 'pointer',
+                      fontSize: '0.95rem',
+                      textDecoration: 'underline',
+                      padding: 0,
+                    }}
+                >
+                  Forgot password?
+                </button>
+
+                {/* Need an account button */}
+                <button
+                    type="button"
+                    onClick={() => setShowAccountMessage(!showAccountMessage)}
+                    className="submit-btn"
+                    style={{
+                      background: '#f3f4f6',
+                      color: '#374151',
+                      border: '1px solid #e5e7eb',
                     }}
                 >
                   Need an account?
-                </span>
+                </button>
+
+                {/* Account message */}
+                {showAccountMessage && (
+                    <div style={{
+                      background: '#eff6ff',
+                      border: '1px solid #bfdbfe',
+                      borderRadius: '6px',
+                      padding: '10px 12px',
+                      color: '#1e40af',
+                      fontSize: '0.9rem',
+                      marginTop: '0.5rem'
+                    }}>
+                      If you need to create an account, please contact the admin at nicholaslauhongyi@gmail.com
+                    </div>
+                )}
               </div>
             </form>
           </div>

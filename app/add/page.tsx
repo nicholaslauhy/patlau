@@ -67,8 +67,8 @@ export default function AddStudent() {
     student_day: 'Saturday',
     student_timeslot: '8-10am',
     student_levelofplay: 'Beginner',
-    price: 0,
-    total_weeks: 1,
+    price: 40,
+    total_weeks: 10,
     weeks_completed: 0
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -79,16 +79,29 @@ export default function AddStudent() {
     setIsSubmitting(true);
     setError('');
 
+    if (!formData.student_name.trim()) {
+      setError('Student name is required');
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const submitData = {
+        student_name: formData.student_name.trim(),
+        student_day: formData.student_day,
+        student_timeslot: formData.student_timeslot,
+        student_levelofplay: formData.student_levelofplay,
+        price: userRole === 'superuser' ? formData.price : 40,
+        total_weeks: userRole === 'superuser' ? formData.total_weeks : 10,
+        weeks_completed: 0,
+        student_id: uuidv4(),
+        created_at: new Date().toISOString()
+        // Remove: created_by - this is causing the foreign key error
+      };
+
       const { data, error } = await supabase
           .from('students')
-          .insert([{
-            ...formData,
-            student_id: uuidv4(),
-            created_by: user?.id,
-            created_at: new Date().toISOString()
-          }])
+          .insert([submitData])
           .select();
 
       if (error) {
@@ -107,7 +120,22 @@ export default function AddStudent() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: isNaN(Number(value)) ? value : Number(value) }));
+
+    setFormData(prev => {
+      // admins cannot change price or total_weeks
+      if (userRole !== 'superuser' && (name === 'price' || name === 'total_weeks')) {
+        return prev;
+      }
+
+      // Only convert to number for numeric fields (not student_name)
+      const numericFields = ['price', 'total_weeks', 'weeks_completed'];
+      const finalValue = numericFields.includes(name) ? Number(value) : value;
+
+      return {
+        ...prev,
+        [name]: finalValue
+      };
+    });
   };
 
   if (userRole === 'member') {
@@ -259,34 +287,38 @@ export default function AddStudent() {
                   </select>
                 </div>
 
-                <div className="form-group">
-                  <label htmlFor="price">Price (S$) *</label>
-                  <input
-                      type="number"
-                      id="price"
-                      name="price"
-                      value={formData.price}
-                      onChange={handleChange}
-                      min="0"
-                      step="0.01"
-                      required
-                      placeholder="0.00"
-                  />
-                </div>
+                {userRole === 'superuser' && (
+                    <>
+                      <div className="form-group">
+                        <label htmlFor="price">Price (S$) *</label>
+                        <input
+                            type="number"
+                            id="price"
+                            name="price"
+                            value={formData.price}
+                            onChange={handleChange}
+                            min="0"
+                            step="0.01"
+                            required
+                            placeholder="0.00"
+                        />
+                      </div>
 
-                <div className="form-group">
-                  <label htmlFor="total_weeks">Total Weeks *</label>
-                  <input
-                      type="number"
-                      id="total_weeks"
-                      name="total_weeks"
-                      value={formData.total_weeks}
-                      onChange={handleChange}
-                      min="1"
-                      required
-                      placeholder="1"
-                  />
-                </div>
+                      <div className="form-group">
+                        <label htmlFor="total_weeks">Total Weeks *</label>
+                        <input
+                            type="number"
+                            id="total_weeks"
+                            name="total_weeks"
+                            value={formData.total_weeks}
+                            onChange={handleChange}
+                            min="1"
+                            required
+                            placeholder="1"
+                        />
+                      </div>
+                    </>
+                )}
               </div>
 
               <div className="form-actions">

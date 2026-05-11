@@ -90,6 +90,25 @@ export default function SettingsPage() {
             return;
         }
 
+        // Client-side validation
+        const normalizedEmail = newUserEmail.toLowerCase().trim();
+        const normalizedName = newUserName.trim();
+
+        // Check if email or username already exists in the current user list
+        const emailExists = users.some(u => u.email?.toLowerCase() === normalizedEmail);
+        if (emailExists) {
+            setError(`Email "${normalizedEmail}" is already in use`);
+            return;
+        }
+
+        const usernameExists = users.some(
+            u => u.user_metadata?.name?.toLowerCase() === normalizedName.toLowerCase()
+        );
+        if (usernameExists) {
+            setError(`Username "${normalizedName}" is already taken. Please try another username!`);
+            return;
+        }
+
         try {
             setIsLoading(true);
 
@@ -100,19 +119,26 @@ export default function SettingsPage() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    email: newUserEmail,
-                    name: newUserName,
+                    email: normalizedEmail,
+                    name: normalizedName,
                     role: roleToSend,
                     password: newUserPassword || undefined
                 })
             });
 
+            const errorData = await response.json();
+
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to create user');
+                // Check for conflict errors (409 = duplicate email/username)
+                if (response.status === 409) {
+                    setError(errorData.error || 'User already exists');
+                } else {
+                    setError(errorData.error || 'Failed to create user');
+                }
+                return;
             }
 
-            setSuccess(`User ${newUserName} created successfully`);
+            setSuccess(`User ${normalizedName} created successfully`);
             setNewUserEmail('');
             setNewUserName('');
             setNewUserPassword('');

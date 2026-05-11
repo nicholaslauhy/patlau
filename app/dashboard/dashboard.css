@@ -380,3 +380,72 @@ th.col-weeks {
 .account-menu-link:hover {
   color: #226bc9;
 }
+
+.undo-btn {
+  background: #f59e0b;
+  color: white;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.undo-btn:hover:not(:disabled) {
+  background: #d97706;
+  transform: translateY(-1px);
+}
+
+.undo-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Student field selects - styled like role selector (superuser only) */
+.student-field-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 8px 28px 8px 12px;
+  border-radius: 16px;
+  border: none;
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  min-width: 110px;
+  transition: var(--transition);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-position: right 8px center;
+  background-repeat: no-repeat;
+  background-size: 16px 16px;
+  background-color: #dbeafe;
+  color: #2563eb;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%232563eb'%3e%3cpath fill-rule='evenodd' d='M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z' clip-rule='evenodd'/%3e%3c/svg%3e");
+}
+
+.student-field-select:hover:not(:disabled) {
+  background-color: #bfdbfe;
+}
+
+.student-field-select:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.student-field-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.student-field-select option {
+  background-color: #fff;
+  color: #1f2937;
+  font-weight: 600;
+  padding: 10px 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}

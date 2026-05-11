@@ -6,58 +6,99 @@ const supabaseAdmin = createClient(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
     try {
-        const body = await req.json();
-        const { email, name, role, password } = body || {};
+        const { email, name, role, password } = await request.json();
 
         if (!email || !name || !role) {
-            return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+            return NextResponse.json(
+                { error: 'Email, name, and role are required' },
+                { status: 400 }
+            );
         }
 
-        const redirectTo = `${process.env.NEXT_PUBLIC_SITE_URL}/reset`;
+        const normalizedEmail = email.toLowerCase().trim();
+        const normalizedName = name.trim();
 
-        // Attempt to create the user (with password if provided)
-        const { data: createData, error: createError } = await supabaseAdmin.auth.admin.createUser({
-            email,
-            password: password || undefined, // pass password if admin provided one
-            email_confirm: false,
+        // List all users to check for duplicates
+        const { data: usersData, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
+
+        if (listErr || !usersData?.users) {
+            console.error('Failed to list users:', listErr);
+            return NextResponse.json(
+                { error: 'Failed to check for duplicate users' },
+                { status: 500 }
+            );
+        }
+
+        // Check for duplicate email
+        const existingEmail = usersData.users.find(
+            (u: any) => u.email?.toLowerCase() === normalizedEmail
+        );
+
+        if (existingEmail) {
+            return NextResponse.json(
+                { error: `Email "${normalizedEmail}" is already in use` },
+                { status: 409 }
+            );
+        }
+
+        // Check for duplicate username (stored in user_metadata.name)
+        const existingUsername = usersData.users.find(
+            (u: any) => u.user_metadata?.name?.toLowerCase() === normalizedName.toLowerCase()
+        );
+
+        if (existingUsername) {
+            return NextResponse.json(
+                { error: `Username "${normalizedName}" is already taken` },
+                { status: 409 }
+            );
+        }
+
+        // Create the user with metadata
+        const { data: userData, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+            email: normalizedEmail,
+            password: password || undefined,
             user_metadata: {
-                name,
-                role
-            }
+                name: normalizedName,
+                role: role,
+            },
+            email_confirm: true,
         });
 
-        // If creation returned an error other than "user exists", return it
-        if (createError) {
-            const msg = (createError?.message || '').toLowerCase();
-            // If user already exists, we'll continue to send the reset email below.
-            if (!msg.includes('already') && !msg.includes('user already')) {
-                console.error('createUser error:', createError);
-                return NextResponse.json({ error: `Failed to create user: ${createError.message}` }, { status: 500 });
-            }
-            // else: user already exists — continue to reset email step
+        if (createErr) {
+            console.error('Create user error:', createErr);
+            return NextResponse.json(
+                { error: createErr.message || 'Failed to create user' },
+                { status: 400 }
+            );
         }
 
-        // Send reset password email (this is the link the user will use to set their password)
-        const { error: resetError } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
-            redirectTo
+        // Send reset password email so user can set their own password
+        const redirectTo = `${process.env.NEXT_PUBLIC_SITE_URL}/reset`;
+        const { error: resetErr } = await supabaseAdmin.auth.resetPasswordForEmail(normalizedEmail, {
+            redirectTo,
         });
 
-        if (resetError) {
-            console.error('resetPasswordForEmail error:', resetError);
-            // if we got a createData.user (user created) but reset fails, return that detail
+        if (resetErr) {
+            console.error('Reset email error:', resetErr);
+            // User was created but email failed — still return success
             return NextResponse.json({
-                error: 'Failed to send reset email',
-                details: resetError.message,
-            }, { status: 500 });
+                message: 'User created but password reset email failed to send',
+                user: userData.user,
+                warning: 'Email delivery issue — user may need to request reset manually',
+            });
         }
 
         return NextResponse.json({
-            message: 'Reset-password email sent successfully',
+            message: 'User created successfully',
+            user: userData.user,
         });
-    } catch (err) {
-        console.error('Create user route error:', err);
-        return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    } catch (error) {
+        console.error('Create user route error:', error);
+        return NextResponse.json(
+            { error: error instanceof Error ? error.message : 'Internal server error' },
+            { status: 500 }
+        );
     }
 }
