@@ -24,25 +24,12 @@ export default function PaymentPage() {
     const checkAuth = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          router.push('/');
-          return;
-        }
+        if (!user) { router.push('/'); return; }
         const role = (user.user_metadata?.role as 'superuser' | 'admin' | 'member') || 'member';
-
-        // Block members and admins, allow superusers
-        if (role === 'member' || role === 'admin') {
-          setUserRole(role);
-          return;
-        }
-
+        if (role === 'member' || role === 'admin') { setUserRole(role); return; }
         setUserRole(role);
-      } catch (err) {
-        console.error('Auth check failed:', err);
-        router.push('/');
-      }
+      } catch (err) { console.error(err); router.push('/'); }
     };
-
     checkAuth();
   }, [router]);
 
@@ -50,14 +37,9 @@ export default function PaymentPage() {
     const loadUserInfo = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          setUserName(user.user_metadata?.name || user.email || 'User');
-        }
-      } catch (err) {
-        console.error('Failed to load user info:', err);
-      }
+        if (user) setUserName(user.user_metadata?.name || user.email || 'User');
+      } catch (err) { console.error(err); }
     };
-
     loadUserInfo();
   }, []);
 
@@ -69,8 +51,7 @@ export default function PaymentPage() {
   const [trackingPeriod, setTrackingPeriod] = useState(() => {
     const today = new Date();
     const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const end = new Date(start);
-    end.setMonth(end.getMonth() + 3);
+    const end = new Date(start); end.setMonth(end.getMonth() + 3);
     return { start, end };
   });
 
@@ -81,8 +62,6 @@ export default function PaymentPage() {
   const days = ['all', 'Saturday', 'Sunday'];
   const timeslots = ['all', '8-10am', '10-12pm', '1-3pm', '2-4pm', '3-5pm', '4-6pm'];
   const levels = ['all', 'Beginner', 'Intermediate', 'Advanced'];
-
-  const [paymentHistory, setPaymentHistory] = useState<Record<string, number>>({});
 
   const sendPeriodSummary = async (totalAmount: number, startDate: Date, endDate: Date) => {
     try {
@@ -131,7 +110,6 @@ export default function PaymentPage() {
           .neq('paid', false);
 
       if (updateError) throw updateError;
-
     } catch (error) {
       console.error('Error sending period summary:', error);
     }
@@ -198,6 +176,25 @@ export default function PaymentPage() {
     }
   };
 
+  useEffect(() => { fetchData(); }, []);
+
+  useEffect(() => {
+    const subscription = supabase
+        .channel('public:students')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, (payload) => {
+          if (payload.eventType === 'UPDATE') {
+            setSearchResults(prev => prev.map(s =>
+                s.student_id === payload.new.student_id ? payload.new as Student : s
+            ));
+          }
+        })
+        .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
   const handlePaymentStatusChange = async (studentId: string, newPaidStatus: boolean) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -248,10 +245,18 @@ export default function PaymentPage() {
     }
   };
 
-  useEffect(() => {
-    fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const handleDelete = async (studentId: string) => {
+    if (!confirm('Delete this student?')) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const response = await fetch('/api/students/delete', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ student_id: studentId }) });
+      if (!response.ok) { const d = await response.json(); throw new Error(d.error || 'Delete failed'); }
+      fetchData();
+    } catch (err: any) {
+      console.error('Delete failed:', err); alert('Delete failed');
+    }
+  };
 
   if (userRole === 'admin' || userRole === 'member') {
     return (
@@ -259,27 +264,10 @@ export default function PaymentPage() {
           <div className="form-card" style={{ maxWidth: 600, width: '100%', textAlign: 'center' }}>
             <h1 style={{ fontSize: '3rem', margin: '0 0 1rem', color: '#dc2626' }}>403</h1>
             <h2 style={{ fontSize: '1.5rem', margin: '0 0 1rem', color: '#374151' }}>Forbidden</h2>
-            <p style={{ margin: '0 0 1.5rem', color: '#6b7280', lineHeight: 1.6 }}>
-              You do not have permission to access this page. Only superusers can view Payment details.
-            </p>
+            <p style={{ margin: '0 0 1.5rem', color: '#6b7280' }}>You do not have permission to access this page.</p>
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-              <Link href="/dashboard" className="btn share-btn" style={{ display: 'inline-block' }}>Go to Dashboard</Link>
-              <button
-                  className="btn share-btn"
-                  onClick={async () => {
-                    await supabase.auth.signOut();
-                    router.push('/');
-                  }}
-                  style={{ display: 'inline-block' }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#dc2626';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = '';
-                  }}
-              >
-                Logout
-              </button>
+              <Link href="/dashboard" className="btn share-btn">Go to Dashboard</Link>
+              <button className="btn share-btn" onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}>Logout</button>
             </div>
           </div>
         </div>
@@ -291,84 +279,41 @@ export default function PaymentPage() {
         <header className="dashboard-header">
           <div className="header-left">
             <div className="brand" style={{ position: 'relative' }}>
-              <button
-                  className="account-avatar-btn"
-                  onClick={() => setShowAccountMenu(!showAccountMenu)}
-                  title="View account"
-              >
-                👤
-              </button>
-
+              <button className="account-avatar-btn" onClick={() => setShowAccountMenu(!showAccountMenu)} title="View account">👤</button>
               {showAccountMenu && (
                   <div className="account-menu">
                     <p className="account-name">{userName || 'User'}</p>
                     <p className="account-role">{userRole?.toUpperCase() || 'MEMBER'}</p>
-                    <Link href="/settings" className="account-menu-link" onClick={() => setShowAccountMenu(false)}>
-                      ⚙️ Settings
-                    </Link>
+                    <Link href="/settings" className="account-menu-link" onClick={() => setShowAccountMenu(false)}>⚙️ Settings</Link>
                   </div>
               )}
             </div>
-
             <h1 className="page-title">Payment</h1>
           </div>
 
           <div className="user-controls">
             <Link href="/dashboard" className="btn share-btn">Dashboard</Link>
-
             <Link href="/attendance" className="btn share-btn">Attendance</Link>
-
-            {userRole === 'superuser' && (
-                <Link href="/add" className="btn share-btn">Add Student</Link>
-            )}
-
-            <button
-                className="btn share-btn logout"  // Add 'logout' class
-                onClick={async () => {
-                  await supabase.auth.signOut();
-                  router.push('/');
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#dc2626 !important';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '';
-                }}
-            >
-              Logout
-            </button>
+            {userRole === 'superuser' && <Link href="/add" className="btn share-btn">Add Student</Link>}
+            <button className="btn share-btn logout" onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}>Logout</button>
           </div>
         </header>
 
         <main>
           <div className="search-box">
-            <input
-                type="text"
-                placeholder="Search students..."
-                onChange={async (e) => {
-                  const searchTerm = e.target.value.trim();
-                  try {
-                    if (searchTerm) {
-                      const response = await fetch('/api/payment-search', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ searchTerm }),
-                      });
-                      if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.message || 'Search failed');
-                      }
-                      const data = await response.json();
-                      setSearchResults(data.results || []);
-                    } else {
-                      await fetchData();
-                    }
-                  } catch (error) {
-                    console.error('Search error:', error);
-                    setSearchResults([]);
-                  }
-                }}
-            />
+            <input type="text" placeholder="Search students..." onChange={async (e) => {
+              const searchTerm = e.target.value.trim();
+              if (searchTerm) {
+                try {
+                  const response = await fetch('/api/payment-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ searchTerm }) });
+                  if (!response.ok) throw new Error('Search failed');
+                  const data = await response.json();
+                  setSearchResults(data.results || []);
+                } catch (err) {
+                  console.error('Search error:', err); setSearchResults([]);
+                }
+              } else fetchData();
+            }} />
           </div>
 
           <div className="filter-box">
@@ -415,7 +360,6 @@ export default function PaymentPage() {
               <h3>Total Payments Collected</h3>
               <p className="amount">S${paidCount.toFixed(2)}</p>
               <p className="timestamp">Tracking Period: {trackingPeriod.start.toLocaleDateString()} - {trackingPeriod.end.toLocaleDateString()}</p>
-              <p className="timestamp">Updated: {new Date().toLocaleString()}</p>
 
               <div className="payment-actions">
                 <button className="payment-action-btn danger" onClick={async () => {
@@ -437,6 +381,7 @@ export default function PaymentPage() {
                     const newEnd = new Date(newStart);
                     newEnd.setMonth(newEnd.getMonth() + 3);
                     setTrackingPeriod({ start: newStart, end: newEnd });
+                    setPaidCount(0);
                     await fetchData();
                     setLastUpdated('Summary sent. All payments reset. New tracking period started');
                   } catch (error) {
@@ -493,176 +438,41 @@ export default function PaymentPage() {
                   <table>
                     <thead>
                     <tr>
-                      {/* Student ID column removed visually */}
-                      <th>Name</th>
-                      <th>Day</th>
-                      <th>Timeslot</th>
-                      <th>Level</th>
-                      <th className="col-price">Price (S$)</th>
-                      <th className="col-weeks">Total Weeks</th>
-                      <th className="col-total">Total Price (S$)</th>
-                      <th>Weeks Completed</th>
-                      <th>Payment Status</th>
-                      <th>Actions</th>
+                      <th>Name</th><th>Day</th><th>Timeslot</th><th>Level</th>
+                      <th className="col-price">Price (S$)</th><th className="col-weeks">Total Weeks</th>
+                      <th>Attended</th><th>Missed</th><th>Total Price</th><th>Payment Status</th><th>Actions</th>
                     </tr>
                     </thead>
                     <tbody>
-                    {searchResults.map((student) => (
-                        <tr key={student.student_id}>
-                          {/* ID removed here */}
-                          <td>{student.student_name}</td>
-
-                          <td>
-                            <select
-                                aria-label="Change day"
-                                value={student.student_day}
-                                onChange={async (e) => {
-                                  const newDay = e.target.value;
-                                  try {
-                                    const { error } = await supabase
-                                        .from('students')
-                                        .update({ student_day: newDay, updated_at: new Date().toISOString() })
-                                        .eq('student_id', student.student_id);
-                                    if (error) throw error;
-                                    setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_day: newDay, updated_at: new Date().toISOString() } : s));
-                                  } catch (error) {
-                                    console.error('Error updating day:', error);
-                                    alert('Failed to update day');
-                                  }
-                                }}
-                            >
-                              <option value="Saturday">Saturday</option>
-                              <option value="Sunday">Sunday</option>
-                            </select>
-                          </td>
-
-                          <td>
-                            <select
-                                aria-label="Change timeslot"
-                                value={student.student_timeslot}
-                                onChange={async (e) => {
-                                  const newTimeslot = e.target.value;
-                                  try {
-                                    const { error } = await supabase
-                                        .from('students')
-                                        .update({ student_timeslot: newTimeslot, updated_at: new Date().toISOString() })
-                                        .eq('student_id', student.student_id);
-                                    if (error) throw error;
-                                    setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_timeslot: newTimeslot, updated_at: new Date().toISOString() } : s));
-                                  } catch (error) {
-                                    console.error('Error updating timeslot:', error);
-                                    alert('Failed to update timeslot');
-                                  }
-                                }}
-                            >
-                              <option value="8-10am">8-10am</option>
-                              <option value="10-12pm">10-12pm</option>
-                              <option value="1-3pm">1-3pm</option>
-                              <option value="2-4pm">2-4pm</option>
-                              <option value="3-5pm">3-5pm</option>
-                              <option value="4-6pm">4-6pm</option>
-                            </select>
-                          </td>
-
-                          <td>
-                            <select
-                                aria-label="Change level"
-                                value={student.student_levelofplay}
-                                onChange={async (e) => {
-                                  const newLevel = e.target.value;
-                                  try {
-                                    const { error } = await supabase
-                                        .from('students')
-                                        .update({ student_levelofplay: newLevel, updated_at: new Date().toISOString() })
-                                        .eq('student_id', student.student_id);
-                                    if (error) throw error;
-                                    setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_levelofplay: newLevel, updated_at: new Date().toISOString() } : s));
-                                  } catch (error) {
-                                    console.error('Error updating level:', error);
-                                    alert('Failed to update level');
-                                  }
-                                }}
-                            >
-                              <option value="Beginner">Beginner</option>
-                              <option value="Intermediate">Intermediate</option>
-                              <option value="Advanced">Advanced</option>
-                            </select>
-                          </td>
-
-                          <td className="col-price">
-                            <input
-                                className="price-input"
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={student.price || 0}
-                                aria-label="Price in SGD"
-                                onChange={async (e) => {
-                                  const newPrice = parseFloat(e.target.value || '0');
-                                  try {
-                                    const { error } = await supabase.from('students').update({ price: newPrice, updated_at: new Date().toISOString() }).eq('student_id', student.student_id);
-                                    if (error) throw error;
-                                    setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, price: newPrice, updated_at: new Date().toISOString() } : s));
-                                  } catch (error) {
-                                    console.error('Error updating price:', error);
-                                    alert('Failed to update price');
-                                  }
-                                }}
-                            />
-                          </td>
-
-                          <td className="col-weeks">
-                            <input
-                                className="weeks-input"
-                                type="number"
-                                min="1"
-                                value={student.total_weeks || 1}
-                                aria-label="Total weeks"
-                                onChange={async (e) => {
-                                  const newTotalWeeks = parseInt(e.target.value || '1');
-                                  try {
-                                    const updates: Partial<Student> = { total_weeks: newTotalWeeks, updated_at: new Date().toISOString() };
-                                    if (newTotalWeeks < (student.weeks_completed || 0)) updates.weeks_completed = newTotalWeeks;
-                                    const { error } = await supabase.from('students').update(updates).eq('student_id', student.student_id);
-                                    if (error) throw error;
-                                    setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, ...updates, updated_at: new Date().toISOString() } : s));
-                                  } catch (error) {
-                                    console.error('Error updating total weeks:', error);
-                                    alert('Failed to update total weeks');
-                                  }
-                                }}
-                            />
-                          </td>
-
-                          <td className="col-total">{((student.price || 0) * (student.total_weeks || 1)).toFixed(2)}</td>
-
-                          <td>{student.weeks_completed || 0}/{student.total_weeks || 1}</td>
-
-                          <td>
-                            <label style={{display: 'flex', alignItems: 'center', gap: '5px'}}>
-                              <input type="checkbox" checked={student.paid ?? false} onChange={(e) => handlePaymentStatusChange(student.student_id, e.target.checked)} />
-                              {student.paid ? 'Paid' : 'Unpaid'}
-                            </label>
-                          </td>
-
-                          <td>
-                            <button onClick={async () => {
-                              if (!confirm(`Are you sure you want to delete ${student.student_name}?`)) return;
-                              try {
-                                const { data: { user } } = await supabase.auth.getUser();
-                                if (!user) throw new Error('Not authenticated');
-                                const serviceRoleClient = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-                                const { error } = await serviceRoleClient.from('students').delete().eq('student_id', student.student_id);
-                                if (error) throw error;
-                                fetchData();
-                              } catch (error) {
-                                console.error('Error deleting student:', error);
-                                alert('Delete failed');
-                              }
-                            }} className="delete-btn">Delete</button>
-                          </td>
-                        </tr>
-                    ))}
+                    {searchResults.map(student => {
+                      const used = (student.attended ?? 0) + (student.missed ?? 0);
+                      const finished = used >= (student.total_weeks ?? 0);
+                      return (
+                          <tr key={student.student_id}>
+                            <td>{student.student_name}</td>
+                            <td>{student.student_day}</td>
+                            <td>{student.student_timeslot}</td>
+                            <td>{student.student_levelofplay}</td>
+                            <td className="col-price">{(student.price || 0).toFixed(2)}</td>
+                            <td className="col-weeks">{student.total_weeks || 1}</td>
+                            <td className="lessons-count">{student.attended ?? 0}</td>
+                            <td className="missed-count">{student.missed ?? 0}</td>
+                            <td className="col-total">{(((student.price || 0) * (student.total_weeks || 1))).toFixed(2)}</td>
+                            <td>
+                              <label style={{display:'flex',alignItems:'center',gap:5}}>
+                                <input type="checkbox" checked={student.paid ?? false} onChange={(e) => handlePaymentStatusChange(student.student_id, e.target.checked)} />
+                                {student.paid ? 'Paid' : 'Unpaid'}
+                              </label>
+                            </td>
+                            <td>
+                              <div style={{display:'flex',gap:10}}>
+                                <button onClick={() => handleDelete(student.student_id)} className="delete-btn">Delete</button>
+                                { finished && !student.paid && <em style={{color:'#b91c1c'}}>Finish used — requires payment</em> }
+                              </div>
+                            </td>
+                          </tr>
+                      );
+                    })}
                     </tbody>
                   </table>
                 </div>
@@ -670,5 +480,5 @@ export default function PaymentPage() {
           </div>
         </main>
       </div>
-  )
+  );
 }

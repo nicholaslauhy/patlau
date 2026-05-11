@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Validate action type
-        const validActions = ['mark', 'makeup', 'undo', 'reset', 'delete'];
+        const validActions = ['mark', 'makeup', 'undo', 'reset', 'delete', 'missed'];
         if (!validActions.includes(action)) {
             return NextResponse.json(
                 { error: `Invalid action. Must be one of: ${validActions.join(', ')}` },

@@ -31,7 +31,6 @@ export default function DashboardPage() {
   const timeslots = ['all', '8-10am', '10-12pm', '1-3pm', '2-4pm', '3-5pm', '4-6pm'];
   const levels = ['all', 'Beginner', 'Intermediate', 'Advanced'];
 
-  // Fetch user info on mount
   useEffect(() => {
     const loadUserName = async () => {
       try {
@@ -63,13 +62,22 @@ export default function DashboardPage() {
     checkAuth();
   }, [router]);
 
-  const logAuditAction = async (studentId: string, action: 'mark' | 'makeup' | 'undo' | 'delete' | 'reset') => {
+  // temporary: expose supabase client to the browser console for debugging
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).supabase = supabase;
+      console.log('[debug] window.supabase is available for debugging');
+    }
+    return () => {
+      if (typeof window !== 'undefined') (window as any).supabase = undefined;
+    };
+  }, []);
+
+  const logAuditAction = async (studentId: string, action: 'mark' | 'makeup' | 'undo' | 'delete' | 'reset' | 'missed') => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
-
       if (!token) return;
-
       await fetch('/api/audit/log-attendance', {
         method: 'POST',
         headers: {
@@ -88,19 +96,15 @@ export default function DashboardPage() {
     setMessage(null);
     try {
       let query = supabase.from('students').select('*');
-
       if (selectedDay !== 'all') query = query.eq('student_day', selectedDay);
       if (selectedTimeslot !== 'all') query = query.eq('student_timeslot', selectedTimeslot);
       if (selectedLevel !== 'all') query = query.eq('student_levelofplay', selectedLevel);
-
       const { data, error } = await query;
-
       if (error) {
         setSearchResults([]);
         setMessage('Failed to load student records.');
         return;
       }
-
       if (Array.isArray(data) && data.length > 0) {
         setSearchResults(data);
       } else {
@@ -115,14 +119,13 @@ export default function DashboardPage() {
     }
   };
 
+  // Delete student (server route)
   const deleteStudent = async (studentId: string, studentName?: string) => {
     if (!confirm(`Delete ${studentName ?? 'this student'}? This cannot be undone.`)) return;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
-
       if (!token) throw new Error('Not authenticated');
-
       const response = await fetch('/api/students/delete', {
         method: 'POST',
         headers: {
@@ -131,12 +134,10 @@ export default function DashboardPage() {
         },
         body: JSON.stringify({ student_id: studentId })
       });
-
       if (!response.ok) {
         const errData = await response.json();
         throw new Error(errData.error || 'Delete failed');
       }
-
       await logAuditAction(studentId, 'delete');
       fetchData();
     } catch (err: any) {
@@ -144,57 +145,100 @@ export default function DashboardPage() {
     }
   };
 
+  // Replace existing handleDeleteLastAttendance with this
   const handleDeleteLastAttendance = async (studentId: string) => {
     try {
+      // get current user (for logging)
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // Get current user's ID
-      const currentUserId = user.id;
-
-      // Fetch the student data
+      // load the current student row
       const { data: studentData, error: fetchError } = await supabase
           .from('students')
           .select('*')
           .eq('student_id', studentId)
           .single();
-
       if (fetchError || !studentData) throw fetchError || new Error('Student not found');
 
-      if (!studentData.attendance_records || studentData.attendance_records.length === 0) {
-        alert('No attendance records to undo.');
-        return;
-      }
-
-      // Check who performed the last mark/makeup action
+      // fetch the latest audit action for this student (mark/makeup/missed)
       const { data: auditLogs, error: auditError } = await supabase
           .from('student_audit')
           .select('*')
           .eq('student_id', studentId)
-          .in('action', ['mark', 'makeup'])
+          .in('action', ['mark', 'makeup', 'missed'])
           .order('created_at', { ascending: false })
           .limit(1);
 
       if (auditError) throw auditError;
 
-      // Check if there's an audit log and if current user performed it
-      if (auditLogs && auditLogs.length > 0) {
-        const lastAction = auditLogs[0];
-        if (lastAction.created_by !== currentUserId) {
-          alert('You can only undo actions you have committed.');
+      let lastAction = Array.isArray(auditLogs) && auditLogs.length > 0 ? auditLogs[0] : null;
+
+      // If there is no audit row, offer a best-effort undo based on counters
+      if (!lastAction) {
+        const ok = confirm('No audit action found. Attempt best-effort undo based on current counters? Click OK to proceed or Cancel to abort.');
+        if (!ok) return;
+
+        let newAttended = (studentData.attended ?? 0);
+        let newMissed = (studentData.missed ?? 0);
+        let newRecords = Array.isArray(studentData.attendance_records) ? [...studentData.attendance_records] : [];
+
+        if (newAttended > 0) {
+          newAttended = Math.max(0, newAttended - 1);
+          if (newRecords.length > 0) newRecords.pop();
+        } else if (newMissed > 0) {
+          newMissed = Math.max(0, newMissed - 1);
+        } else {
+          alert('Nothing to undo.');
           return;
         }
+
+        const { data: updatedStudent, error } = await supabase
+            .from('students')
+            .update({
+              attended: newAttended,
+              missed: newMissed,
+              attendance_records: newRecords,
+              updated_at: new Date().toISOString()
+            })
+            .eq('student_id', studentId)
+            .select()
+            .single();
+
+        if (error || !updatedStudent) throw error || new Error('Update failed');
+
+        // Log undo and refresh UI
+        await logAuditAction(studentId, 'undo');
+        await fetchData();
+        return;
       }
 
-      // Perform the undo
-      const updatedRecords = [...(studentData.attendance_records || [])];
-      updatedRecords.pop();
+      // Reverse the last action (mark/makeup/missed)
+      let newAttended = (studentData.attended ?? 0);
+      let newMissed = (studentData.missed ?? 0);
+      let newRecords = Array.isArray(studentData.attendance_records) ? [...studentData.attendance_records] : [];
 
+      if (lastAction.action === 'mark') {
+        newAttended = Math.max(0, newAttended - 1);
+        if (newRecords.length > 0) newRecords.pop();
+      } else if (lastAction.action === 'missed') {
+        newMissed = Math.max(0, newMissed - 1);
+      } else if (lastAction.action === 'makeup') {
+        // makeup did missed--, attended++; undo does attended--, missed++
+        newAttended = Math.max(0, newAttended - 1);
+        newMissed = newMissed + 1;
+        if (newRecords.length > 0) newRecords.pop();
+      } else {
+        alert('Last action cannot be undone.');
+        return;
+      }
+
+      // Apply update to students table
       const { data: updatedStudent, error } = await supabase
           .from('students')
           .update({
-            attendance_records: updatedRecords,
-            weeks_completed: Math.max(0, updatedRecords.length),
+            attended: newAttended,
+            missed: newMissed,
+            attendance_records: newRecords,
             updated_at: new Date().toISOString()
           })
           .eq('student_id', studentId)
@@ -203,13 +247,17 @@ export default function DashboardPage() {
 
       if (error || !updatedStudent) throw error || new Error('Update failed');
 
-      setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
+      // Log undo in audit table (so history is preserved)
       await logAuditAction(studentId, 'undo');
+
+      // refresh UI
+      await fetchData();
     } catch (err: any) {
       alert(`Failed to undo attendance: ${err?.message ?? 'Unknown error'}`);
     }
   };
 
+  // Mark attended (only on student's scheduled day)
   const handleAttendanceClick = async (studentId: string) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -220,7 +268,6 @@ export default function DashboardPage() {
           .select('*')
           .eq('student_id', studentId)
           .single();
-
       if (fetchError || !studentData) throw fetchError || new Error('Student not found');
 
       const today = new Date().getDay();
@@ -233,14 +280,22 @@ export default function DashboardPage() {
         return;
       }
 
-      const newWeeksCompleted = Math.min((studentData.weeks_completed || 0) + 1, studentData.total_weeks);
-      const newAttendance = [...(studentData.attendance_records || []), new Date().toISOString()];
+      const attended = (studentData.attended ?? 0);
+      const missed = (studentData.missed ?? 0);
+      const totalWeeks = studentData.total_weeks ?? 0;
+      if ((attended + missed) >= totalWeeks) {
+        alert('Total lessons for this subscription have already been used.');
+        return;
+      }
+
+      const newAttended = attended + 1;
+      const newRecords = Array.isArray(studentData.attendance_records) ? [...studentData.attendance_records, new Date().toISOString()] : [new Date().toISOString()];
 
       const { data: updatedStudent, error } = await supabase
           .from('students')
           .update({
-            attendance_records: newAttendance,
-            weeks_completed: newWeeksCompleted,
+            attended: newAttended,
+            attendance_records: newRecords,
             updated_at: new Date().toISOString()
           })
           .eq('student_id', studentId)
@@ -256,6 +311,7 @@ export default function DashboardPage() {
     }
   };
 
+  // Makeup: convert one missed to attended
   const handleMakeupAttendance = async (studentId: string) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -266,17 +322,32 @@ export default function DashboardPage() {
           .select('*')
           .eq('student_id', studentId)
           .single();
-
       if (fetchError || !studentData) throw fetchError || new Error('Student not found');
 
-      const newWeeksCompleted = Math.min((studentData.weeks_completed || 0) + 1, studentData.total_weeks);
-      const newAttendance = [...(studentData.attendance_records || []), new Date().toISOString()];
+      const attended = (studentData.attended ?? 0);
+      const missed = (studentData.missed ?? 0);
+      const totalWeeks = studentData.total_weeks ?? 0;
+
+      if (missed <= 0) {
+        alert('No missed lessons available to convert to makeup.');
+        return;
+      }
+
+      if ((attended + missed) > totalWeeks) {
+        alert('Cannot makeup because subscription total would be exceeded.');
+        return;
+      }
+
+      const newAttended = attended + 1;
+      const newMissed = Math.max(0, missed - 1);
+      const newRecords = Array.isArray(studentData.attendance_records) ? [...studentData.attendance_records, new Date().toISOString()] : [new Date().toISOString()];
 
       const { data: updatedStudent, error } = await supabase
           .from('students')
           .update({
-            attendance_records: newAttendance,
-            weeks_completed: newWeeksCompleted,
+            attended: newAttended,
+            missed: newMissed,
+            attendance_records: newRecords,
             updated_at: new Date().toISOString()
           })
           .eq('student_id', studentId)
@@ -292,18 +363,74 @@ export default function DashboardPage() {
     }
   };
 
-  const handleResetCourse = async (studentId: string) => {
+  // Missed: mark a lesson as missed (no attendance record appended)
+  const handleMissed = async (studentId: string) => {
     try {
-      if (!confirm('Reset this course? This will clear all attendance records.')) return;
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
+
+      const { data: studentData, error: fetchError } = await supabase
+          .from('students')
+          .select('*')
+          .eq('student_id', studentId)
+          .single();
+      if (fetchError || !studentData) throw fetchError || new Error('Student not found');
+
+      const attended = (studentData.attended ?? 0);
+      const missed = (studentData.missed ?? 0);
+      const totalWeeks = studentData.total_weeks ?? 0;
+
+      if ((attended + missed) >= totalWeeks) {
+        alert('Total lessons for this subscription have already been used.');
+        return;
+      }
+
+      const newMissed = missed + 1;
 
       const { data: updatedStudent, error } = await supabase
           .from('students')
           .update({
+            missed: newMissed,
+            updated_at: new Date().toISOString()
+          })
+          .eq('student_id', studentId)
+          .select()
+          .single();
+
+      if (error || !updatedStudent) throw error || new Error('Update failed');
+
+      setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
+
+      // AWAIT this so the audit log is written before function returns
+      await logAuditAction(studentId, 'missed');
+    } catch (err: any) {
+      alert(`Failed to mark missed: ${err?.message ?? 'Unknown error'}`);
+    }
+  };
+
+  // Reset: clears attended/missed (only allowed if paid === true)
+  const handleResetCourse = async (studentId: string) => {
+    if (!confirm('Reset this course? This will clear attended and missed counts.')) return;
+    try {
+      const student = searchResults.find(s => s.student_id === studentId);
+      if (!student) throw new Error('Student not found');
+
+      const paid = Boolean(student.paid ?? false);
+      if (!paid) {
+        const override = confirm('Student must have paid for a new subscription before reset.\n\nClick OK to force reset anyway, or Cancel to abort.');
+        if (!override) {
+          alert('Reset cancelled.');
+          return;
+        }
+      }
+
+      const { data: updatedStudent, error } = await supabase
+          .from('students')
+          .update({
+            attended: 0,
+            missed: 0,
             attendance_records: [],
-            weeks_completed: 0,
+            paid: false,
             updated_at: new Date().toISOString()
           })
           .eq('student_id', studentId)
@@ -314,6 +441,7 @@ export default function DashboardPage() {
 
       setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
       await logAuditAction(studentId, 'reset');
+      alert('Course reset successfully!');
     } catch (err: any) {
       alert(`Failed to reset course: ${err?.message ?? 'Unknown error'}`);
     }
@@ -326,20 +454,17 @@ export default function DashboardPage() {
         fetchData();
         return;
       }
-
       try {
         const response = await fetch('/api/search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ searchTerm: term }),
         });
-
         if (!response.ok) {
           setSearchResults([]);
           setMessage('Search failed.');
           return;
         }
-
         const data = await response.json();
         setSearchResults(data.results || []);
       } catch {
@@ -347,7 +472,6 @@ export default function DashboardPage() {
         setMessage('Search failed.');
       }
     }, 300);
-
     return () => clearTimeout(handler);
   }, [searchTerm]);
 
@@ -355,7 +479,6 @@ export default function DashboardPage() {
     fetchData();
   }, [selectedDay, selectedTimeslot, selectedLevel]);
 
-  // Check if day/timeslot/level are editable based on user role
   const canEditStudentFields = userRole === 'superuser';
   const isSuperuser = userRole === 'superuser';
 
@@ -452,18 +575,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="filter-buttons">
-              <button
-                  onClick={() => {
-                    setSelectedDay('all');
-                    setSelectedTimeslot('all');
-                    setSelectedLevel('all');
-                    setSearchTerm('');
-                    fetchData();
-                  }}
-                  className="filter-button secondary"
-              >
-                Reset
-              </button>
+              <button onClick={() => { setSelectedDay('all'); setSelectedTimeslot('all'); setSelectedLevel('all'); setSearchTerm(''); fetchData(); }} className="filter-button secondary">Reset</button>
               <button onClick={() => fetchData()} className="filter-button">Apply</button>
             </div>
           </div>
@@ -481,15 +593,17 @@ export default function DashboardPage() {
                       <th>Day</th>
                       <th>Timeslot</th>
                       <th>Level</th>
-                      <th className="lessons-header">Lessons</th>
-                      <th style={{ width: userRole === 'superuser' ? 340 : 220 }}>Actions</th>
+                      <th>Attended</th>
+                      <th>Missed</th>
+                      <th style={{ width: userRole === 'superuser' ? 420 : 280 }}>Actions</th>
                     </tr>
                     </thead>
                     <tbody>
                     {searchResults.map((student) => {
-                      const attendanceCount = Array.isArray(student.attendance_records)
-                          ? student.attendance_records.length
-                          : (student.weeks_completed ?? 0);
+                      const attended = student.attended ?? 0;
+                      const missed = student.missed ?? 0;
+                      const lessonsUsed = attended + missed;
+                      const finished = lessonsUsed >= (student.total_weeks ?? 0);
 
                       return (
                           <tr key={student.student_id}>
@@ -507,9 +621,7 @@ export default function DashboardPage() {
                                               .from('students')
                                               .update({ student_day: newDay, updated_at: new Date().toISOString() })
                                               .eq('student_id', student.student_id);
-
                                           if (error) throw error;
-
                                           setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_day: newDay, updated_at: new Date().toISOString() } : s));
                                         } catch (err: any) {
                                           alert(`Failed to update day: ${err?.message ?? 'Unknown error'}`);
@@ -521,10 +633,11 @@ export default function DashboardPage() {
                                   </select>
                               ) : (
                                   <span title="Only superusers can change this" style={{ cursor: 'not-allowed', opacity: 0.7 }}>
-                                    {student.student_day}
-                                  </span>
+                              {student.student_day}
+                            </span>
                               )}
                             </td>
+
                             <td>
                               {canEditStudentFields ? (
                                   <select
@@ -538,9 +651,7 @@ export default function DashboardPage() {
                                               .from('students')
                                               .update({ student_timeslot: newTimeslot, updated_at: new Date().toISOString() })
                                               .eq('student_id', student.student_id);
-
                                           if (error) throw error;
-
                                           setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_timeslot: newTimeslot, updated_at: new Date().toISOString() } : s));
                                         } catch (err: any) {
                                           alert(`Failed to update timeslot: ${err?.message ?? 'Unknown error'}`);
@@ -556,10 +667,11 @@ export default function DashboardPage() {
                                   </select>
                               ) : (
                                   <span title="Only superusers can change this" style={{ cursor: 'not-allowed', opacity: 0.7 }}>
-                                    {student.student_timeslot}
-                                  </span>
+                              {student.student_timeslot}
+                            </span>
                               )}
                             </td>
+
                             <td>
                               {canEditStudentFields ? (
                                   <select
@@ -573,9 +685,7 @@ export default function DashboardPage() {
                                               .from('students')
                                               .update({ student_levelofplay: newLevel, updated_at: new Date().toISOString() })
                                               .eq('student_id', student.student_id);
-
                                           if (error) throw error;
-
                                           setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_levelofplay: newLevel, updated_at: new Date().toISOString() } : s));
                                         } catch (err: any) {
                                           alert(`Failed to update level: ${err?.message ?? 'Unknown error'}`);
@@ -588,27 +698,48 @@ export default function DashboardPage() {
                                   </select>
                               ) : (
                                   <span title="Only superusers can change this" style={{ cursor: 'not-allowed', opacity: 0.7 }}>
-                                    {student.student_levelofplay}
-                                  </span>
+                              {student.student_levelofplay}
+                            </span>
                               )}
                             </td>
-                            <td className="lessons-count" title={`${attendanceCount} lessons attended`}>
-                              {attendanceCount}
-                            </td>
-                            <td className="actions-cell" style={{ width: userRole === 'superuser' ? 340 : 220 }}>
+
+                            <td className="lessons-count" title={`${attended} attended`}>{attended}</td>
+                            <td className="missed-count" title={`${missed} missed`}>{missed}</td>
+
+                            <td className="actions-cell" style={{ width: userRole === 'superuser' ? 420 : 280 }}>
                               <div className="btn-group">
-                                <button className="attendance-btn" onClick={() => handleAttendanceClick(student.student_id)}>
+                                <button
+                                    className="attendance-btn"
+                                    onClick={() => handleAttendanceClick(student.student_id)}
+                                    disabled={finished}
+                                    title={finished ? 'Subscription lessons completed' : 'Mark attended'}
+                                >
                                   Mark
                                 </button>
-                                <button className="makeup-btn" onClick={() => handleMakeupAttendance(student.student_id)}>
+
+                                <button
+                                    className="missed-btn"
+                                    onClick={() => handleMissed(student.student_id)}
+                                    disabled={finished}
+                                    title={finished ? 'Subscription lessons completed' : 'Mark missed'}
+                                >
+                                  Missed
+                                </button>
+
+                                <button
+                                    className="makeup-btn"
+                                    onClick={() => handleMakeupAttendance(student.student_id)}
+                                    disabled={finished || (student.missed ?? 0) <= 0}
+                                    title={(student.missed ?? 0) <= 0 ? 'No missed lessons to makeup' : 'Makeup (convert one missed to attended)'}
+                                >
                                   Makeup
                                 </button>
 
                                 <button
                                     className="undo-btn"
                                     onClick={() => handleDeleteLastAttendance(student.student_id)}
-                                    disabled={attendanceCount === 0}
-                                    title={attendanceCount === 0 ? 'No attendance records to undo' : 'Undo last mark or makeup'}
+                                    disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
+                                    title={(student.attended ?? 0) + (student.missed ?? 0) === 0 ? 'No actions to undo' : 'Undo last action you performed'}
                                 >
                                   Undo
                                 </button>
