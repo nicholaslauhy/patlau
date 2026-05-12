@@ -695,7 +695,7 @@ table tbody tr:hover {
 /* -- UI tidy overrides (append to end of file) -- */
 
 .container {
-  max-width: 720px;
+  max-width: 1100px;
   padding: 1.25rem;
   margin-top: 1rem;
   min-height: calc(100vh - 48px);
@@ -877,18 +877,6 @@ header h1 {
   width: 100%;
 }
 
-/* Users table: keep table responsive without forcing wider layout */
-.users-table {
-  width: 100%;
-  overflow-x: auto;              /* allows horizontal scroll inside the box */
-}
-.users-table table {
-  width: 100%;
-  /* if you want table columns to respect widths: use table-layout: auto; */
-  table-layout: auto;
-  min-width: 0;              /* guarantees readable layout; remove or lower as desired */
-}
-
 /* Keep form controls fluid */
 .input,
 .form-input,
@@ -998,4 +986,156 @@ header h1 {
   background-color: #dbeafe;
   color: #2563eb;
   background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%232563eb'%3e%3cpath fill-rule='evenodd' d='M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z' clip-rule='evenodd'/%3e%3c/svg%3e");
+}
+
+/* Compact layout for phones in landscape so more fits on screen */
+@media (max-width: 900px) and (orientation: landscape) {
+  body {
+    height: auto !important;
+    min-height: 100dvh;
+  }
+
+  .container {
+    width: 100%;
+    max-width: 100% !important;
+    margin: 0 auto;
+    padding: 0.5rem !important;
+    height: auto !important;
+    min-height: 100dvh;
+  }
+
+  header {
+    height: auto;
+    padding: 0.35rem 0;
+  }
+
+  .dashboard-header {
+    padding: 0.35rem 0;
+    gap: 0.5rem;
+  }
+
+  .page-title {
+    font-size: 1rem;
+  }
+
+  .user-controls {
+    gap: 0.35rem;
+    flex-wrap: wrap;
+  }
+
+  .share-btn {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.85rem;
+  }
+
+  main {
+    padding: 0.5rem 0 !important;
+    align-items: flex-start;
+  }
+
+  .search-box,
+  .filter-box,
+  .payment-summary,
+  .form-card,
+  .table-container {
+    width: 100%;
+    max-width: 100% !important;
+  }
+
+  .filter-box {
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .filter-grid {
+    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  .filter-input,
+  .student-field-select,
+  .price-input,
+  .weeks-input {
+    font-size: 0.9rem;
+    padding: 0.5rem 0.65rem;
+  }
+
+  table th,
+  table td {
+    padding: 0.5rem 0.6rem;
+    font-size: 0.85rem;
+  }
+
+  .table-container {
+    overflow-x: auto;
+  }
+
+  .attendance-btn,
+  .missed-btn,
+  .makeup-btn,
+  .undo-btn,
+  .reset-btn,
+  .delete-btn {
+    padding: 0.35rem 0.55rem;
+    font-size: 0.78rem;
+  }
+}
+
+/* ===== clean table scroll + stable layout ===== */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  margin-top: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  background: var(--surface);
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-scroll > table {
+  width: 100%;
+  min-width: 980px; /* allows horizontal scroll on smaller windows */
+  border-collapse: collapse;
+  table-layout: auto;
+}
+
+/* restore normal cell behavior */
+.table-scroll th,
+.table-scroll td {
+  white-space: normal;
+}
+
+/* compact numeric columns */
+.lessons-count,
+.missed-count,
+.col-price,
+.col-weeks {
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* stable actions column (no ballooning) */
+.actions-cell {
+  width: 260px;
+  min-width: 220px;
+  max-width: 280px;
+  vertical-align: top;
+}
+
+.actions-cell .btn-group,
+.actions-cell .actions-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.actions-cell button {
+  white-space: nowrap;
 }

@@ -465,6 +465,7 @@ export default function PaymentPage() {
 
             {!isLoading && Array.isArray(searchResults) && searchResults.length > 0 && (
                 <div className="table-container">
+                  <div className="user-scroll">
                   <table>
                     <thead>
                     <tr>
@@ -505,6 +506,7 @@ export default function PaymentPage() {
                     })}
                     </tbody>
                   </table>
+                  </div>
                 </div>
             )}
           </div>

@@ -137,6 +137,7 @@ export default function AttendancePage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
+      // Current student state
       const { data: studentData, error: fetchError } = await supabase
           .from('students')
           .select('*')
@@ -147,32 +148,46 @@ export default function AttendancePage() {
         throw fetchError || new Error('Student not found');
       }
 
+      // Pull latest audit trail for this student (include undo entries)
       const { data: auditLogs, error: auditError } = await supabase
           .from('student_audit')
-          .select('*')
+          .select('action, created_at')
           .eq('student_id', studentId)
-          .in('action', ['mark', 'makeup', 'missed'])
+          .in('action', ['mark', 'missed', 'makeup', 'undo'])
           .order('created_at', { ascending: false })
-          .limit(1);
+          .limit(100);
 
       if (auditError) throw auditError;
 
-      if (!auditLogs || auditLogs.length === 0) {
-        alert('No audit log found. Undoing last recorded action...');
+      const logs = auditLogs || [];
 
+      // Build "unconsumed" action stack:
+      // - mark/missed/makeup push
+      // - undo pops one
+      const stack: Array<'mark' | 'missed' | 'makeup'> = [];
+      for (let i = logs.length - 1; i >= 0; i--) {
+        const a = logs[i].action;
+        if (a === 'mark' || a === 'missed' || a === 'makeup') {
+          stack.push(a);
+        } else if (a === 'undo') {
+          if (stack.length > 0) stack.pop();
+        }
+      }
+
+      // last unconsumed action to reverse now
+      const lastAction = stack.length > 0 ? stack[stack.length - 1] : null;
+
+      // Fallback if no audit action found: best effort from counters
+      if (!lastAction) {
         let newAttended = studentData.attended ?? 0;
         let newMissed = studentData.missed ?? 0;
-
         let newRecords = Array.isArray(studentData.attendance_records)
             ? [...studentData.attendance_records]
             : [];
 
         if (newAttended > 0) {
           newAttended = Math.max(0, newAttended - 1);
-
-          if (newRecords.length > 0) {
-            newRecords.pop();
-          }
+          if (newRecords.length > 0) newRecords.pop();
         } else if (newMissed > 0) {
           newMissed = Math.max(0, newMissed - 1);
         } else {
@@ -192,42 +207,31 @@ export default function AttendancePage() {
             .select()
             .single();
 
-        if (error || !updatedStudent) {
-          throw error || new Error('Update failed');
-        }
+        if (error || !updatedStudent) throw error || new Error('Update failed');
 
-        setSearchResults(prev =>
-            prev.map(s => s.student_id === studentId ? updatedStudent : s)
-        );
-
+        setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
         await logAudit(studentId, 'undo');
         return;
       }
 
-      const lastAction = auditLogs[0];
-
+      // Reverse lastAction
       let newAttended = studentData.attended ?? 0;
       let newMissed = studentData.missed ?? 0;
-
       let newRecords = Array.isArray(studentData.attendance_records)
           ? [...studentData.attendance_records]
           : [];
 
-      if (lastAction.action === 'mark') {
+      if (lastAction === 'mark') {
         newAttended = Math.max(0, newAttended - 1);
-
-        if (newRecords.length > 0) {
-          newRecords.pop();
-        }
-      } else if (lastAction.action === 'missed') {
+        if (newRecords.length > 0) newRecords.pop();
+      } else if (lastAction === 'missed') {
         newMissed = Math.max(0, newMissed - 1);
-      } else if (lastAction.action === 'makeup') {
+      } else if (lastAction === 'makeup') {
+        // makeup = attended +1, missed -1
+        // undo makeup => attended -1, missed +1
         newAttended = Math.max(0, newAttended - 1);
         newMissed = newMissed + 1;
-
-        if (newRecords.length > 0) {
-          newRecords.pop();
-        }
+        if (newRecords.length > 0) newRecords.pop();
       }
 
       const { data: updatedStudent, error } = await supabase
@@ -242,30 +246,12 @@ export default function AttendancePage() {
           .select()
           .single();
 
-      if (error || !updatedStudent) {
-        throw error || new Error('Update failed');
-      }
+      if (error || !updatedStudent) throw error || new Error('Update failed');
 
-      setSearchResults(prev =>
-          prev.map(s => s.student_id === studentId ? updatedStudent : s)
-      );
+      setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
 
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-
-      if (token) {
-        await fetch('/api/audit/log-attendance', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            student_id: studentId,
-            action: 'undo'
-          })
-        });
-      }
+      // IMPORTANT: write undo so next undo consumes previous action correctly
+      await logAudit(studentId, 'undo');
     } catch (err: any) {
       console.error('Undo error:', err);
       alert(`Failed to undo: ${err?.message ?? 'Unknown error'}`);
@@ -585,6 +571,7 @@ export default function AttendancePage() {
             {!isLoading && message && <p className="dashboard-error-message">{message}</p>}
             {!isLoading && Array.isArray(searchResults) && searchResults.length > 0 && (
                 <div className="table-container">
+                  <div className="table-scroll">
                   <table>
                     <thead>
                     <tr>
@@ -739,7 +726,7 @@ export default function AttendancePage() {
                             <td className="lessons-count" title={`${attended} attended`}>{attended}</td>
                             <td className="missed-count" title={`${missed} missed`}>{missed}</td>
 
-                            <td style={{ width: 500 }}>
+                            <td className="actions-cell">
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {/* Row 1: Mark / Missed / Makeup */}
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -831,6 +818,7 @@ export default function AttendancePage() {
                     })}
                     </tbody>
                   </table>
+                  </div>
                 </div>
             )}
           </div>
