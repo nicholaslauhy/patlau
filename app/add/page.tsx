@@ -85,6 +85,12 @@ export default function AddStudent() {
       return;
     }
 
+    if (userRole === 'superuser' && (!formData.price || formData.price === 0 || !formData.total_weeks || formData.total_weeks === 0)) {
+      setError('Price and total weeks are required');
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
       const submitData = {
         student_name: formData.student_name.trim(),
@@ -127,13 +133,18 @@ export default function AddStudent() {
         return prev;
       }
 
-      // Only convert to number for numeric fields (not student_name)
-      const numericFields = ['price', 'total_weeks', 'weeks_completed'];
-      const finalValue = numericFields.includes(name) ? Number(value) : value;
+      // For price and total_weeks: allow empty string, convert to number if not empty
+      if (name === 'price' || name === 'total_weeks') {
+        const parsedValue = value === '' ? null : (name === 'price' ? parseFloat(value) : parseInt(value));
+        return {
+          ...prev,
+          [name]: parsedValue
+        };
+      }
 
       return {
         ...prev,
-        [name]: finalValue
+        [name]: value
       };
     });
   };
@@ -290,31 +301,37 @@ export default function AddStudent() {
                 {userRole === 'superuser' && (
                     <>
                       <div className="form-group">
-                        <label htmlFor="price">Price (S$) *</label>
+                        <label htmlFor="price">
+                          Price (S$) *
+                          {(!formData.price && formData.price !== 0) && <span style={{ color: '#ef4444' }}> (Required)</span>}
+                        </label>
                         <input
                             type="number"
                             id="price"
                             name="price"
-                            value={formData.price}
+                            value={formData.price ?? ''}
                             onChange={handleChange}
                             min="0"
                             step="0.01"
-                            required
-                            placeholder="0.00"
+                            placeholder="Enter price"
+                            style={{ borderColor: (!formData.price && formData.price !== 0) ? '#ef4444' : 'inherit' }}
                         />
                       </div>
 
                       <div className="form-group">
-                        <label htmlFor="total_weeks">Total Weeks *</label>
+                        <label htmlFor="total_weeks">
+                          Total Weeks *
+                          {(!formData.total_weeks || formData.total_weeks === 0) && <span style={{ color: '#ef4444' }}> (Required)</span>}
+                        </label>
                         <input
                             type="number"
                             id="total_weeks"
                             name="total_weeks"
-                            value={formData.total_weeks}
+                            value={formData.total_weeks ?? ''}
                             onChange={handleChange}
                             min="1"
-                            required
-                            placeholder="1"
+                            placeholder="Enter weeks"
+                            style={{ borderColor: (!formData.total_weeks || formData.total_weeks === 0) ? '#ef4444' : 'inherit' }}
                         />
                       </div>
                     </>

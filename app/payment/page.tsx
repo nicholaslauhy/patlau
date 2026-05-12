@@ -63,6 +63,21 @@ export default function PaymentPage() {
   const timeslots = ['all', '8-10am', '10-12pm', '1-3pm', '2-4pm', '3-5pm', '4-6pm'];
   const levels = ['all', 'Beginner', 'Intermediate', 'Advanced'];
 
+  const sendPaymentStatusTelegram = async (studentName: string, amount: number, recordedAt: string, isPaid: boolean) => {
+    const message =
+        `${isPaid ? '✅ Payment Received!' : '↩️ Payment Reversed!'}\n\n` +
+        `Student: ${studentName}\n` +
+        `Amount: ${isPaid ? '+' : '-'}S$${Math.abs(amount).toFixed(2)}\n` +
+        `Recorded At: ${new Date(recordedAt).toLocaleString()}\n` +
+        `Status: ${isPaid ? 'Paid' : 'Unpaid'}`;
+
+    await fetch('/api/telegram-reminder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+  };
+
   const sendPeriodSummary = async (totalAmount: number, startDate: Date, endDate: Date) => {
     try {
       const { data: payments } = await supabase
@@ -86,9 +101,10 @@ export default function PaymentPage() {
           })
       );
 
-      const paymentLines = paymentDetails.map(p =>
-          `- ${p.student_name}: S$${Math.abs(p.amount).toFixed(2)} (${new Date(p.recorded_at).toLocaleDateString()})`
-      ).join('\n');
+      const paymentLines = paymentDetails.map(p => {
+        const sign = p.amount >= 0 ? '+' : '-';
+        return `- ${p.student_name}: ${sign}S$${Math.abs(p.amount).toFixed(2)} (${new Date(p.recorded_at).toLocaleDateString()})`;
+      }).join('\n');
 
       const message = `📊 Payment Period Summary 📊\n\n` +
           `Period: ${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}\n` +
@@ -205,6 +221,7 @@ export default function PaymentPage() {
 
       const now = new Date();
       const studentAmount = (student.price || 0) * (student.total_weeks || 1);
+      const historyAmount = newPaidStatus ? studentAmount : -studentAmount;
       const newAmount = newPaidStatus ? paidCount + studentAmount : paidCount - studentAmount;
 
       const { error: updateError } = await supabase
@@ -229,14 +246,27 @@ export default function PaymentPage() {
           .from('payment_history')
           .insert({
             student_id: studentId,
-            amount: newPaidStatus ? studentAmount : -studentAmount,
+            amount: historyAmount,
             recorded_at: now.toISOString()
           });
 
       if (historyError) throw new Error('Failed to record payment history');
 
+      await sendPaymentStatusTelegram(
+          student.student_name,
+          studentAmount,
+          now.toISOString(),
+          newPaidStatus
+      );
+
       setPaidCount(newAmount);
-      setSearchResults(prev => prev.map(s => s.student_id === studentId ? { ...s, paid: newPaidStatus, updated_at: now.toISOString() } : s));
+      setSearchResults(prev =>
+          prev.map(s =>
+              s.student_id === studentId
+                  ? { ...s, paid: newPaidStatus, updated_at: now.toISOString() }
+                  : s
+          )
+      );
       setLastUpdated(`Payment recorded at ${now.toLocaleString()}`);
       setTimeout(fetchPaidCount, 500);
     } catch (error) {
