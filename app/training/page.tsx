@@ -4,6 +4,7 @@ import { type CSSProperties, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
+import AppHeader from './../components/AppHeader';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 
@@ -103,7 +104,6 @@ export default function TrainingPage() {
 
     const [userName, setUserName] = useState('');
     const [userRole, setUserRole] = useState<UserRole | null>(null);
-    const [showAccountMenu, setShowAccountMenu] = useState(false);
 
     const [students, setStudents] = useState<Student[]>([]);
     const [coaches, setCoaches] = useState<AppUser[]>([]);
@@ -345,45 +345,12 @@ export default function TrainingPage() {
 
     return (
         <div className="container">
-            <header className="dashboard-header">
-                <div className="header-left">
-                    <div className="brand" style={{ position: 'relative' }}>
-                        <button
-                            className="account-avatar-btn"
-                            onClick={() => setShowAccountMenu(!showAccountMenu)}
-                            title="View account"
-                        >
-                            👤
-                        </button>
-                        {showAccountMenu && (
-                            <div className="account-menu">
-                                <p className="account-name">{userName}</p>
-                                <p className="account-role">{userRole?.toUpperCase()}</p>
-                                <Link href="/settings" className="account-menu-link" onClick={() => setShowAccountMenu(false)}>
-                                    ⚙️ Settings
-                                </Link>
-                            </div>
-                        )}
-                    </div>
-                    <h1 className="page-title">1-on-1 Training</h1>
-                </div>
-
-                <div className="user-controls">
-                    <Link href="/dashboard" className="btn share-btn">Dashboard</Link>
-                    <Link href="/attendance" className="btn share-btn">Attendance</Link>
-                    <Link href="/payment" className="btn share-btn">Payment</Link>
-                    <Link href="/trngpayment" className="btn share-btn">1-1 Payment</Link>
-                    <button
-                        className="btn share-btn logout"
-                        onClick={async () => {
-                            await supabase.auth.signOut();
-                            router.push('/');
-                        }}
-                    >
-                        Logout
-                    </button>
-                </div>
-            </header>
+            <AppHeader
+                title="1-on-1 Training"
+                userName={userName}
+                userRole={userRole}
+                mode="dashboard"
+            />
 
             <main>
                 <div className="filter-box" style={{ width: '100%' }}>

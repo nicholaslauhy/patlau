@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
+import AppHeader from './../components/AppHeader';
 import { v4 as uuidv4 } from 'uuid';
 import './../styles.css';
 import './../dashboard/dashboard.css';
@@ -17,7 +18,6 @@ const supabase = createBrowserClient(
 export default function AddStudent() {
   const router = useRouter();
   const [userName, setUserName] = useState('');
-  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [userRole, setUserRole] = useState<'superuser' | 'admin' | 'member' | null>(null);
 
   useEffect(() => {
@@ -30,8 +30,8 @@ export default function AddStudent() {
         }
         const role = (user.user_metadata?.role as 'superuser' | 'admin' | 'member') || 'member';
 
-        // Only superuser can access /add
-        if (role !== 'superuser') {
+        // Only admins and superusers can access /add
+        if (role !== 'superuser' && role !== 'admin') {
           setUserRole(role);
           return;
         }
@@ -183,52 +183,12 @@ export default function AddStudent() {
 
   return (
       <div className="container">
-        <header className="dashboard-header">
-          <div className="header-left">
-            <div className="brand" style={{ position: 'relative' }}>
-              <button
-                  className="account-avatar-btn"
-                  onClick={() => setShowAccountMenu(!showAccountMenu)}
-                  title="View account"
-              >
-                👤
-              </button>
-
-              {showAccountMenu && (
-                  <div className="account-menu">
-                    <p className="account-name">{userName || 'User'}</p>
-                    <p className="account-role">{userRole?.toUpperCase() || 'MEMBER'}</p>
-                    <Link href="/settings" className="account-menu-link" onClick={() => setShowAccountMenu(false)}>
-                      ⚙️ Settings
-                    </Link>
-                  </div>
-              )}
-            </div>
-
-            <h1 className="page-title">Add New Student</h1>
-          </div>
-
-          <div className="user-controls">
-            <Link href="/dashboard" className="btn share-btn">Dashboard</Link>
-            <Link href="/attendance" className="btn share-btn">Attendance</Link>
-            <Link href="/payment" className="btn share-btn">Payment</Link>
-            <button
-                className="btn share-btn logout"  // Add 'logout' class
-                onClick={async () => {
-                  await supabase.auth.signOut();
-                  router.push('/');
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#dc2626 !important';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '';
-                }}
-            >
-              Logout
-            </button>
-          </div>
-        </header>
+        <AppHeader
+            title="Add New Student"
+            userName={userName}
+            userRole={userRole}
+            mode="dashboard"
+        />
 
         <main>
           <div className="form-card">

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
+import AppHeader from './../components/AppHeader';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 import './payment.css';
@@ -17,7 +18,6 @@ const supabase = createBrowserClient(
 export default function PaymentPage() {
   const router = useRouter();
   const [userName, setUserName] = useState('');
-  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [userRole, setUserRole] = useState<'superuser' | 'admin' | 'member' | null>(null);
 
   useEffect(() => {
@@ -306,28 +306,12 @@ export default function PaymentPage() {
 
   return (
       <div className="container">
-        <header className="dashboard-header">
-          <div className="header-left">
-            <div className="brand" style={{ position: 'relative' }}>
-              <button className="account-avatar-btn" onClick={() => setShowAccountMenu(!showAccountMenu)} title="View account">👤</button>
-              {showAccountMenu && (
-                  <div className="account-menu">
-                    <p className="account-name">{userName || 'User'}</p>
-                    <p className="account-role">{userRole?.toUpperCase() || 'MEMBER'}</p>
-                    <Link href="/settings" className="account-menu-link" onClick={() => setShowAccountMenu(false)}>⚙️ Settings</Link>
-                  </div>
-              )}
-            </div>
-            <h1 className="page-title">Payment</h1>
-          </div>
-
-          <div className="user-controls">
-            <Link href="/dashboard" className="btn share-btn">Dashboard</Link>
-            <Link href="/attendance" className="btn share-btn">Attendance</Link>
-            {userRole === 'superuser' && <Link href="/add" className="btn share-btn">Add Student</Link>}
-            <button className="btn share-btn logout" onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}>Logout</button>
-          </div>
-        </header>
+        <AppHeader
+            title="Payment"
+            userName={userName}
+            userRole={userRole}
+            mode="dashboard"
+        />
 
         <main>
           <div className="search-box">
@@ -466,46 +450,46 @@ export default function PaymentPage() {
             {!isLoading && Array.isArray(searchResults) && searchResults.length > 0 && (
                 <div className="table-container">
                   <div className="user-scroll">
-                  <table>
-                    <thead>
-                    <tr>
-                      <th>Name</th><th>Day</th><th>Timeslot</th><th>Level</th>
-                      <th className="col-price">Price (S$)</th><th className="col-weeks">Total Weeks</th>
-                      <th>Attended</th><th>Missed</th><th>Total Price</th><th>Payment Status</th><th>Actions</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    {searchResults.map(student => {
-                      const used = (student.attended ?? 0) + (student.missed ?? 0);
-                      const finished = used >= (student.total_weeks ?? 0);
-                      return (
-                          <tr key={student.student_id}>
-                            <td>{student.student_name}</td>
-                            <td>{student.student_day}</td>
-                            <td>{student.student_timeslot}</td>
-                            <td>{student.student_levelofplay}</td>
-                            <td className="col-price">{(student.price || 0).toFixed(2)}</td>
-                            <td className="col-weeks">{student.total_weeks || 1}</td>
-                            <td className="lessons-count">{student.attended ?? 0}</td>
-                            <td className="missed-count">{student.missed ?? 0}</td>
-                            <td className="col-total">{(((student.price || 0) * (student.total_weeks || 1))).toFixed(2)}</td>
-                            <td>
-                              <label style={{display:'flex',alignItems:'center',gap:5}}>
-                                <input type="checkbox" checked={student.paid ?? false} onChange={(e) => handlePaymentStatusChange(student.student_id, e.target.checked)} />
-                                {student.paid ? 'Paid' : 'Unpaid'}
-                              </label>
-                            </td>
-                            <td>
-                              <div style={{display:'flex',gap:10}}>
-                                <button onClick={() => handleDelete(student.student_id)} className="delete-btn">Delete</button>
-                                { finished && !student.paid && <em style={{color:'#b91c1c'}}>Finish used — requires payment</em> }
-                              </div>
-                            </td>
-                          </tr>
-                      );
-                    })}
-                    </tbody>
-                  </table>
+                    <table>
+                      <thead>
+                      <tr>
+                        <th>Name</th><th>Day</th><th>Timeslot</th><th>Level</th>
+                        <th className="col-price">Price (S$)</th><th className="col-weeks">Total Weeks</th>
+                        <th>Attended</th><th>Missed</th><th>Total Price</th><th>Payment Status</th><th>Actions</th>
+                      </tr>
+                      </thead>
+                      <tbody>
+                      {searchResults.map(student => {
+                        const used = (student.attended ?? 0) + (student.missed ?? 0);
+                        const finished = used >= (student.total_weeks ?? 0);
+                        return (
+                            <tr key={student.student_id}>
+                              <td>{student.student_name}</td>
+                              <td>{student.student_day}</td>
+                              <td>{student.student_timeslot}</td>
+                              <td>{student.student_levelofplay}</td>
+                              <td className="col-price">{(student.price || 0).toFixed(2)}</td>
+                              <td className="col-weeks">{student.total_weeks || 1}</td>
+                              <td className="lessons-count">{student.attended ?? 0}</td>
+                              <td className="missed-count">{student.missed ?? 0}</td>
+                              <td className="col-total">{(((student.price || 0) * (student.total_weeks || 1))).toFixed(2)}</td>
+                              <td>
+                                <label style={{display:'flex',alignItems:'center',gap:5}}>
+                                  <input type="checkbox" checked={student.paid ?? false} onChange={(e) => handlePaymentStatusChange(student.student_id, e.target.checked)} />
+                                  {student.paid ? 'Paid' : 'Unpaid'}
+                                </label>
+                              </td>
+                              <td>
+                                <div style={{display:'flex',gap:10}}>
+                                  <button onClick={() => handleDelete(student.student_id)} className="delete-btn">Delete</button>
+                                  { finished && !student.paid && <em style={{color:'#b91c1c'}}>Finish used — requires payment</em> }
+                                </div>
+                              </td>
+                            </tr>
+                        );
+                      })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
             )}

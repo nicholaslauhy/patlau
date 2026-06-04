@@ -5,6 +5,11 @@ import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import './styles.css';
 
+const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
 export default function Login() {
   const [emailOrUsername, setEmailOrUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -13,43 +18,38 @@ export default function Login() {
   const [showAccountMessage, setShowAccountMessage] = useState(false);
   const router = useRouter();
 
-  const supabase = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
     try {
-      // Call our custom login endpoint
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          emailOrUsername,
-          password,
-        }),
+        body: JSON.stringify({ emailOrUsername, password }),
       });
 
       const data = await response.json();
 
-      // friendly error mapping (preserve your current messages)
       if (!response.ok) {
         let msg = data?.error || 'Login failed';
-        if (msg.includes('Invalid login credentials')) msg = 'Invalid email/username or password.';
-        else if (msg.includes('email not confirmed')) msg = 'Please confirm your email first.';
-        else if (msg.toLowerCase().includes('rate limit')) msg = 'Too many attempts — try again later.';
-        else if (msg.includes('User not found')) msg = 'User not found.';
+
+        if (msg.includes('Invalid login credentials')) {
+          msg = 'Invalid email/username or password.';
+        } else if (msg.includes('email not confirmed')) {
+          msg = 'Please confirm your email first.';
+        } else if (msg.toLowerCase().includes('rate limit')) {
+          msg = 'Too many attempts — try again later.';
+        } else if (msg.includes('User not found')) {
+          msg = 'User not found.';
+        }
 
         console.error('Login failed response:', data);
         setError(msg);
         return;
       }
 
-      // Defensive: ensure a valid session object with tokens before calling setSession
       const session = data?.session;
       if (!session || !session.access_token || !session.refresh_token) {
         console.error('Login route returned invalid session:', data);
@@ -57,37 +57,35 @@ export default function Login() {
         return;
       }
 
-      try {
-        await supabase.auth.setSession({
-          access_token: session.access_token,
-          refresh_token: session.refresh_token,
-        });
-      } catch (err) {
-        console.error('setSession error', err, data);
-        setError('Login failed (session error). Try again.');
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+      });
+
+      if (sessionError) {
+        console.error('setSession error:', sessionError);
+        setError('Login failed. Please try again.');
         return;
       }
 
-      // Ensure user profile exists
       try {
-        const { data: existing } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('id', data.user.id)
-            .maybeSingle();
-
-        await supabase.from('profiles').upsert({
-          id: data.user.id,
-          name: data.user.email?.split('@')[0] || 'User',
-          created_at: new Date().toISOString(),
-        }, { onConflict: 'id' });
-      } catch {
-        // ignore profile errors
+        if (data?.user?.id) {
+          await supabase.from('profiles').upsert(
+              {
+                id: data.user.id,
+                name: data.user.email?.split('@')[0] || 'User',
+                created_at: new Date().toISOString(),
+              },
+              { onConflict: 'id' }
+          );
+        }
+      } catch (profileError) {
+        console.error('Profile upsert failed:', profileError);
       }
 
       router.push('/dashboard');
     } catch (err) {
-      console.error('Login error', err);
+      console.error('Login error:', err);
       setError('Login failed — please try again.');
     } finally {
       setIsLoading(false);
@@ -98,9 +96,6 @@ export default function Login() {
       <div className="container">
         <header>
           <h1 style={{ margin: 0 }}>PatLau</h1>
-          <div className="user-controls">
-            {/* Removed sign up button here */}
-          </div>
         </header>
 
         <main>
@@ -119,7 +114,7 @@ export default function Login() {
                     className="form-input"
                     placeholder="you@example.com or username"
                     value={emailOrUsername}
-                    onChange={e => setEmailOrUsername(e.target.value)}
+                    onChange={(e) => setEmailOrUsername(e.target.value)}
                     autoComplete="username"
                 />
               </div>
@@ -133,7 +128,7 @@ export default function Login() {
                     className="form-input"
                     placeholder="••••••••"
                     value={password}
-                    onChange={e => setPassword(e.target.value)}
+                    onChange={(e) => setPassword(e.target.value)}
                     autoComplete="current-password"
                 />
               </div>
@@ -142,8 +137,15 @@ export default function Login() {
                 {isLoading ? 'Signing in...' : 'Sign in'}
               </button>
 
-              <div style={{ marginTop: '1rem', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {/* Forgot Password Link */}
+              <div
+                  style={{
+                    marginTop: '1rem',
+                    textAlign: 'center',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.75rem',
+                  }}
+              >
                 <button
                     type="button"
                     onClick={() => router.push('/reset')}
@@ -160,7 +162,6 @@ export default function Login() {
                   Forgot password?
                 </button>
 
-                {/* Need an account button */}
                 <button
                     type="button"
                     onClick={() => setShowAccountMessage(!showAccountMessage)}
@@ -174,17 +175,18 @@ export default function Login() {
                   Need an account?
                 </button>
 
-                {/* Account message */}
                 {showAccountMessage && (
-                    <div style={{
-                      background: '#eff6ff',
-                      border: '1px solid #bfdbfe',
-                      borderRadius: '6px',
-                      padding: '10px 12px',
-                      color: '#1e40af',
-                      fontSize: '0.9rem',
-                      marginTop: '0.5rem'
-                    }}>
+                    <div
+                        style={{
+                          background: '#eff6ff',
+                          border: '1px solid #bfdbfe',
+                          borderRadius: '6px',
+                          padding: '10px 12px',
+                          color: '#1e40af',
+                          fontSize: '0.9rem',
+                          marginTop: '0.5rem',
+                        }}
+                    >
                       If you need to create an account, please contact the admin at nicholaslauhongyi@gmail.com
                     </div>
                 )}

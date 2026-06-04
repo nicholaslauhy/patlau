@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
+import { createBrowserClient } from '@supabase/ssr';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 import './settings.css';
@@ -278,35 +278,26 @@ export default function SettingsPage() {
     };
 
     // Determine which users to show to the current viewer:
-    const visibleUsers = userRole === 'admin'
-        ? users.filter(u => (u.user_metadata?.role || 'member') === 'member')
-        : users;
+    // - superusers see everyone
+    // - admins see only members
+    // - members see only themselves
+    const visibleUsers = userRole === 'superuser'
+        ? users
+        : userRole === 'admin'
+            ? users.filter(u => (u.user_metadata?.role || 'member') === 'member')
+            : users.filter(u => u.id === currentUserId);
 
     return (
         <div className="container">
             <header className="dashboard-header">
-                <h1 className="page-title">Settings</h1>
+                <div className="header-left">
+                    <h1 className="page-title">Settings</h1>
+                </div>
 
                 <div className="user-controls">
-                    <Link href="/dashboard" className="btn share-btn">Back to Dashboard</Link>
-
-                    {/* Only superusers see Attendance and Payment links */}
-                    {userRole === 'superuser' && (
-                        <>
-                            <Link href="/attendance" className="btn share-btn">Attendance</Link>
-                            <Link href="/payment" className="btn share-btn">Payment</Link>
-                        </>
-                    )}
-
-                    <button
-                        className="btn share-btn logout"
-                        onClick={async () => {
-                            await supabase.auth.signOut();
-                            router.push('/');
-                        }}
-                    >
-                        Logout
-                    </button>
+                    <Link href="/dashboard" className="btn share-btn">
+                        Return to Dashboard
+                    </Link>
                 </div>
             </header>
 

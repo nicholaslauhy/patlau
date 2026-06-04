@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
+import AppHeader from './../components/AppHeader';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 import './../payment/payment.css';
@@ -102,7 +103,6 @@ export default function TrngPaymentPage() {
     const router = useRouter();
     const [userRole, setUserRole] = useState<UserRole | null>(null);
     const [userName, setUserName] = useState('');
-    const [showAccountMenu, setShowAccountMenu] = useState(false);
 
     const [sessions, setSessions] = useState<TrainingSession[]>([]);
     const [payments, setPayments] = useState<TrainingPayment[]>([]);
@@ -484,13 +484,13 @@ export default function TrngPaymentPage() {
     const monthTotal = paidCount * TRAINING_PRICE;
     const possibleTotal = sessions.length * TRAINING_PRICE;
 
-    if (userRole === 'member' || !userRole) {
+    if (userRole !== 'superuser') {
         return (
             <div className="container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '3rem 1rem' }}>
                 <div className="form-card" style={{ maxWidth: 600, width: '100%', textAlign: 'center' }}>
                     <h1 style={{ fontSize: '3rem', margin: '0 0 1rem', color: '#dc2626' }}>403</h1>
                     <h2 style={{ fontSize: '1.5rem', margin: '0 0 1rem', color: '#374151' }}>Forbidden</h2>
-                    <p style={{ margin: '0 0 1.5rem', color: '#6b7280' }}>You do not have permission to access this page.</p>
+                    <p style={{ margin: '0 0 1.5rem', color: '#6b7280' }}>You do not have permission to access this page. Only superusers can access 1-on-1 payment.</p>
                     <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
                         <Link href="/dashboard" className="btn share-btn">Go to Dashboard</Link>
                         <button
@@ -510,44 +510,12 @@ export default function TrngPaymentPage() {
 
     return (
         <div className="container">
-            <header className="dashboard-header">
-                <div className="header-left">
-                    <div className="brand" style={{ position: 'relative' }}>
-                        <button
-                            className="account-avatar-btn"
-                            onClick={() => setShowAccountMenu(!showAccountMenu)}
-                            title="View account"
-                        >
-                            👤
-                        </button>
-                        {showAccountMenu && (
-                            <div className="account-menu">
-                                <p className="account-name">{userName || 'User'}</p>
-                                <p className="account-role">{userRole?.toUpperCase() || 'MEMBER'}</p>
-                                <Link href="/settings" className="account-menu-link" onClick={() => setShowAccountMenu(false)}>
-                                    ⚙️ Settings
-                                </Link>
-                            </div>
-                        )}
-                    </div>
-                    <h1 className="page-title">1-on-1 Payment</h1>
-                </div>
-
-                <div className="user-controls">
-                    <Link href="/dashboard" className="btn share-btn">Dashboard</Link>
-                    <Link href="/training" className="btn share-btn">Training</Link>
-                    <Link href="/payment" className="btn share-btn">Main Payment</Link>
-                    <button
-                        className="btn share-btn logout"
-                        onClick={async () => {
-                            await supabase.auth.signOut();
-                            router.push('/');
-                        }}
-                    >
-                        Logout
-                    </button>
-                </div>
-            </header>
+            <AppHeader
+                title="1-on-1 Payment"
+                userName={userName}
+                userRole={userRole}
+                mode="dashboard"
+            />
 
             <main>
                 <div className="search-box">

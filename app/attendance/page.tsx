@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
+import AppHeader from './../components/AppHeader';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 import { Student } from '../../types/supabase';
@@ -30,7 +31,6 @@ export default function AttendancePage() {
   const router = useRouter();
   const [userRole, setUserRole] = useState<'superuser' | 'admin' | 'member' | null>(null);
   const [userName, setUserName] = useState('');
-  const [showAccountMenu, setShowAccountMenu] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -477,28 +477,12 @@ export default function AttendancePage() {
 
   return (
       <div className="container">
-        <header className="dashboard-header">
-          <div className="header-left">
-            <div className="brand" style={{ position: 'relative' }}>
-              <button className="account-avatar-btn" onClick={() => setShowAccountMenu(!showAccountMenu)} title="View account">👤</button>
-              {showAccountMenu && (
-                  <div className="account-menu">
-                    <p className="account-name">{userName || 'User'}</p>
-                    <p className="account-role">{userRole?.toUpperCase() || 'MEMBER'}</p>
-                    <Link href="/settings" className="account-menu-link" onClick={() => setShowAccountMenu(false)}>⚙️ Settings</Link>
-                  </div>
-              )}
-            </div>
-            <h1 className="page-title">Attendance</h1>
-          </div>
-
-          <div className="user-controls">
-            <Link href="/dashboard" className="btn share-btn">Dashboard</Link>
-            <Link href="/payment" className="btn share-btn">Payment</Link>
-            {userRole === 'superuser' && <Link href="/add" className="btn share-btn">Add Student</Link>}
-            <button type="button" className="btn share-btn logout" onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}>Logout</button>
-          </div>
-        </header>
+        <AppHeader
+            title="Attendance"
+            userName={userName}
+            userRole={userRole}
+            mode="dashboard"
+        />
 
         <main>
           <div className="search-box">
@@ -572,252 +556,252 @@ export default function AttendancePage() {
             {!isLoading && Array.isArray(searchResults) && searchResults.length > 0 && (
                 <div className="table-container">
                   <div className="table-scroll">
-                  <table>
-                    <thead>
-                    <tr>
-                      <th>Name</th><th>Day</th><th>Timeslot</th><th>Level</th>
-                      <th>Price (S$)</th><th>Weeks</th><th>Attended</th><th>Missed</th><th>Actions</th><th>Attendance History</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    {searchResults.map(student => {
-                      const attended = student.attended ?? 0;
-                      const missed = student.missed ?? 0;
-                      const used = attended + missed;
-                      const finished = used >= (student.total_weeks ?? 0);
-                      return (
-                          <tr key={student.student_id}>
-                            <td>{student.student_name}</td>
-                            <td>
-                              <select
-                                  aria-label="Change day"
-                                  value={student.student_day}
-                                  className="student-field-select"
-                                  onChange={async (e) => {
-                                    const newDay = e.target.value;
-                                    try {
-                                      const { error } = await supabase.from('students').update({ student_day: newDay, updated_at: new Date().toISOString() }).eq('student_id', student.student_id);
-                                      if (error) throw error;
-                                      setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_day: newDay, updated_at: new Date().toISOString() } : s));
-                                    } catch (err) { console.error(err); alert('Failed to update day'); }
-                                  }}
-                              >
-                                <option value="Saturday">Saturday</option>
-                                <option value="Sunday">Sunday</option>
-                              </select>
-                            </td>
-
-                            <td>
-                              <select
-                                  aria-label="Change timeslot"
-                                  value={student.student_timeslot}
-                                  className="student-field-select"
-                                  onChange={async (e) => {
-                                    const newTimeslot = e.target.value;
-                                    try {
-                                      const { error } = await supabase.from('students').update({ student_timeslot: newTimeslot, updated_at: new Date().toISOString() }).eq('student_id', student.student_id);
-                                      if (error) throw error;
-                                      setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_timeslot: newTimeslot, updated_at: new Date().toISOString() } : s));
-                                    } catch (err) { console.error(err); alert('Failed to update timeslot'); }
-                                  }}
-                              >
-                                {['8-10am','10-12pm','1-3pm','2-4pm','3-5pm','4-6pm'].map(t => <option key={t} value={t}>{t}</option>)}
-                              </select>
-                            </td>
-
-                            <td>
-                              <select
-                                  aria-label="Change level"
-                                  value={student.student_levelofplay}
-                                  className="student-field-select"
-                                  onChange={async (e) => {
-                                    const newLevel = e.target.value;
-                                    try {
-                                      const { error } = await supabase.from('students').update({ student_levelofplay: newLevel, updated_at: new Date().toISOString() }).eq('student_id', student.student_id);
-                                      if (error) throw error;
-                                      setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_levelofplay: newLevel, updated_at: new Date().toISOString() } : s));
-                                    } catch (err) { console.error(err); alert('Failed to update level'); }
-                                  }}
-                              >
-                                <option value="Beginner">Beginner</option>
-                                <option value="Intermediate">Intermediate</option>
-                                <option value="Advanced">Advanced</option>
-                              </select>
-                            </td>
-
-                            <td className="col-price">
-                              <input
-                                  className="price-input"
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={student.price ?? ''}
-                                  onChange={(e) => {
-                                    const inputValue = e.target.value;
-                                    // Update UI immediately
-                                    setSearchResults(prev => prev.map(s =>
-                                        s.student_id === student.student_id
-                                            ? { ...s, price: inputValue === '' ? null : parseFloat(inputValue) }
-                                            : s
-                                    ));
-
-                                    // Debounce the database update (500ms delay)
-                                    const updatePrice = async () => {
-                                      const newPrice = inputValue === '' ? null : parseFloat(inputValue || '0');
+                    <table>
+                      <thead>
+                      <tr>
+                        <th>Name</th><th>Day</th><th>Timeslot</th><th>Level</th>
+                        <th>Price (S$)</th><th>Weeks</th><th>Attended</th><th>Missed</th><th>Actions</th><th>Attendance History</th>
+                      </tr>
+                      </thead>
+                      <tbody>
+                      {searchResults.map(student => {
+                        const attended = student.attended ?? 0;
+                        const missed = student.missed ?? 0;
+                        const used = attended + missed;
+                        const finished = used >= (student.total_weeks ?? 0);
+                        return (
+                            <tr key={student.student_id}>
+                              <td>{student.student_name}</td>
+                              <td>
+                                <select
+                                    aria-label="Change day"
+                                    value={student.student_day}
+                                    className="student-field-select"
+                                    onChange={async (e) => {
+                                      const newDay = e.target.value;
                                       try {
-                                        const { error } = await supabase.from('students').update({ price: newPrice, updated_at: new Date().toISOString() }).eq('student_id', student.student_id);
+                                        const { error } = await supabase.from('students').update({ student_day: newDay, updated_at: new Date().toISOString() }).eq('student_id', student.student_id);
                                         if (error) throw error;
-                                      } catch (err) {
-                                        console.error(err);
-                                        alert('Failed to update price');
-                                      }
-                                    };
+                                        setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_day: newDay, updated_at: new Date().toISOString() } : s));
+                                      } catch (err) { console.error(err); alert('Failed to update day'); }
+                                    }}
+                                >
+                                  <option value="Saturday">Saturday</option>
+                                  <option value="Sunday">Sunday</option>
+                                </select>
+                              </td>
 
-                                    // Clear existing timeout
-                                    if ((e.currentTarget as any).__priceTimeout) {
-                                      clearTimeout((e.currentTarget as any).__priceTimeout);
-                                    }
-                                    (e.currentTarget as any).__priceTimeout = setTimeout(updatePrice, 500);
-                                  }}
-                                  style={{ borderColor: (student.price ?? 0) === 0 || student.price === null || student.price === undefined ? '#ef4444' : 'var(--border)' }}
-                                  title={(student.price ?? 0) === 0 || student.price === null || student.price === undefined ? 'Required field' : `Price: S$${student.price}`}
-                              />
-                            </td>
-
-                            <td className="col-weeks">
-                              <input
-                                  className="weeks-input"
-                                  type="number"
-                                  min="1"
-                                  value={student.total_weeks ?? ''}
-                                  onChange={(e) => {
-                                    const inputValue = e.target.value;
-                                    // Update UI immediately
-                                    setSearchResults(prev => prev.map(s =>
-                                        s.student_id === student.student_id
-                                            ? { ...s, total_weeks: inputValue === '' ? null : parseInt(inputValue) }
-                                            : s
-                                    ));
-
-                                    // Debounce the database update (500ms delay)
-                                    const updateWeeks = async () => {
-                                      const newTotal = inputValue === '' ? null : parseInt(inputValue || '1');
+                              <td>
+                                <select
+                                    aria-label="Change timeslot"
+                                    value={student.student_timeslot}
+                                    className="student-field-select"
+                                    onChange={async (e) => {
+                                      const newTimeslot = e.target.value;
                                       try {
-                                        const updates: Partial<Student> = { total_weeks: newTotal, updated_at: new Date().toISOString() };
-                                        const { error } = await supabase.from('students').update(updates).eq('student_id', student.student_id);
+                                        const { error } = await supabase.from('students').update({ student_timeslot: newTimeslot, updated_at: new Date().toISOString() }).eq('student_id', student.student_id);
                                         if (error) throw error;
-                                      } catch (err) {
-                                        console.error(err);
-                                        alert('Failed to update total weeks');
-                                      }
-                                    };
+                                        setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_timeslot: newTimeslot, updated_at: new Date().toISOString() } : s));
+                                      } catch (err) { console.error(err); alert('Failed to update timeslot'); }
+                                    }}
+                                >
+                                  {['8-10am','10-12pm','1-3pm','2-4pm','3-5pm','4-6pm'].map(t => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                              </td>
 
-                                    // Clear existing timeout
-                                    if ((e.currentTarget as any).__weeksTimeout) {
-                                      clearTimeout((e.currentTarget as any).__weeksTimeout);
-                                    }
-                                    (e.currentTarget as any).__weeksTimeout = setTimeout(updateWeeks, 500);
-                                  }}
-                                  style={{ borderColor: (student.total_weeks ?? 0) === 0 || student.total_weeks === null || student.total_weeks === undefined ? '#ef4444' : 'var(--border)' }}
-                                  title={(student.total_weeks ?? 0) === 0 || student.total_weeks === null || student.total_weeks === undefined ? 'Required field' : `Weeks: ${student.total_weeks}`}
-                              />
-                            </td>
+                              <td>
+                                <select
+                                    aria-label="Change level"
+                                    value={student.student_levelofplay}
+                                    className="student-field-select"
+                                    onChange={async (e) => {
+                                      const newLevel = e.target.value;
+                                      try {
+                                        const { error } = await supabase.from('students').update({ student_levelofplay: newLevel, updated_at: new Date().toISOString() }).eq('student_id', student.student_id);
+                                        if (error) throw error;
+                                        setSearchResults(prev => prev.map(s => s.student_id === student.student_id ? { ...s, student_levelofplay: newLevel, updated_at: new Date().toISOString() } : s));
+                                      } catch (err) { console.error(err); alert('Failed to update level'); }
+                                    }}
+                                >
+                                  <option value="Beginner">Beginner</option>
+                                  <option value="Intermediate">Intermediate</option>
+                                  <option value="Advanced">Advanced</option>
+                                </select>
+                              </td>
 
-                            <td className="lessons-count" title={`${attended} attended`}>{attended}</td>
-                            <td className="missed-count" title={`${missed} missed`}>{missed}</td>
+                              <td className="col-price">
+                                <input
+                                    className="price-input"
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={student.price ?? ''}
+                                    onChange={(e) => {
+                                      const inputValue = e.target.value;
+                                      // Update UI immediately
+                                      setSearchResults(prev => prev.map(s =>
+                                          s.student_id === student.student_id
+                                              ? { ...s, price: inputValue === '' ? null : parseFloat(inputValue) }
+                                              : s
+                                      ));
 
-                            <td className="actions-cell">
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                {/* Row 1: Mark / Missed / Makeup */}
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                  <button
-                                      type="button"
-                                      className="attendance-btn"
-                                      onClick={() => handleAttendanceClick(student.student_id)}
-                                      disabled={finished}
-                                      title={finished ? 'Subscription lessons completed' : 'Mark attended'}
-                                  >
-                                    Mark
-                                  </button>
-
-                                  <button
-                                      type="button"
-                                      className="missed-btn"
-                                      onClick={() => handleMissed(student.student_id)}
-                                      disabled={finished}
-                                      title={finished ? 'Subscription lessons completed' : 'Mark missed'}
-                                  >
-                                    Missed
-                                  </button>
-
-                                  <button
-                                      type="button"
-                                      className="makeup-btn"
-                                      onClick={() => handleMakeupAttendance(student.student_id)}
-                                      disabled={finished || (student.missed ?? 0) <= 0}
-                                      title={(student.missed ?? 0) <= 0 ? 'No missed lessons to makeup' : 'Makeup (convert one missed to attended)'}
-                                  >
-                                    Makeup
-                                  </button>
-                                </div>
-
-                                {/* Row 2: Undo / Reset / Delete */}
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                  <button
-                                      type="button"
-                                      className="undo-btn"
-                                      onClick={() => handleDeleteLastAttendance(student.student_id)}
-                                      disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
-                                      title={(student.attended ?? 0) + (student.missed ?? 0) === 0 ? 'No actions to undo' : 'Undo last action'}
-                                  >
-                                    Undo
-                                  </button>
-
-                                  <button
-                                      type="button"
-                                      className="reset-btn"
-                                      onClick={() => handleResetCourse(student.student_id)}
-                                      title="Reset course (requires payment)"
-                                  >
-                                    Reset
-                                  </button>
-
-                                  <button
-                                      type="button"
-                                      className="delete-btn"
-                                      onClick={() => {
-                                        if (confirm(`Delete ${student.student_name}? This cannot be undone.`)) {
-                                          deleteStudent(student.student_id, student.student_name);
+                                      // Debounce the database update (500ms delay)
+                                      const updatePrice = async () => {
+                                        const newPrice = inputValue === '' ? null : parseFloat(inputValue || '0');
+                                        try {
+                                          const { error } = await supabase.from('students').update({ price: newPrice, updated_at: new Date().toISOString() }).eq('student_id', student.student_id);
+                                          if (error) throw error;
+                                        } catch (err) {
+                                          console.error(err);
+                                          alert('Failed to update price');
                                         }
-                                      }}
-                                      title="Delete this student"
-                                  >
-                                    Delete
-                                  </button>
+                                      };
+
+                                      // Clear existing timeout
+                                      if ((e.currentTarget as any).__priceTimeout) {
+                                        clearTimeout((e.currentTarget as any).__priceTimeout);
+                                      }
+                                      (e.currentTarget as any).__priceTimeout = setTimeout(updatePrice, 500);
+                                    }}
+                                    style={{ borderColor: (student.price ?? 0) === 0 || student.price === null || student.price === undefined ? '#ef4444' : 'var(--border)' }}
+                                    title={(student.price ?? 0) === 0 || student.price === null || student.price === undefined ? 'Required field' : `Price: S$${student.price}`}
+                                />
+                              </td>
+
+                              <td className="col-weeks">
+                                <input
+                                    className="weeks-input"
+                                    type="number"
+                                    min="1"
+                                    value={student.total_weeks ?? ''}
+                                    onChange={(e) => {
+                                      const inputValue = e.target.value;
+                                      // Update UI immediately
+                                      setSearchResults(prev => prev.map(s =>
+                                          s.student_id === student.student_id
+                                              ? { ...s, total_weeks: inputValue === '' ? null : parseInt(inputValue) }
+                                              : s
+                                      ));
+
+                                      // Debounce the database update (500ms delay)
+                                      const updateWeeks = async () => {
+                                        const newTotal = inputValue === '' ? null : parseInt(inputValue || '1');
+                                        try {
+                                          const updates: Partial<Student> = { total_weeks: newTotal, updated_at: new Date().toISOString() };
+                                          const { error } = await supabase.from('students').update(updates).eq('student_id', student.student_id);
+                                          if (error) throw error;
+                                        } catch (err) {
+                                          console.error(err);
+                                          alert('Failed to update total weeks');
+                                        }
+                                      };
+
+                                      // Clear existing timeout
+                                      if ((e.currentTarget as any).__weeksTimeout) {
+                                        clearTimeout((e.currentTarget as any).__weeksTimeout);
+                                      }
+                                      (e.currentTarget as any).__weeksTimeout = setTimeout(updateWeeks, 500);
+                                    }}
+                                    style={{ borderColor: (student.total_weeks ?? 0) === 0 || student.total_weeks === null || student.total_weeks === undefined ? '#ef4444' : 'var(--border)' }}
+                                    title={(student.total_weeks ?? 0) === 0 || student.total_weeks === null || student.total_weeks === undefined ? 'Required field' : `Weeks: ${student.total_weeks}`}
+                                />
+                              </td>
+
+                              <td className="lessons-count" title={`${attended} attended`}>{attended}</td>
+                              <td className="missed-count" title={`${missed} missed`}>{missed}</td>
+
+                              <td className="actions-cell">
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                  {/* Row 1: Mark / Missed / Makeup */}
+                                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <button
+                                        type="button"
+                                        className="attendance-btn"
+                                        onClick={() => handleAttendanceClick(student.student_id)}
+                                        disabled={finished}
+                                        title={finished ? 'Subscription lessons completed' : 'Mark attended'}
+                                    >
+                                      Mark
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        className="missed-btn"
+                                        onClick={() => handleMissed(student.student_id)}
+                                        disabled={finished}
+                                        title={finished ? 'Subscription lessons completed' : 'Mark missed'}
+                                    >
+                                      Missed
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        className="makeup-btn"
+                                        onClick={() => handleMakeupAttendance(student.student_id)}
+                                        disabled={finished || (student.missed ?? 0) <= 0}
+                                        title={(student.missed ?? 0) <= 0 ? 'No missed lessons to makeup' : 'Makeup (convert one missed to attended)'}
+                                    >
+                                      Makeup
+                                    </button>
+                                  </div>
+
+                                  {/* Row 2: Undo / Reset / Delete */}
+                                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <button
+                                        type="button"
+                                        className="undo-btn"
+                                        onClick={() => handleDeleteLastAttendance(student.student_id)}
+                                        disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
+                                        title={(student.attended ?? 0) + (student.missed ?? 0) === 0 ? 'No actions to undo' : 'Undo last action'}
+                                    >
+                                      Undo
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        className="reset-btn"
+                                        onClick={() => handleResetCourse(student.student_id)}
+                                        title="Reset course (requires payment)"
+                                    >
+                                      Reset
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        className="delete-btn"
+                                        onClick={() => {
+                                          if (confirm(`Delete ${student.student_name}? This cannot be undone.`)) {
+                                            deleteStudent(student.student_id, student.student_name);
+                                          }
+                                        }}
+                                        title="Delete this student"
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+
+                                  {/* Info message if subscription is used - only show if weeks is set AND used */}
+                                  {student.total_weeks !== null &&
+                                      student.total_weeks !== undefined &&
+                                      student.total_weeks !== 0 &&
+                                      (student.attended + student.missed) >= student.total_weeks && (
+                                          <p style={{ fontSize: '0.85rem', color: '#ef4444', margin: '4px 0 0 0' }}>
+                                            <em>✓ Subscription used — requires payment to reset</em>
+                                          </p>
+                                      )}
                                 </div>
+                              </td>
 
-                                {/* Info message if subscription is used - only show if weeks is set AND used */}
-                                {student.total_weeks !== null &&
-                                student.total_weeks !== undefined &&
-                                student.total_weeks !== 0 &&
-                                (student.attended + student.missed) >= student.total_weeks && (
-                                    <p style={{ fontSize: '0.85rem', color: '#ef4444', margin: '4px 0 0 0' }}>
-                                      <em>✓ Subscription used — requires payment to reset</em>
-                                    </p>
-                                )}
-                              </div>
-                            </td>
-
-                            <td>
-                              {student.attendance_records?.length > 0 ? (
-                                  <div className="attendance-history"><ul>{student.attendance_records.map((r,i) => <li key={i}>{new Date(r).toLocaleDateString()}</li>)}</ul></div>
-                              ) : 'No attendance'}
-                            </td>
-                          </tr>
-                      );
-                    })}
-                    </tbody>
-                  </table>
+                              <td>
+                                {student.attendance_records?.length > 0 ? (
+                                    <div className="attendance-history"><ul>{student.attendance_records.map((r,i) => <li key={i}>{new Date(r).toLocaleDateString()}</li>)}</ul></div>
+                                ) : 'No attendance'}
+                              </td>
+                            </tr>
+                        );
+                      })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
             )}
