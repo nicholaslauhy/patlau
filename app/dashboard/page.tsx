@@ -42,6 +42,113 @@ export default function DashboardPage() {
   ];
   const levels = ["all", "Beginner", "Intermediate", "Advanced"];
 
+
+  type AttendanceStatus = "mark" | "missed" | "makeup";
+
+  const makeAttendanceRecord = (
+      dateIso: string,
+      status: AttendanceStatus = "mark",
+      originalMissedDate?: string,
+  ) => {
+    if (status === "mark") {
+      return dateIso;
+    }
+
+    if (status === "makeup" && originalMissedDate) {
+      return `${dateIso}|makeup|${originalMissedDate}`;
+    }
+
+    return `${dateIso}|${status}`;
+  };
+
+  const parseAttendanceRecord = (record: unknown) => {
+    const raw = String(record || "");
+
+    if (raw.includes("|")) {
+      const [dateIso, statusRaw, originalMissedDate] = raw.split("|");
+      const status = ["missed", "makeup"].includes(statusRaw)
+          ? (statusRaw as AttendanceStatus)
+          : "mark";
+
+      return { dateIso, status, originalMissedDate };
+    }
+
+    const legacyMissedMatch = raw.match(/^(.*)\s+\(missed\)$/i);
+    if (legacyMissedMatch) {
+      return {
+        dateIso: legacyMissedMatch[1],
+        status: "missed" as AttendanceStatus,
+        originalMissedDate: undefined,
+      };
+    }
+
+    const legacyMakeupMatch = raw.match(/^(.*)\s+\(makeup\)$/i);
+    if (legacyMakeupMatch) {
+      return {
+        dateIso: legacyMakeupMatch[1],
+        status: "makeup" as AttendanceStatus,
+        originalMissedDate: undefined,
+      };
+    }
+
+    return {
+      dateIso: raw,
+      status: "mark" as AttendanceStatus,
+      originalMissedDate: undefined,
+    };
+  };
+
+  const findLastRecordIndexByStatus = (
+      records: unknown[],
+      statuses: AttendanceStatus[],
+  ) => {
+    for (let i = records.length - 1; i >= 0; i--) {
+      const parsed = parseAttendanceRecord(records[i]);
+      if (statuses.includes(parsed.status)) {
+        return i;
+      }
+    }
+
+    return -1;
+  };
+
+  const removeLastRecordByStatus = (
+      records: unknown[],
+      statuses: AttendanceStatus[],
+  ) => {
+    const nextRecords = [...records];
+    const index = findLastRecordIndexByStatus(nextRecords, statuses);
+
+    if (index !== -1) {
+      nextRecords.splice(index, 1);
+      return nextRecords;
+    }
+
+    if (nextRecords.length > 0) {
+      nextRecords.pop();
+    }
+
+    return nextRecords;
+  };
+
+  const formatAttendanceRecord = (record: unknown) => {
+    const { dateIso, status } = parseAttendanceRecord(record);
+    const parsedDate = new Date(dateIso);
+    const readableDate = Number.isNaN(parsedDate.getTime())
+        ? String(dateIso)
+        : parsedDate.toLocaleDateString();
+
+    if (status === "missed") {
+      return `${readableDate} (missed)`;
+    }
+
+    if (status === "makeup") {
+      return `${readableDate} (makeup)`;
+    }
+
+    return readableDate;
+  };
+
   const canEditStudentFields = userRole === "superuser";
   const isSuperuser = userRole === "superuser";
 
@@ -268,24 +375,27 @@ export default function DashboardPage() {
 
       if (actionToUndo.action === "mark") {
         // Original mark: attended + 1
-        // Undo mark: attended - 1
+        // Undo mark: attended - 1 and remove latest normal attendance record.
         newAttended = Math.max(0, newAttended - 1);
-
-        if (newRecords.length > 0) {
-          newRecords.pop();
-        }
+        newRecords = removeLastRecordByStatus(newRecords, ["mark"]);
       } else if (actionToUndo.action === "missed") {
         // Original missed: missed + 1
-        // Undo missed: missed - 1
+        // Undo missed: missed - 1 and remove latest missed history row.
         newMissed = Math.max(0, newMissed - 1);
+        newRecords = removeLastRecordByStatus(newRecords, ["missed"]);
       } else if (actionToUndo.action === "makeup") {
         // Original makeup: missed - 1, attended + 1
-        // Undo makeup: attended - 1, missed + 1
+        // Undo makeup: attended - 1, missed + 1 and restore the missed history row.
         newAttended = Math.max(0, newAttended - 1);
         newMissed = newMissed + 1;
 
-        if (newRecords.length > 0) {
-          newRecords.pop();
+        const makeupRecordIndex = findLastRecordIndexByStatus(newRecords, ["makeup"]);
+        if (makeupRecordIndex !== -1) {
+          const makeupRecord = parseAttendanceRecord(newRecords[makeupRecordIndex]);
+          const missedDateToRestore = makeupRecord.originalMissedDate || makeupRecord.dateIso;
+          newRecords[makeupRecordIndex] = makeAttendanceRecord(missedDateToRestore, "missed");
+        } else {
+          newRecords = removeLastRecordByStatus(newRecords, ["makeup"]);
         }
       } else {
         alert("Last action cannot be undone.");
@@ -308,10 +418,15 @@ export default function DashboardPage() {
         throw updateError || new Error("Update failed");
       }
 
+      // Update only this row locally instead of refetching the whole dashboard.
+      // This prevents the table from flashing/reloading after Undo.
+      setSearchResults((prev) =>
+          prev.map((s) => (s.student_id === studentId ? updatedStudent : s)),
+      );
+      setMessage(null);
+
       // Log this undo. Future undo presses will now skip the action we just reversed.
       await logAuditAction(studentId, "undo");
-
-      await fetchData();
     } catch (err: any) {
       alert(`Failed to undo attendance: ${err?.message ?? "Unknown error"}`);
     }
@@ -354,10 +469,12 @@ export default function DashboardPage() {
         return;
       }
 
+      const nowIso = new Date().toISOString();
       const newAttended = attended + 1;
-      const newRecords = Array.isArray(studentData.attendance_records)
-          ? [...studentData.attendance_records, new Date().toISOString()]
-          : [new Date().toISOString()];
+      const currentRecords = Array.isArray(studentData.attendance_records)
+          ? [...studentData.attendance_records]
+          : [];
+      const newRecords = [...currentRecords, makeAttendanceRecord(nowIso, "mark")];
 
       const { data: updatedStudent, error } = await supabase
           .from("students")
@@ -414,11 +531,25 @@ export default function DashboardPage() {
         return;
       }
 
+      const nowIso = new Date().toISOString();
       const newAttended = attended + 1;
       const newMissed = Math.max(0, missed - 1);
       const newRecords = Array.isArray(studentData.attendance_records)
-          ? [...studentData.attendance_records, new Date().toISOString()]
-          : [new Date().toISOString()];
+          ? [...studentData.attendance_records]
+          : [];
+
+      const missedRecordIndex = findLastRecordIndexByStatus(newRecords, ["missed"]);
+
+      if (missedRecordIndex !== -1) {
+        const missedRecord = parseAttendanceRecord(newRecords[missedRecordIndex]);
+        newRecords[missedRecordIndex] = makeAttendanceRecord(
+            nowIso,
+            "makeup",
+            missedRecord.dateIso,
+        );
+      } else {
+        newRecords.push(makeAttendanceRecord(nowIso, "makeup"));
+      }
 
       const { data: updatedStudent, error } = await supabase
           .from("students")
@@ -471,13 +602,19 @@ export default function DashboardPage() {
         return;
       }
 
+      const nowIso = new Date().toISOString();
       const newMissed = missed + 1;
+      const currentRecords = Array.isArray(studentData.attendance_records)
+          ? [...studentData.attendance_records]
+          : [];
+      const newRecords = [...currentRecords, makeAttendanceRecord(nowIso, "missed")];
 
       const { data: updatedStudent, error } = await supabase
           .from("students")
           .update({
             missed: newMissed,
-            updated_at: new Date().toISOString(),
+            attendance_records: newRecords,
+            updated_at: nowIso,
           })
           .eq("student_id", studentId)
           .select()
@@ -700,9 +837,8 @@ export default function DashboardPage() {
                         <th>Level</th>
                         <th>Attended</th>
                         <th>Missed</th>
-                        <th style={{ width: userRole === "superuser" ? 420 : 280 }}>
-                          Actions
-                        </th>
+                        <th className="actions-header">Actions</th>
+                        <th>Attendance History</th>
                       </tr>
                       </thead>
                       <tbody>
@@ -873,57 +1009,59 @@ export default function DashboardPage() {
                               </td>
 
                               <td className="actions-cell">
-                                <div className="actions-row">
-                                  <button
-                                      type="button"
-                                      className="attendance-btn"
-                                      onClick={() => handleAttendanceClick(student.student_id)}
-                                      disabled={finished}
-                                      title={finished ? "Subscription lessons completed" : "Mark attended"}
-                                  >
-                                    Mark
-                                  </button>
+                                <div className={isSuperuser ? "actions-stack" : "actions-stack actions-stack-single"}>
+                                  <div className="actions-row actions-primary-row">
+                                    <button
+                                        type="button"
+                                        className="attendance-btn"
+                                        onClick={() => handleAttendanceClick(student.student_id)}
+                                        disabled={finished}
+                                        title={finished ? "Subscription lessons completed" : "Mark attended"}
+                                    >
+                                      Mark
+                                    </button>
 
-                                  <button
-                                      type="button"
-                                      className="missed-btn"
-                                      onClick={() => handleMissed(student.student_id)}
-                                      disabled={finished}
-                                      title={finished ? "Subscription lessons completed" : "Mark missed"}
-                                  >
-                                    Missed
-                                  </button>
+                                    <button
+                                        type="button"
+                                        className="missed-btn"
+                                        onClick={() => handleMissed(student.student_id)}
+                                        disabled={finished}
+                                        title={finished ? "Subscription lessons completed" : "Mark missed"}
+                                    >
+                                      Missed
+                                    </button>
 
-                                  <button
-                                      type="button"
-                                      className="makeup-btn"
-                                      onClick={() => handleMakeupAttendance(student.student_id)}
-                                      disabled={finished || (student.missed ?? 0) <= 0}
-                                      title={
-                                        (student.missed ?? 0) <= 0
-                                            ? "No missed lessons to makeup"
-                                            : "Makeup (convert one missed to attended)"
-                                      }
-                                  >
-                                    Makeup
-                                  </button>
+                                    <button
+                                        type="button"
+                                        className="makeup-btn"
+                                        onClick={() => handleMakeupAttendance(student.student_id)}
+                                        disabled={finished || (student.missed ?? 0) <= 0}
+                                        title={
+                                          (student.missed ?? 0) <= 0
+                                              ? "No missed lessons to makeup"
+                                              : "Makeup (convert one missed to attended)"
+                                        }
+                                    >
+                                      Makeup
+                                    </button>
 
-                                  <button
-                                      type="button"
-                                      className="undo-btn"
-                                      onClick={() => handleDeleteLastAttendance(student.student_id)}
-                                      disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
-                                      title={
-                                        (student.attended ?? 0) + (student.missed ?? 0) === 0
-                                            ? "No actions to undo"
-                                            : "Undo last action"
-                                      }
-                                  >
-                                    Undo
-                                  </button>
+                                    <button
+                                        type="button"
+                                        className="undo-btn"
+                                        onClick={() => handleDeleteLastAttendance(student.student_id)}
+                                        disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
+                                        title={
+                                          (student.attended ?? 0) + (student.missed ?? 0) === 0
+                                              ? "No actions to undo"
+                                              : "Undo last action"
+                                        }
+                                    >
+                                      Undo
+                                    </button>
+                                  </div>
 
                                   {isSuperuser && (
-                                      <>
+                                      <div className="actions-row actions-admin-row">
                                         <button
                                             type="button"
                                             className="reset-btn"
@@ -940,9 +1078,21 @@ export default function DashboardPage() {
                                         >
                                           Delete
                                         </button>
-                                      </>
+                                      </div>
                                   )}
                                 </div>
+                              </td>
+                              <td className="attendance-history">
+                                {Array.isArray(student.attendance_records) &&
+                                student.attendance_records.length > 0 ? (
+                                    <ul>
+                                      {student.attendance_records.map((record, index) => (
+                                          <li key={index}>{formatAttendanceRecord(record)}</li>
+                                      ))}
+                                    </ul>
+                                ) : (
+                                    <span className="muted">No history</span>
+                                )}
                               </td>
                             </tr>
                         );

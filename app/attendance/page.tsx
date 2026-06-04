@@ -67,6 +67,117 @@ export default function AttendancePage() {
   const timeslots = ['all', '8-10am', '10-12pm', '1-3pm', '2-4pm', '3-5pm', '4-6pm'];
   const levels = ['all', 'Beginner', 'Intermediate', 'Advanced'];
 
+
+  type AttendanceStatus = 'mark' | 'missed' | 'makeup';
+
+  const makeAttendanceRecord = (
+      dateIso: string,
+      status: AttendanceStatus = 'mark',
+      originalMissedDate?: string
+  ) => {
+    if (status === 'mark') {
+      return dateIso;
+    }
+
+    if (status === 'makeup' && originalMissedDate) {
+      return `${dateIso}|makeup|${originalMissedDate}`;
+    }
+
+    return `${dateIso}|${status}`;
+  };
+
+  const parseAttendanceRecord = (record: unknown) => {
+    const raw = String(record || '');
+
+    if (raw.includes('|')) {
+      const [dateIso, statusRaw, originalMissedDate] = raw.split('|');
+      const status = ['missed', 'makeup'].includes(statusRaw)
+          ? (statusRaw as AttendanceStatus)
+          : 'mark';
+
+      return {
+        dateIso,
+        status,
+        originalMissedDate
+      };
+    }
+
+    const legacyMissedMatch = raw.match(/^(.*)\s+\(missed\)$/i);
+    if (legacyMissedMatch) {
+      return {
+        dateIso: legacyMissedMatch[1],
+        status: 'missed' as AttendanceStatus,
+        originalMissedDate: undefined
+      };
+    }
+
+    const legacyMakeupMatch = raw.match(/^(.*)\s+\(makeup\)$/i);
+    if (legacyMakeupMatch) {
+      return {
+        dateIso: legacyMakeupMatch[1],
+        status: 'makeup' as AttendanceStatus,
+        originalMissedDate: undefined
+      };
+    }
+
+    return {
+      dateIso: raw,
+      status: 'mark' as AttendanceStatus,
+      originalMissedDate: undefined
+    };
+  };
+
+  const findLastRecordIndexByStatus = (
+      records: unknown[],
+      statuses: AttendanceStatus[]
+  ) => {
+    for (let i = records.length - 1; i >= 0; i--) {
+      const parsed = parseAttendanceRecord(records[i]);
+      if (statuses.includes(parsed.status)) {
+        return i;
+      }
+    }
+
+    return -1;
+  };
+
+  const removeLastRecordByStatus = (
+      records: unknown[],
+      statuses: AttendanceStatus[]
+  ) => {
+    const nextRecords = [...records];
+    const index = findLastRecordIndexByStatus(nextRecords, statuses);
+
+    if (index !== -1) {
+      nextRecords.splice(index, 1);
+      return nextRecords;
+    }
+
+    if (nextRecords.length > 0) {
+      nextRecords.pop();
+    }
+
+    return nextRecords;
+  };
+
+  const formatAttendanceRecord = (record: unknown) => {
+    const { dateIso, status } = parseAttendanceRecord(record);
+    const parsedDate = new Date(dateIso);
+    const readableDate = Number.isNaN(parsedDate.getTime())
+        ? String(dateIso)
+        : parsedDate.toLocaleDateString();
+
+    if (status === 'missed') {
+      return `${readableDate} (missed)`;
+    }
+
+    if (status === 'makeup') {
+      return `${readableDate} (makeup)`;
+    }
+
+    return readableDate;
+  };
+
   const fetchData = async () => {
     setIsLoading(true);
     setSearchResults([]);
@@ -187,9 +298,10 @@ export default function AttendancePage() {
 
         if (newAttended > 0) {
           newAttended = Math.max(0, newAttended - 1);
-          if (newRecords.length > 0) newRecords.pop();
+          newRecords = removeLastRecordByStatus(newRecords, ['mark', 'makeup']);
         } else if (newMissed > 0) {
           newMissed = Math.max(0, newMissed - 1);
+          newRecords = removeLastRecordByStatus(newRecords, ['missed']);
         } else {
           alert('Nothing to undo.');
           return;
@@ -223,15 +335,24 @@ export default function AttendancePage() {
 
       if (lastAction === 'mark') {
         newAttended = Math.max(0, newAttended - 1);
-        if (newRecords.length > 0) newRecords.pop();
+        newRecords = removeLastRecordByStatus(newRecords, ['mark']);
       } else if (lastAction === 'missed') {
         newMissed = Math.max(0, newMissed - 1);
+        newRecords = removeLastRecordByStatus(newRecords, ['missed']);
       } else if (lastAction === 'makeup') {
         // makeup = attended +1, missed -1
-        // undo makeup => attended -1, missed +1
+        // undo makeup => attended -1, missed +1 and restore the missed history row
         newAttended = Math.max(0, newAttended - 1);
         newMissed = newMissed + 1;
-        if (newRecords.length > 0) newRecords.pop();
+
+        const makeupRecordIndex = findLastRecordIndexByStatus(newRecords, ['makeup']);
+        if (makeupRecordIndex !== -1) {
+          const makeupRecord = parseAttendanceRecord(newRecords[makeupRecordIndex]);
+          const missedDateToRestore = makeupRecord.originalMissedDate || makeupRecord.dateIso;
+          newRecords[makeupRecordIndex] = makeAttendanceRecord(missedDateToRestore, 'missed');
+        } else {
+          newRecords = removeLastRecordByStatus(newRecords, ['makeup']);
+        }
       }
 
       const { data: updatedStudent, error } = await supabase
@@ -275,17 +396,21 @@ export default function AttendancePage() {
       const totalWeeks = studentData.total_weeks ?? 0;
       if ((attended + missed) >= totalWeeks) { alert('Subscription lessons already used.'); return; }
 
+      const nowIso = new Date().toISOString();
       const newAttended = attended + 1;
-      const newRecords = Array.isArray(studentData.attendance_records) ? [...studentData.attendance_records, new Date().toISOString()] : [new Date().toISOString()];
+      const currentRecords = Array.isArray(studentData.attendance_records)
+          ? [...studentData.attendance_records]
+          : [];
+      const newRecords = [...currentRecords, makeAttendanceRecord(nowIso, 'mark')];
 
       const { data: updatedStudent, error } = await supabase.from('students').update({
         attended: newAttended,
         attendance_records: newRecords,
-        updated_at: new Date().toISOString()
+        updated_at: nowIso
       }).eq('student_id', studentId).select().single();
 
       if (error || !updatedStudent) throw error || new Error('Update failed');
-      setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s)); // Just update the row
+      setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
       await logAudit(studentId, 'mark');
     } catch (err: any) {
       console.error('Attendance error:', err);
@@ -322,12 +447,25 @@ export default function AttendancePage() {
         return;
       }
 
+      const nowIso = new Date().toISOString();
       const newAttended = attended + 1;
       const newMissed = Math.max(0, missed - 1);
 
       const newRecords = Array.isArray(studentData.attendance_records)
-          ? [...studentData.attendance_records, new Date().toISOString()]
-          : [new Date().toISOString()];
+          ? [...studentData.attendance_records]
+          : [];
+      const missedRecordIndex = findLastRecordIndexByStatus(newRecords, ['missed']);
+
+      if (missedRecordIndex !== -1) {
+        const missedRecord = parseAttendanceRecord(newRecords[missedRecordIndex]);
+        newRecords[missedRecordIndex] = makeAttendanceRecord(
+            nowIso,
+            'makeup',
+            missedRecord.dateIso
+        );
+      } else {
+        newRecords.push(makeAttendanceRecord(nowIso, 'makeup'));
+      }
 
       const { data: updatedStudent, error } = await supabase
           .from('students')
@@ -335,7 +473,7 @@ export default function AttendancePage() {
             attended: newAttended,
             missed: newMissed,
             attendance_records: newRecords,
-            updated_at: new Date().toISOString()
+            updated_at: nowIso
           })
           .eq('student_id', studentId)
           .select()
@@ -370,15 +508,21 @@ export default function AttendancePage() {
 
       if ((attended + missed) >= totalWeeks) { alert('Subscription lessons already used.'); return; }
 
+      const nowIso = new Date().toISOString();
       const newMissed = missed + 1;
+      const currentRecords = Array.isArray(studentData.attendance_records)
+          ? [...studentData.attendance_records]
+          : [];
+      const newRecords = [...currentRecords, makeAttendanceRecord(nowIso, 'missed')];
 
       const { data: updatedStudent, error } = await supabase.from('students').update({
         missed: newMissed,
-        updated_at: new Date().toISOString()
+        attendance_records: newRecords,
+        updated_at: nowIso
       }).eq('student_id', studentId).select().single();
 
       if (error || !updatedStudent) throw error || new Error('Update failed');
-      setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s)); // Just update the row
+      setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
       await logAudit(studentId, 'missed');
     } catch (err: any) {
       console.error('Missed error:', err);
@@ -794,7 +938,7 @@ export default function AttendancePage() {
 
                               <td>
                                 {student.attendance_records?.length > 0 ? (
-                                    <div className="attendance-history"><ul>{student.attendance_records.map((r,i) => <li key={i}>{new Date(r).toLocaleDateString()}</li>)}</ul></div>
+                                    <div className="attendance-history"><ul>{student.attendance_records.map((r,i) => <li key={i}>{formatAttendanceRecord(r)}</li>)}</ul></div>
                                 ) : 'No attendance'}
                               </td>
                             </tr>
