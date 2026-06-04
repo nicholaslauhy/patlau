@@ -246,7 +246,7 @@ export default function TrngPaymentPage() {
             `Recorded At: ${new Date(recordedAt).toLocaleString()}\n` +
             `Status: ${isPaid ? 'Paid' : 'Unpaid'}`;
 
-        const response = await fetch('/api/telegram-reminder', {
+        const response = await fetch('/api/telegram-trngpayment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: telegramMessage })
@@ -295,7 +295,7 @@ export default function TrngPaymentPage() {
     };
 
     const sendMonthlySummaryNotification = async () => {
-        const response = await fetch('/api/telegram-reminder', {
+        const response = await fetch('/api/telegram-trngpayment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: buildMonthlySummaryMessage() })

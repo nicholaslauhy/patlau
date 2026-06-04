@@ -90,13 +90,48 @@ const cardStyle: CSSProperties = {
 
 const rowStyle: CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr auto',
+    gridTemplateColumns: 'minmax(160px, 1.1fr) auto minmax(160px, 1.1fr) auto',
     gap: '12px',
-    alignItems: 'center',
+    alignItems: 'end',
     padding: '12px',
     borderRadius: '12px',
     background: '#f9fafb',
     marginTop: '10px'
+};
+
+const addRowStyle: CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(160px, 1.1fr) auto minmax(160px, 1.1fr) auto',
+    gap: '12px',
+    alignItems: 'end',
+    marginTop: '16px',
+    padding: '14px',
+    borderRadius: '14px',
+    border: '1px dashed #cbd5e1',
+    background: '#ffffff'
+};
+
+const selectGroupStyle: CSSProperties = {
+    display: 'grid',
+    gap: '6px',
+    minWidth: 0
+};
+
+const selectLabelStyle: CSSProperties = {
+    fontSize: '0.72rem',
+    fontWeight: 800,
+    color: '#475569',
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em'
+};
+
+const relationArrowStyle: CSSProperties = {
+    alignSelf: 'center',
+    justifySelf: 'center',
+    fontSize: '1.35rem',
+    fontWeight: 900,
+    color: '#2563eb',
+    paddingBottom: '8px'
 };
 
 export default function TrainingPage() {
@@ -389,7 +424,7 @@ export default function TrainingPage() {
                                             })}
                                         </h2>
                                         <p className="timestamp" style={{ textAlign: 'left', margin: '6px 0 0' }}>
-                                            {dateSessions.length} student{dateSessions.length === 1 ? '' : 's'} added
+                                            {dateSessions.length} pair{dateSessions.length === 1 ? '' : 's'} assigned
                                         </p>
                                     </div>
                                 </div>
@@ -398,33 +433,43 @@ export default function TrainingPage() {
                                     <div style={{ marginTop: '14px' }}>
                                         {dateSessions.map((session) => (
                                             <div key={session.id} style={rowStyle}>
-                                                <select
-                                                    className="student-field-select"
-                                                    value={session.student_id}
-                                                    onChange={(e) => updateSession(session.id, { student_id: e.target.value })}
-                                                    aria-label="Student"
-                                                >
-                                                    <option value="">Select student</option>
-                                                    {students.map((s) => (
-                                                        <option key={s.student_id} value={s.student_id}>
-                                                            {s.student_name}
-                                                        </option>
-                                                    ))}
-                                                </select>
+                                                <label style={selectGroupStyle}>
+                                                    <span style={selectLabelStyle}>Coach</span>
+                                                    <select
+                                                        className="student-field-select"
+                                                        value={session.coach_id}
+                                                        onChange={(e) => updateSession(session.id, { coach_id: e.target.value })}
+                                                        aria-label="Coach"
+                                                    >
+                                                        <option value="">Assign coach</option>
+                                                        {coaches.map((coach) => (
+                                                            <option key={coach.id} value={coach.id}>
+                                                                {getDisplayName(coach)}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </label>
 
-                                                <select
-                                                    className="student-field-select"
-                                                    value={session.coach_id}
-                                                    onChange={(e) => updateSession(session.id, { coach_id: e.target.value })}
-                                                    aria-label="Coach"
-                                                >
-                                                    <option value="">Assign coach</option>
-                                                    {coaches.map((coach) => (
-                                                        <option key={coach.id} value={coach.id}>
-                                                            {getDisplayName(coach)}
-                                                        </option>
-                                                    ))}
-                                                </select>
+                                                <span aria-hidden="true" style={relationArrowStyle}>
+                                                    →
+                                                </span>
+
+                                                <label style={selectGroupStyle}>
+                                                    <span style={selectLabelStyle}>Student</span>
+                                                    <select
+                                                        className="student-field-select"
+                                                        value={session.student_id}
+                                                        onChange={(e) => updateSession(session.id, { student_id: e.target.value })}
+                                                        aria-label="Student"
+                                                    >
+                                                        <option value="">Select student</option>
+                                                        {students.map((s) => (
+                                                            <option key={s.student_id} value={s.student_id}>
+                                                                {s.student_name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </label>
 
                                                 <button
                                                     className="btn share-btn logout"
@@ -438,53 +483,51 @@ export default function TrainingPage() {
                                     </div>
                                 )}
 
-                                <div
-                                    style={{
-                                        display: 'grid',
-                                        gridTemplateColumns: '1fr 1fr auto',
-                                        gap: '12px',
-                                        alignItems: 'center',
-                                        marginTop: '16px',
-                                        padding: '14px',
-                                        borderRadius: '14px',
-                                        border: '1px dashed #cbd5e1',
-                                        background: '#ffffff'
-                                    }}
-                                >
-                                    <select
-                                        className="student-field-select"
-                                        value={draft.studentId}
-                                        onChange={(e) => updateDraft(dateKey, { studentId: e.target.value })}
-                                        aria-label="Add student"
-                                    >
-                                        <option value="">Choose student</option>
-                                        {students.map((s) => (
-                                            <option key={s.student_id} value={s.student_id}>
-                                                {s.student_name}
-                                            </option>
-                                        ))}
-                                    </select>
+                                <div style={addRowStyle}>
+                                    <label style={selectGroupStyle}>
+                                        <span style={selectLabelStyle}>Coach</span>
+                                        <select
+                                            className="student-field-select"
+                                            value={draft.coachId}
+                                            onChange={(e) => updateDraft(dateKey, { coachId: e.target.value })}
+                                            aria-label="Assign coach"
+                                        >
+                                            <option value="">Choose coach</option>
+                                            {coaches.map((coach) => (
+                                                <option key={coach.id} value={coach.id}>
+                                                    {getDisplayName(coach)}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
 
-                                    <select
-                                        className="student-field-select"
-                                        value={draft.coachId}
-                                        onChange={(e) => updateDraft(dateKey, { coachId: e.target.value })}
-                                        aria-label="Assign coach"
-                                    >
-                                        <option value="">Choose coach</option>
-                                        {coaches.map((coach) => (
-                                            <option key={coach.id} value={coach.id}>
-                                                {getDisplayName(coach)}
-                                            </option>
-                                        ))}
-                                    </select>
+                                    <span aria-hidden="true" style={relationArrowStyle}>
+                                        →
+                                    </span>
+
+                                    <label style={selectGroupStyle}>
+                                        <span style={selectLabelStyle}>Student</span>
+                                        <select
+                                            className="student-field-select"
+                                            value={draft.studentId}
+                                            onChange={(e) => updateDraft(dateKey, { studentId: e.target.value })}
+                                            aria-label="Add student"
+                                        >
+                                            <option value="">Choose student</option>
+                                            {students.map((s) => (
+                                                <option key={s.student_id} value={s.student_id}>
+                                                    {s.student_name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
 
                                     <button
                                         className="btn share-btn"
                                         onClick={() => createSession(dateKey)}
                                         type="button"
                                     >
-                                        Add Student
+                                        Add Pair
                                     </button>
                                 </div>
                             </section>

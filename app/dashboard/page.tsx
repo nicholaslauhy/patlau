@@ -207,6 +207,7 @@ export default function DashboardPage() {
 
       if (!user) throw new Error("Not authenticated");
 
+      // Load current student row
       const { data: studentData, error: fetchError } = await supabase
           .from("students")
           .select("*")
@@ -217,18 +218,47 @@ export default function DashboardPage() {
         throw fetchError || new Error("Student not found");
       }
 
+      // Fetch full recent action history, INCLUDING undo
+      // This is important because every "undo" should cancel one previous
+      // mark/makeup/missed action.
       const { data: auditLogs, error: auditError } = await supabase
           .from("student_audit")
           .select("*")
           .eq("student_id", studentId)
-          .in("action", ["mark", "makeup", "missed"])
+          .in("action", ["mark", "makeup", "missed", "undo"])
           .order("created_at", { ascending: false })
-          .limit(1);
+          .limit(100);
 
       if (auditError) throw auditError;
 
-      const lastAction =
-          Array.isArray(auditLogs) && auditLogs.length > 0 ? auditLogs[0] : null;
+      const logs = Array.isArray(auditLogs) ? auditLogs : [];
+
+      let undoCount = 0;
+      let actionToUndo: any = null;
+
+      for (const log of logs) {
+        if (log.action === "undo") {
+          undoCount += 1;
+          continue;
+        }
+
+        if (["mark", "makeup", "missed"].includes(log.action)) {
+          if (undoCount > 0) {
+            // This action has already been cancelled by a later undo.
+            undoCount -= 1;
+            continue;
+          }
+
+          // This is the latest attendance action that has NOT been undone yet.
+          actionToUndo = log;
+          break;
+        }
+      }
+
+      if (!actionToUndo) {
+        alert("Nothing to undo.");
+        return;
+      }
 
       let newAttended = studentData.attended ?? 0;
       let newMissed = studentData.missed ?? 0;
@@ -236,37 +266,33 @@ export default function DashboardPage() {
           ? [...studentData.attendance_records]
           : [];
 
-      if (!lastAction) {
-        const ok = confirm(
-            "No audit action found. Attempt best-effort undo based on current counters? Click OK to proceed or Cancel to abort.",
-        );
-
-        if (!ok) return;
-
-        if (newAttended > 0) {
-          newAttended = Math.max(0, newAttended - 1);
-          if (newRecords.length > 0) newRecords.pop();
-        } else if (newMissed > 0) {
-          newMissed = Math.max(0, newMissed - 1);
-        } else {
-          alert("Nothing to undo.");
-          return;
-        }
-      } else if (lastAction.action === "mark") {
+      if (actionToUndo.action === "mark") {
+        // Original mark: attended + 1
+        // Undo mark: attended - 1
         newAttended = Math.max(0, newAttended - 1);
-        if (newRecords.length > 0) newRecords.pop();
-      } else if (lastAction.action === "missed") {
+
+        if (newRecords.length > 0) {
+          newRecords.pop();
+        }
+      } else if (actionToUndo.action === "missed") {
+        // Original missed: missed + 1
+        // Undo missed: missed - 1
         newMissed = Math.max(0, newMissed - 1);
-      } else if (lastAction.action === "makeup") {
+      } else if (actionToUndo.action === "makeup") {
+        // Original makeup: missed - 1, attended + 1
+        // Undo makeup: attended - 1, missed + 1
         newAttended = Math.max(0, newAttended - 1);
         newMissed = newMissed + 1;
-        if (newRecords.length > 0) newRecords.pop();
+
+        if (newRecords.length > 0) {
+          newRecords.pop();
+        }
       } else {
         alert("Last action cannot be undone.");
         return;
       }
 
-      const { data: updatedStudent, error } = await supabase
+      const { data: updatedStudent, error: updateError } = await supabase
           .from("students")
           .update({
             attended: newAttended,
@@ -278,9 +304,13 @@ export default function DashboardPage() {
           .select()
           .single();
 
-      if (error || !updatedStudent) throw error || new Error("Update failed");
+      if (updateError || !updatedStudent) {
+        throw updateError || new Error("Update failed");
+      }
 
+      // Log this undo. Future undo presses will now skip the action we just reversed.
       await logAuditAction(studentId, "undo");
+
       await fetchData();
     } catch (err: any) {
       alert(`Failed to undo attendance: ${err?.message ?? "Unknown error"}`);
