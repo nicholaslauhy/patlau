@@ -94,6 +94,8 @@ export default function WeekdayPaymentPage() {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
     const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+    const [isResetting, setIsResetting] = useState(false);
+    const [isUndoing, setIsUndoing] = useState(false);
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -218,6 +220,7 @@ export default function WeekdayPaymentPage() {
 
     const monthlySummaryRows = useMemo(() => {
         const summaryMap = new Map<string, {
+            studentId: string;
             studentName: string;
             days: WeekdayName[];
             sessions: number;
@@ -230,6 +233,7 @@ export default function WeekdayPaymentPage() {
 
         rows.forEach((row) => {
             const existing = summaryMap.get(row.student.id) || {
+                studentId: row.student.id,
                 studentName: row.student.student_name,
                 days: [],
                 sessions: 0,
@@ -252,27 +256,226 @@ export default function WeekdayPaymentPage() {
         });
 
         return Array.from(summaryMap.values())
-            .map((summary) => {
-                let paymentStatus = 'Unpaid';
-
-                if (summary.totalRows > 0 && summary.paidRows === summary.totalRows) {
-                    paymentStatus = 'Paid';
-                } else if (summary.paidRows > 0) {
-                    paymentStatus = 'Partially Paid';
-                }
-
-                return {
-                    ...summary,
-                    days: Array.from(new Set(summary.days)),
-                    paymentStatus,
-                };
-            })
+            .map((summary) => ({
+                ...summary,
+                days: Array.from(new Set(summary.days)),
+                isPaidAll: summary.totalRows > 0 && summary.paidRows === summary.totalRows,
+            }))
             .sort((a, b) => a.studentName.localeCompare(b.studentName));
     }, [rows]);
 
-    const summaryFullyPaidCount = monthlySummaryRows.filter((row) => row.paymentStatus === 'Paid').length;
-    const summaryPartialPaidCount = monthlySummaryRows.filter((row) => row.paymentStatus === 'Partially Paid').length;
-    const summaryUnpaidCount = monthlySummaryRows.filter((row) => row.paymentStatus === 'Unpaid').length;
+    const summaryPaidAllCount = monthlySummaryRows.filter((row) => row.isPaidAll).length;
+    const summaryNotPaidAllCount = monthlySummaryRows.filter((row) => !row.isPaidAll).length;
+
+    const buildMonthlySummaryMessage = () => {
+        const studentLines = monthlySummaryRows.length > 0
+            ? monthlySummaryRows.map((summary) => (
+                `- ${summary.studentName}: ${summary.days.join(', ')} | ` +
+                `${summary.sessions} session${summary.sessions === 1 ? '' : 's'} | ` +
+                `${summary.payableHours.toFixed(2).replace(/\.00$/, '')}h | ` +
+                `S$${summary.amount.toFixed(2)} | ${summary.isPaidAll ? 'Paid' : 'Unpaid'}`
+            )).join('\n')
+            : '- No weekday payment records for this month.';
+
+        return `📊 Weekday Monthly Payment Summary 📊\n\n` +
+            `Month: ${getReadableMonth(selectedMonth)}\n` +
+            `Total Collected: S$${totalCollected.toFixed(2)}\n` +
+            `Possible Total: S$${possibleTotal.toFixed(2)}\n` +
+            `Total Sessions: ${totalSessions}\n` +
+            `Total Payable Hours: ${totalPayableHours.toFixed(2).replace(/\.00$/, '')}h\n` +
+            `Paid: ${summaryPaidAllCount}\n` +
+            `Unpaid: ${summaryNotPaidAllCount}\n\n` +
+            `Payment Details:\n${studentLines}\n\n` +
+            `Reset triggered at: ${new Date().toLocaleString()}`;
+    };
+
+    const sendWeekdayTelegramNotification = async (message: string) => {
+        const response = await fetch('/api/telegram-reminder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message }),
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to send Telegram notification.');
+        }
+    };
+
+    const handleResetTotal = async () => {
+        if (rows.length === 0) {
+            alert('No weekday payment rows found for this month.');
+            return;
+        }
+
+        if (!confirm(`Send ${getReadableMonth(selectedMonth)} weekday payment summary and reset all paid statuses for this month?`)) {
+            return;
+        }
+
+        try {
+            setIsResetting(true);
+
+            await sendWeekdayTelegramNotification(buildMonthlySummaryMessage());
+
+            const paidPaymentIds = payments
+                .filter((payment) => payment.payment_month === selectedMonth && payment.paid)
+                .map((payment) => payment.id);
+
+            if (paidPaymentIds.length > 0) {
+                const { error } = await supabase
+                    .from('weekday_payments')
+                    .update({
+                        paid: false,
+                        updated_at: new Date().toISOString(),
+                    })
+                    .in('id', paidPaymentIds);
+
+                if (error) throw error;
+            }
+
+            await loadData();
+            setLastUpdated('Monthly summary sent. Paid statuses for this month were reset.');
+        } catch (err: any) {
+            alert(err?.message || 'Failed to reset weekday payment total.');
+        } finally {
+            setIsResetting(false);
+        }
+    };
+
+    const handleUndoAdd = async () => {
+        const latestPaidPayment = [...payments]
+            .filter((payment) => payment.payment_month === selectedMonth && payment.paid)
+            .sort((a, b) => {
+                const aTime = new Date(a.updated_at || a.created_at).getTime();
+                const bTime = new Date(b.updated_at || b.created_at).getTime();
+                return bTime - aTime;
+            })[0];
+
+        if (!latestPaidPayment) {
+            alert('No paid weekday payment found to undo for this month.');
+            return;
+        }
+
+        const matchingStudent = students.find((student) => student.id === latestPaidPayment.weekday_student_id);
+        const studentName = matchingStudent?.student_name || 'Unknown student';
+
+        const studentPaidRows = payments.filter(
+            (payment) =>
+                payment.weekday_student_id === latestPaidPayment.weekday_student_id &&
+                payment.payment_month === selectedMonth &&
+                payment.paid
+        );
+
+        const paidDays = studentPaidRows
+            .map((payment) => payment.day_name)
+            .filter(Boolean)
+            .join(', ');
+
+        const totalUndoAmount = studentPaidRows.reduce(
+            (sum, payment) => sum + Number(payment.amount || 0),
+            0
+        );
+
+        if (!confirm(`Undo latest weekday payment for ${studentName} (${getReadableMonth(selectedMonth)})?\n\nThis will set all paid weekday rows for this student back to unpaid.\n\nDays: ${paidDays || 'None'}`)) {
+            return;
+        }
+
+        try {
+            setIsUndoing(true);
+
+            const { data, error } = await supabase
+                .from('weekday_payments')
+                .update({
+                    paid: false,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('weekday_student_id', latestPaidPayment.weekday_student_id)
+                .eq('payment_month', selectedMonth)
+                .eq('paid', true)
+                .select('*');
+
+            if (error) throw error;
+
+            const updatedPayments = (data || []) as WeekdayPayment[];
+
+            setPayments((prev) =>
+                prev.map((payment) => {
+                    const updatedPayment = updatedPayments.find((item) => item.id === payment.id);
+                    return updatedPayment || payment;
+                })
+            );
+
+            const message =
+                `↩️ Weekday Payment Undone ↩️\n\n` +
+                `Student: ${studentName}\n` +
+                `Month: ${getReadableMonth(selectedMonth)}\n` +
+                `Days Undone: ${paidDays || 'None'}\n` +
+                `Amount: -S$${totalUndoAmount.toFixed(2)}\n` +
+                `Status: Unpaid\n` +
+                `Recorded At: ${new Date().toLocaleString()}`;
+
+            await sendWeekdayTelegramNotification(message);
+
+            setLastUpdated(`Undid all weekday payment rows for ${studentName}.`);
+        } catch (err: any) {
+            alert(err?.message || 'Failed to undo latest weekday payment.');
+            await loadData();
+        } finally {
+            setIsUndoing(false);
+        }
+    };
+
+    const setStudentMonthPaid = async (studentId: string, paid: boolean) => {
+        const targetRows = rows.filter((row) => row.student.id === studentId);
+
+        if (targetRows.length === 0) {
+            alert('No weekday sessions found for this student.');
+            return;
+        }
+
+        try {
+            const now = new Date().toISOString();
+
+            const payload = targetRows.map((row) => ({
+                weekday_student_id: row.student.id,
+                payment_month: selectedMonth,
+                day_name: row.schedule.day,
+                paid,
+                scheduled_hours: row.scheduledMonthlyHours,
+                manual_hours: row.payment?.manual_hours ?? null,
+                amount: row.amount,
+                updated_at: now,
+            }));
+
+            const { data, error } = await supabase
+                .from('weekday_payments')
+                .upsert(payload, { onConflict: 'weekday_student_id,payment_month,day_name' })
+                .select('*');
+
+            if (error) throw error;
+
+            const savedPayments = (data || []) as WeekdayPayment[];
+
+            setPayments((prev) => {
+                const savedKeySet = new Set(
+                    savedPayments.map((payment) =>
+                        `${payment.weekday_student_id}-${payment.payment_month}-${payment.day_name}`
+                    )
+                );
+
+                const unchanged = prev.filter((payment) =>
+                    !savedKeySet.has(`${payment.weekday_student_id}-${payment.payment_month}-${payment.day_name}`)
+                );
+
+                return [...unchanged, ...savedPayments];
+            });
+
+            const studentName = targetRows[0]?.student.student_name || 'Student';
+            setLastUpdated(`${studentName} marked as ${paid ? 'Paid' : 'Unpaid'} at ${new Date().toLocaleString()}`);
+        } catch (err: any) {
+            alert(err?.message || 'Failed to update student weekday payment status.');
+            await loadData();
+        }
+    };
 
     const upsertPayment = async (
         studentId: string,
@@ -389,12 +592,32 @@ export default function WeekdayPaymentPage() {
                         <p className="amount">S${totalCollected.toFixed(2)}</p>
                         <p className="timestamp">Month: {getReadableMonth(selectedMonth)}</p>
                         <p className="timestamp">
-                            Paid rows: {paidRows.length} · Unpaid rows: {unpaidRows.length} · Possible Total: S${possibleTotal.toFixed(2)}
+                            Paid: {summaryPaidAllCount} · Unpaid: {summaryNotPaidAllCount} · Possible Total: S${possibleTotal.toFixed(2)}
                         </p>
                         <p className="timestamp">
                             Total Sessions: {totalSessions} · Total Payable Hours: {totalPayableHours.toFixed(2).replace(/\.00$/, '')}h
                         </p>
                         {lastUpdated && <p className="timestamp">{lastUpdated}</p>}
+
+                        <div className="payment-actions">
+                            <button
+                                className="payment-action-btn danger"
+                                onClick={handleResetTotal}
+                                disabled={isResetting || loading}
+                                type="button"
+                            >
+                                {isResetting ? 'Resetting...' : 'Reset Total'}
+                            </button>
+
+                            <button
+                                className="payment-action-btn warning"
+                                onClick={handleUndoAdd}
+                                disabled={isUndoing || loading}
+                                type="button"
+                            >
+                                {isUndoing ? 'Undoing...' : 'Undo Add'}
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -419,7 +642,6 @@ export default function WeekdayPaymentPage() {
                                             <th>Payable Hours</th>
                                             <th>Rate</th>
                                             <th>Amount</th>
-                                            <th>Status</th>
                                         </tr>
                                         </thead>
                                         <tbody>
@@ -451,24 +673,6 @@ export default function WeekdayPaymentPage() {
                                                 </td>
                                                 <td>S${row.rate.toFixed(2)}/h</td>
                                                 <td>S${row.amount.toFixed(2)}</td>
-                                                <td>
-                                                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={row.isPaid}
-                                                            onChange={(event) =>
-                                                                upsertPayment(
-                                                                    row.student.id,
-                                                                    row.schedule.day,
-                                                                    { paid: event.target.checked },
-                                                                    row.scheduledMonthlyHours,
-                                                                    row.rate
-                                                                )
-                                                            }
-                                                        />
-                                                        {row.isPaid ? 'Paid' : 'Unpaid'}
-                                                    </label>
-                                                </td>
                                             </tr>
                                         ))}
                                         </tbody>
@@ -494,7 +698,7 @@ export default function WeekdayPaymentPage() {
                                 This combines Monday, Wednesday, and Thursday into one monthly total per student.
                             </p>
                             <p className="timestamp">
-                                Fully Paid: {summaryFullyPaidCount} · Partially Paid: {summaryPartialPaidCount} · Unpaid: {summaryUnpaidCount}
+                                Paid: {summaryPaidAllCount} · Unpaid: {summaryNotPaidAllCount}
                             </p>
                         </div>
 
@@ -509,7 +713,7 @@ export default function WeekdayPaymentPage() {
                                         <th>Default Monthly Hours</th>
                                         <th>Payable Hours</th>
                                         <th>Total Amount</th>
-                                        <th>Payment Status</th>
+                                        <th>Paid</th>
                                     </tr>
                                     </thead>
                                     <tbody>
@@ -522,29 +726,15 @@ export default function WeekdayPaymentPage() {
                                             <td>{summary.payableHours.toFixed(2).replace(/\.00$/, '')}h</td>
                                             <td><strong>S${summary.amount.toFixed(2)}</strong></td>
                                             <td>
-                          <span
-                              style={{
-                                  display: 'inline-flex',
-                                  padding: '6px 10px',
-                                  borderRadius: 999,
-                                  fontWeight: 800,
-                                  fontSize: '0.82rem',
-                                  color:
-                                      summary.paymentStatus === 'Paid'
-                                          ? '#047857'
-                                          : summary.paymentStatus === 'Partially Paid'
-                                              ? '#92400e'
-                                              : '#b91c1c',
-                                  background:
-                                      summary.paymentStatus === 'Paid'
-                                          ? '#d1fae5'
-                                          : summary.paymentStatus === 'Partially Paid'
-                                              ? '#fef3c7'
-                                              : '#fee2e2',
-                              }}
-                          >
-                            {summary.paymentStatus}
-                          </span>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={summary.isPaidAll}
+                                                        onChange={(event) => setStudentMonthPaid(summary.studentId, event.target.checked)}
+                                                        disabled={loading}
+                                                    />
+                                                    {summary.isPaidAll ? 'Paid' : 'Unpaid'}
+                                                </label>
                                             </td>
                                         </tr>
                                     ))}
