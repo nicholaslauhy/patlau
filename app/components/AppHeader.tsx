@@ -26,23 +26,34 @@ const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-const trainingItems: NavItem[] = [
+const weekendItems: NavItem[] = [
     { label: 'Dashboard', href: '/dashboard', allowedRoles: ['superuser', 'admin', 'member'] },
-    { label: 'Add Student', href: '/add', allowedRoles: ['superuser', 'admin'] },
-    { label: 'Attendance', href: '/attendance', allowedRoles: ['superuser'] },
-    { label: 'Payment', href: '/payment', allowedRoles: ['superuser'] }
+    { label: 'Add Weekend Student', href: '/add', allowedRoles: ['superuser', 'admin'] },
+    { label: 'Weekend Attendance', href: '/attendance', allowedRoles: ['superuser'] },
+    { label: 'Weekend Payment', href: '/payment', allowedRoles: ['superuser'] }
 ];
 
 const oneToOneItems: NavItem[] = [
+    { label: 'Add 1-1 Student', href: '/training/add', allowedRoles: ['superuser', 'admin'] },
     { label: '1-1 Training', href: '/training', allowedRoles: ['superuser', 'admin'] },
     { label: '1-1 Payment', href: '/trngpayment', allowedRoles: ['superuser'] }
+];
+
+const weekdayItems: NavItem[] = [
+    { label: 'Add Weekday Student', href: '/weekday/add', allowedRoles: ['superuser', 'admin'] },
+    { label: 'Weekday Attendance', href: '/weekday/attendance', allowedRoles: ['superuser', 'admin'] },
+    { label: 'Weekday Payment', href: '/weekday/payment', allowedRoles: ['superuser'] }
+];
+
+const matchPlayItems: NavItem[] = [
+    { label: 'MatchPlay', href: '/matchplay', allowedRoles: ['superuser', 'admin', 'member'] }
 ];
 
 const menuBoxStyle: React.CSSProperties = {
     position: 'absolute',
     right: 0,
     top: 'calc(100% + 6px)',
-    minWidth: '200px',
+    minWidth: '220px',
     background: 'white',
     border: '1px solid #e5e7eb',
     borderRadius: '14px',
@@ -70,7 +81,6 @@ const menuItemStyle: React.CSSProperties = {
     lineHeight: 1.2,
     textAlign: 'left'
 };
-
 
 const hoverMenuItemStyle: React.CSSProperties = {
     background: '#eff6ff',
@@ -182,6 +192,8 @@ function NavDropdown({ label, items, userRole }: { label: string; items: NavItem
 
     if (visibleItems.length === 0) return null;
 
+    const active = visibleItems.some(item => pathname === item.href || pathname.startsWith(`${item.href}/`));
+
     return (
         <div ref={dropdownRef} style={{ position: 'relative' }}>
             <button
@@ -190,6 +202,7 @@ function NavDropdown({ label, items, userRole }: { label: string; items: NavItem
                 onClick={() => setOpen(prev => !prev)}
                 aria-haspopup="menu"
                 aria-expanded={open}
+                style={active ? { borderColor: '#2563eb', color: '#2563eb', background: '#eff6ff' } : undefined}
             >
                 {label} ▾
             </button>
@@ -302,11 +315,13 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
                 <h1 className="page-title">{title}</h1>
             </div>
 
-            <div className="user-controls">
+            <div className="user-controls" style={{ flexWrap: 'wrap' }}>
                 {mode === 'dashboard' ? (
                     <>
-                        <NavDropdown label="Training" items={trainingItems} userRole={userRole} />
+                        <NavDropdown label="Weekend" items={weekendItems} userRole={userRole} />
                         <NavDropdown label="1-1" items={oneToOneItems} userRole={userRole} />
+                        <NavDropdown label="Weekday" items={weekdayItems} userRole={userRole} />
+                        <NavDropdown label="MatchPlay" items={matchPlayItems} userRole={userRole} />
                     </>
                 ) : (
                     <Link href="/dashboard" className="btn share-btn">
