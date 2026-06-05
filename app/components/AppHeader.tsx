@@ -1,4 +1,4 @@
-'use client';
+'use client'
 
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
@@ -26,40 +26,49 @@ const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-const weekendItems: NavItem[] = [
-    { label: 'Dashboard', href: '/dashboard', allowedRoles: ['superuser', 'admin', 'member'] },
-    { label: 'Add Weekend Student', href: '/add', allowedRoles: ['superuser', 'admin'] },
-    { label: 'Weekend Attendance', href: '/attendance', allowedRoles: ['superuser'] },
-    { label: 'Weekend Payment', href: '/payment', allowedRoles: ['superuser'] }
+/**
+ * Header order:
+ * Weekday → MatchPlay → 1-1 → Weekend
+ *
+ * Role rules:
+ * - superuser: can access everything
+ * - admin: can access operational pages, but not superuser-only payment pages
+ * - member: only Weekend → Dashboard
+ */
+const weekdayItems: NavItem[] = [
+    { label: 'Add Weekday Student', href: '/weekday/add', allowedRoles: ['superuser', 'admin'] },
+    { label: 'Weekday Attendance', href: '/weekday/attendance', allowedRoles: ['superuser', 'admin'] },
+    { label: 'Weekday Payment', href: '/weekday/payment', allowedRoles: ['superuser'] },
+];
+
+const matchPlayItems: NavItem[] = [
+    { label: 'MatchPlay', href: '/matchplay', allowedRoles: ['superuser', 'admin'] },
 ];
 
 const oneToOneItems: NavItem[] = [
     { label: 'Add 1-1 Student', href: '/training/add', allowedRoles: ['superuser', 'admin'] },
     { label: '1-1 Training', href: '/training', allowedRoles: ['superuser', 'admin'] },
-    { label: '1-1 Payment', href: '/trngpayment', allowedRoles: ['superuser'] }
+    { label: '1-1 Payment', href: '/trngpayment', allowedRoles: ['superuser'] },
 ];
 
-const weekdayItems: NavItem[] = [
-    { label: 'Add Weekday Student', href: '/weekday/add', allowedRoles: ['superuser', 'admin'] },
-    { label: 'Weekday Attendance', href: '/weekday/attendance', allowedRoles: ['superuser', 'admin'] },
-    { label: 'Weekday Payment', href: '/weekday/payment', allowedRoles: ['superuser'] }
-];
-
-const matchPlayItems: NavItem[] = [
-    { label: 'MatchPlay', href: '/matchplay', allowedRoles: ['superuser', 'admin', 'member'] }
+const weekendItems: NavItem[] = [
+    { label: 'Dashboard', href: '/dashboard', allowedRoles: ['superuser', 'admin', 'member'] },
+    { label: 'Add Student', href: '/add', allowedRoles: ['superuser', 'admin'] },
+    { label: 'Attendance', href: '/attendance', allowedRoles: ['superuser'] },
+    { label: 'Payment', href: '/payment', allowedRoles: ['superuser'] },
 ];
 
 const menuBoxStyle: React.CSSProperties = {
     position: 'absolute',
     right: 0,
-    top: 'calc(100% + 6px)',
+    top: 'calc(100% + 8px)',
     minWidth: '220px',
     background: 'white',
     border: '1px solid #e5e7eb',
     borderRadius: '14px',
     boxShadow: '0 14px 34px rgba(0,0,0,0.14)',
     padding: '8px',
-    zIndex: 2000
+    zIndex: 3000,
 };
 
 const menuItemStyle: React.CSSProperties = {
@@ -71,44 +80,66 @@ const menuItemStyle: React.CSSProperties = {
     borderRadius: '10px',
     color: '#374151',
     textDecoration: 'none',
-    fontWeight: 600,
+    fontWeight: 700,
     whiteSpace: 'nowrap',
     border: 'none',
     background: 'transparent',
     cursor: 'pointer',
     fontFamily: 'inherit',
-    fontSize: '0.95rem',
+    fontSize: '0.92rem',
     lineHeight: 1.2,
-    textAlign: 'left'
+    textAlign: 'left',
 };
 
 const hoverMenuItemStyle: React.CSSProperties = {
     background: '#eff6ff',
     color: '#1d4ed8',
-    transform: 'translateX(2px)'
 };
 
 const activeMenuItemStyle: React.CSSProperties = {
     background: '#2563eb',
     color: 'white',
-    boxShadow: '0 6px 14px rgba(37,99,235,0.28)'
+    boxShadow: '0 6px 14px rgba(37,99,235,0.28)',
 };
 
 const activePillStyle: React.CSSProperties = {
     marginLeft: 'auto',
-    fontSize: '0.7rem',
-    fontWeight: 800,
+    fontSize: '0.68rem',
+    fontWeight: 900,
     padding: '3px 7px',
     borderRadius: '999px',
     background: 'rgba(255,255,255,0.22)',
-    color: 'white'
+    color: 'white',
+};
+
+const navRowStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: '8px',
+    flexWrap: 'nowrap',
+    whiteSpace: 'nowrap',
+    overflow: 'visible',
+    minWidth: 'max-content',
+};
+
+const navButtonStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+    padding: '8px 12px',
+    borderRadius: '10px',
+    lineHeight: 1,
+    minHeight: '36px',
 };
 
 function MenuLink({
                       href,
                       children,
                       active = false,
-                      onClick
+                      onClick,
                   }: {
     href: string;
     children: React.ReactNode;
@@ -123,9 +154,9 @@ function MenuLink({
             role="menuitem"
             style={{
                 ...menuItemStyle,
-                transition: 'background 0.16s ease, color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease',
+                transition: 'background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease',
                 ...(hovered && !active ? hoverMenuItemStyle : {}),
-                ...(active ? activeMenuItemStyle : {})
+                ...(active ? activeMenuItemStyle : {}),
             }}
             onMouseEnter={() => setHovered(true)}
             onMouseLeave={() => setHovered(false)}
@@ -141,7 +172,7 @@ function MenuLink({
 
 function MenuButton({
                         children,
-                        onClick
+                        onClick,
                     }: {
     children: React.ReactNode;
     onClick: () => void;
@@ -151,12 +182,11 @@ function MenuButton({
     return (
         <button
             type="button"
-            className="account-menu-link"
             onClick={onClick}
             style={{
                 ...menuItemStyle,
-                transition: 'background 0.16s ease, color 0.16s ease, transform 0.16s ease',
-                ...(hovered ? hoverMenuItemStyle : {})
+                transition: 'background 0.16s ease, color 0.16s ease',
+                ...(hovered ? hoverMenuItemStyle : {}),
             }}
             onMouseEnter={() => setHovered(true)}
             onMouseLeave={() => setHovered(false)}
@@ -168,11 +198,26 @@ function MenuButton({
     );
 }
 
-function NavDropdown({ label, items, userRole }: { label: string; items: NavItem[]; userRole: UserRole | null }) {
+function NavDropdown({
+                         label,
+                         items,
+                         userRole,
+                     }: {
+    label: string;
+    items: NavItem[];
+    userRole: UserRole | null;
+}) {
     const [open, setOpen] = useState(false);
     const pathname = usePathname();
     const dropdownRef = useRef<HTMLDivElement | null>(null);
-    const visibleItems = items.filter(item => userRole && item.allowedRoles.includes(userRole));
+
+    const visibleItems = items.filter(
+        (item) => userRole && item.allowedRoles.includes(userRole)
+    );
+
+    const active = visibleItems.some(
+        (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
+    );
 
     useEffect(() => {
         const handlePointerDown = (event: MouseEvent | TouchEvent) => {
@@ -192,24 +237,35 @@ function NavDropdown({ label, items, userRole }: { label: string; items: NavItem
 
     if (visibleItems.length === 0) return null;
 
-    const active = visibleItems.some(item => pathname === item.href || pathname.startsWith(`${item.href}/`));
-
     return (
-        <div ref={dropdownRef} style={{ position: 'relative' }}>
+        <div
+            ref={dropdownRef}
+            style={{
+                position: 'relative',
+                display: 'inline-flex',
+                flexShrink: 0,
+                overflow: 'visible',
+            }}
+        >
             <button
                 type="button"
                 className="btn share-btn"
-                onClick={() => setOpen(prev => !prev)}
+                onClick={() => setOpen((prev) => !prev)}
                 aria-haspopup="menu"
                 aria-expanded={open}
-                style={active ? { borderColor: '#2563eb', color: '#2563eb', background: '#eff6ff' } : undefined}
+                style={{
+                    ...navButtonStyle,
+                    borderColor: active ? '#2563eb' : undefined,
+                    color: active ? '#1d4ed8' : undefined,
+                    boxShadow: active ? '0 0 0 2px rgba(37, 99, 235, 0.08)' : undefined,
+                }}
             >
                 {label} ▾
             </button>
 
             {open && (
                 <div role="menu" style={menuBoxStyle}>
-                    {visibleItems.map(item => {
+                    {visibleItems.map((item) => {
                         const isActive = pathname === item.href;
 
                         return (
@@ -229,7 +285,12 @@ function NavDropdown({ label, items, userRole }: { label: string; items: NavItem
     );
 }
 
-export default function AppHeader({ title, userName, userRole, mode = 'dashboard' }: AppHeaderProps) {
+export default function AppHeader({
+                                      title,
+                                      userName,
+                                      userRole,
+                                      mode = 'dashboard',
+                                  }: AppHeaderProps) {
     const router = useRouter();
     const pathname = usePathname();
     const accountRef = useRef<HTMLDivElement | null>(null);
@@ -253,20 +314,41 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
 
     const signOut = async () => {
         const { error } = await supabase.auth.signOut();
+
         if (error) {
             alert('Logout failed');
             return;
         }
+
         router.push('/');
     };
 
     return (
-        <header className="dashboard-header">
-            <div className="header-left">
-                <div ref={accountRef} className="brand" style={{ position: 'relative' }}>
+        <header
+            className="dashboard-header"
+            style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                flexWrap: 'nowrap',
+                overflow: 'visible',
+            }}
+        >
+            <div
+                className="header-left"
+                style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    minWidth: 0,
+                    flex: '1 1 auto',
+                }}
+            >
+                <div ref={accountRef} className="brand" style={{ position: 'relative', flexShrink: 0 }}>
                     <button
                         className="account-avatar-btn"
-                        onClick={() => setShowAccountMenu(prev => !prev)}
+                        onClick={() => setShowAccountMenu((prev) => !prev)}
                         title="View account"
                         type="button"
                     >
@@ -283,14 +365,28 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
                                 boxShadow: '0 14px 34px rgba(0,0,0,0.14)',
                                 border: '1px solid #e5e7eb',
                                 background: 'white',
-                                zIndex: 2000
+                                zIndex: 3000,
                             }}
                         >
-                            <div style={{ padding: '8px 10px 10px', borderBottom: '1px solid #f3f4f6', marginBottom: '6px' }}>
+                            <div
+                                style={{
+                                    padding: '8px 10px 10px',
+                                    borderBottom: '1px solid #f3f4f6',
+                                    marginBottom: '6px',
+                                }}
+                            >
                                 <p className="account-name" style={{ margin: 0, fontWeight: 700, color: '#111827' }}>
                                     {userName || 'User'}
                                 </p>
-                                <p className="account-role" style={{ margin: '4px 0 0', fontSize: '0.78rem', color: '#6b7280', letterSpacing: '0.04em' }}>
+                                <p
+                                    className="account-role"
+                                    style={{
+                                        margin: '4px 0 0',
+                                        fontSize: '0.78rem',
+                                        color: '#6b7280',
+                                        letterSpacing: '0.04em',
+                                    }}
+                                >
                                     {userRole?.toUpperCase() || 'MEMBER'}
                                 </p>
                             </div>
@@ -312,19 +408,35 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
                     )}
                 </div>
 
-                <h1 className="page-title">{title}</h1>
+                <h1
+                    className="page-title"
+                    style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        minWidth: 0,
+                    }}
+                >
+                    {title}
+                </h1>
             </div>
 
-            <div className="user-controls" style={{ flexWrap: 'wrap' }}>
+            <div
+                className="user-controls"
+                style={{
+                    ...navRowStyle,
+                    flex: '0 0 auto',
+                }}
+            >
                 {mode === 'dashboard' ? (
                     <>
-                        <NavDropdown label="Weekend" items={weekendItems} userRole={userRole} />
-                        <NavDropdown label="1-1" items={oneToOneItems} userRole={userRole} />
                         <NavDropdown label="Weekday" items={weekdayItems} userRole={userRole} />
                         <NavDropdown label="MatchPlay" items={matchPlayItems} userRole={userRole} />
+                        <NavDropdown label="1-1" items={oneToOneItems} userRole={userRole} />
+                        <NavDropdown label="Weekend" items={weekendItems} userRole={userRole} />
                     </>
                 ) : (
-                    <Link href="/dashboard" className="btn share-btn">
+                    <Link href="/dashboard" className="btn share-btn" style={navButtonStyle}>
                         Return to Dashboard
                     </Link>
                 )}

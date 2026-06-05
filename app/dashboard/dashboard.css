@@ -720,3 +720,92 @@ td.attendance-history {
     min-width: 180px !important;
   }
 }
+
+
+/* AppHeader one-line dropdown fix */
+.dashboard-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  flex-wrap: nowrap !important;
+  overflow: visible !important;
+}
+
+.dashboard-header .header-left {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+}
+
+.dashboard-header .page-title {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.dashboard-header .user-controls {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+  flex-wrap: nowrap !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  min-width: max-content !important;
+  flex: 0 0 auto !important;
+}
+
+.dashboard-header .user-controls .btn {
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
+  padding: 8px 12px !important;
+  min-height: 36px !important;
+  line-height: 1 !important;
+}
+
+/* Fix AppHeader dropdown hover contrast.
+   Paste this at the bottom of app/dashboard/dashboard.css or your global CSS. */
+
+.dashboard-header .user-controls .btn.share-btn:hover,
+.dashboard-header .user-controls .btn.share-btn:focus {
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+  border-color: #93c5fd !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.14) !important;
+  transform: none !important;
+}
+
+.dashboard-header .user-controls .btn.share-btn:hover *,
+.dashboard-header .user-controls .btn.share-btn:focus * {
+  color: #1d4ed8 !important;
+}
+
+/* Dropdown menu items */
+.dashboard-header a[role="menuitem"]:hover,
+.dashboard-header a[role="menuitem"]:focus,
+.dashboard-header button[role="menuitem"]:hover,
+.dashboard-header button[role="menuitem"]:focus {
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
+/* Keep active/current item readable */
+.dashboard-header a[role="menuitem"][aria-current="page"],
+.dashboard-header a[role="menuitem"].active {
+  background: #2563eb !important;
+  color: #ffffff !important;
+}
+
+/* Safer general header button text contrast */
+.dashboard-header .btn {
+  color: #111827;
+}
+
+.dashboard-header .btn:hover {
+  color: #1d4ed8;
+}
+

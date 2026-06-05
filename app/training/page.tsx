@@ -18,21 +18,18 @@ type UserRole = 'superuser' | 'admin' | 'member';
 interface AppUser {
     id: string;
     email: string;
-    user_metadata?: {
-        name?: string;
-        role?: UserRole;
-    };
-    app_metadata?: {
-        role?: UserRole;
-    };
+    user_metadata?: { name?: string; role?: UserRole };
+    app_metadata?: { role?: UserRole };
 }
 
-interface Student {
-    student_id: string;
+interface OneToOneStudent {
+    id: string;
     student_name: string;
+    payment_amount: number;
+    active: boolean;
 }
 
-interface TrainingSession {
+interface OneToOneSession {
     id: number;
     session_date: string;
     student_id: string;
@@ -46,17 +43,11 @@ interface DraftSession {
     coachId: string;
 }
 
-const getUserRole = (user: any): UserRole => {
-    return (
-        user?.app_metadata?.role ||
-        user?.user_metadata?.role ||
-        'member'
-    ) as UserRole;
-};
+const getUserRole = (user: any): UserRole => (
+    user?.app_metadata?.role || user?.user_metadata?.role || 'member'
+) as UserRole;
 
-const getDisplayName = (user: AppUser) => {
-    return user.user_metadata?.name || user.email || 'User';
-};
+const getDisplayName = (user: AppUser) => user.user_metadata?.name || user.email || 'User';
 
 const formatDateLocal = (date: Date) => {
     const year = date.getFullYear();
@@ -65,18 +56,14 @@ const formatDateLocal = (date: Date) => {
     return `${year}-${month}-${day}`;
 };
 
-const normalizeDateKey = (dateValue: string) => {
-    return dateValue.slice(0, 10);
-};
+const normalizeDateKey = (dateValue: string) => dateValue.slice(0, 10);
 
 const getNextMonthDateKey = (monthValue: string) => {
     const [yearStr, monthStr] = monthValue.split('-');
     const year = Number(yearStr);
     const month = Number(monthStr);
-
     const nextMonth = month === 12 ? 1 : month + 1;
     const nextYear = month === 12 ? year + 1 : year;
-
     return `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
 };
 
@@ -100,23 +87,13 @@ const rowStyle: CSSProperties = {
 };
 
 const addRowStyle: CSSProperties = {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(160px, 1.1fr) auto minmax(160px, 1.1fr) auto',
-    gap: '12px',
-    alignItems: 'end',
+    ...rowStyle,
     marginTop: '16px',
-    padding: '14px',
-    borderRadius: '14px',
     border: '1px dashed #cbd5e1',
     background: '#ffffff'
 };
 
-const selectGroupStyle: CSSProperties = {
-    display: 'grid',
-    gap: '6px',
-    minWidth: 0
-};
-
+const selectGroupStyle: CSSProperties = { display: 'grid', gap: '6px', minWidth: 0 };
 const selectLabelStyle: CSSProperties = {
     fontSize: '0.72rem',
     fontWeight: 800,
@@ -124,7 +101,6 @@ const selectLabelStyle: CSSProperties = {
     textTransform: 'uppercase',
     letterSpacing: '0.04em'
 };
-
 const relationArrowStyle: CSSProperties = {
     alignSelf: 'center',
     justifySelf: 'center',
@@ -139,10 +115,9 @@ export default function TrainingPage() {
 
     const [userName, setUserName] = useState('');
     const [userRole, setUserRole] = useState<UserRole | null>(null);
-
-    const [students, setStudents] = useState<Student[]>([]);
+    const [students, setStudents] = useState<OneToOneStudent[]>([]);
     const [coaches, setCoaches] = useState<AppUser[]>([]);
-    const [sessions, setSessions] = useState<TrainingSession[]>([]);
+    const [sessions, setSessions] = useState<OneToOneSession[]>([]);
     const [draftSessions, setDraftSessions] = useState<Record<string, DraftSession>>({});
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
@@ -184,18 +159,15 @@ export default function TrainingPage() {
         return days;
     }, [selectedMonth]);
 
-    const studentNameById = useMemo(() => {
-        return new Map(students.map(student => [student.student_id, student.student_name]));
-    }, [students]);
-
     const loadData = async () => {
         try {
             setLoading(true);
             setMessage('');
 
             const { data: studentData, error: studentError } = await supabase
-                .from('students')
-                .select('student_id, student_name')
+                .from('one_to_one_students')
+                .select('id, student_name, payment_amount, active')
+                .eq('active', true)
                 .order('student_name', { ascending: true });
 
             if (studentError) throw studentError;
@@ -218,7 +190,7 @@ export default function TrainingPage() {
             const endDateKey = getNextMonthDateKey(selectedMonth);
 
             const { data: sessionData, error: sessionError } = await supabase
-                .from('training_sessions')
+                .from('one_to_one_sessions')
                 .select('id, session_date, student_id, coach_id, created_at, updated_at')
                 .gte('session_date', startDateKey)
                 .lt('session_date', endDateKey)
@@ -227,15 +199,15 @@ export default function TrainingPage() {
 
             if (sessionError) throw sessionError;
 
-            setStudents(studentData || []);
+            setStudents((studentData || []) as OneToOneStudent[]);
             setCoaches(coachList);
-            setSessions(((sessionData || []) as TrainingSession[]).map(session => ({
+            setSessions(((sessionData || []) as OneToOneSession[]).map(session => ({
                 ...session,
                 session_date: normalizeDateKey(session.session_date)
             })));
         } catch (err: any) {
             console.error(err);
-            setMessage(err?.message || 'Failed to load training data');
+            setMessage(err?.message || 'Failed to load 1-1 training data');
         } finally {
             setLoading(false);
         }
@@ -245,9 +217,7 @@ export default function TrainingPage() {
         loadData();
     }, [selectedMonth]);
 
-    const getSessionsForDate = (date: string) => {
-        return sessions.filter(s => s.session_date === date);
-    };
+    const getSessionsForDate = (date: string) => sessions.filter(s => s.session_date === date);
 
     const updateDraft = (date: string, patch: Partial<DraftSession>) => {
         setDraftSessions(prev => ({
@@ -264,7 +234,7 @@ export default function TrainingPage() {
         const draft = draftSessions[sessionDate];
 
         if (!draft?.studentId || !draft?.coachId) {
-            alert('Please select both a student and a coach.');
+            alert('Please select both a coach and a student.');
             return;
         }
 
@@ -273,17 +243,18 @@ export default function TrainingPage() {
         );
 
         if (alreadyAdded) {
-            alert('This student has already been added for this Sunday.');
+            alert('This 1-1 student has already been added for this Sunday.');
             return;
         }
 
         try {
             const { data, error } = await supabase
-                .from('training_sessions')
+                .from('one_to_one_sessions')
                 .insert({
                     session_date: sessionDate,
                     student_id: draft.studentId,
-                    coach_id: draft.coachId
+                    coach_id: draft.coachId,
+                    updated_at: new Date().toISOString()
                 })
                 .select('id, session_date, student_id, coach_id, created_at, updated_at')
                 .single();
@@ -291,8 +262,8 @@ export default function TrainingPage() {
             if (error) throw error;
 
             const newSession = {
-                ...(data as TrainingSession),
-                session_date: normalizeDateKey((data as TrainingSession).session_date)
+                ...(data as OneToOneSession),
+                session_date: normalizeDateKey((data as OneToOneSession).session_date)
             };
 
             setSessions(prev =>
@@ -307,11 +278,14 @@ export default function TrainingPage() {
                 [sessionDate]: { studentId: '', coachId: '' }
             }));
         } catch (err: any) {
-            alert(err?.message || 'Failed to add training session');
+            alert(err?.message || 'Failed to add 1-1 training session');
         }
     };
 
-    const updateSession = async (sessionId: number, patch: Partial<Pick<TrainingSession, 'student_id' | 'coach_id'>>) => {
+    const updateSession = async (
+        sessionId: number,
+        patch: Partial<Pick<OneToOneSession, 'student_id' | 'coach_id'>>
+    ) => {
         try {
             const currentSession = sessions.find(s => s.id === sessionId);
             if (!currentSession) return;
@@ -325,14 +299,14 @@ export default function TrainingPage() {
                 );
 
                 if (duplicate) {
-                    alert('This student has already been added for this Sunday.');
+                    alert('This 1-1 student has already been added for this Sunday.');
                     return;
                 }
             }
 
             const { data, error } = await supabase
-                .from('training_sessions')
-                .update(patch)
+                .from('one_to_one_sessions')
+                .update({ ...patch, updated_at: new Date().toISOString() })
                 .eq('id', sessionId)
                 .select('id, session_date, student_id, coach_id, created_at, updated_at')
                 .single();
@@ -340,13 +314,13 @@ export default function TrainingPage() {
             if (error) throw error;
 
             const updatedSession = {
-                ...(data as TrainingSession),
-                session_date: normalizeDateKey((data as TrainingSession).session_date)
+                ...(data as OneToOneSession),
+                session_date: normalizeDateKey((data as OneToOneSession).session_date)
             };
 
             setSessions(prev => prev.map(s => s.id === sessionId ? updatedSession : s));
         } catch (err: any) {
-            alert(err?.message || 'Failed to update training session');
+            alert(err?.message || 'Failed to update 1-1 training session');
         }
     };
 
@@ -356,7 +330,7 @@ export default function TrainingPage() {
 
         try {
             const { error } = await supabase
-                .from('training_sessions')
+                .from('one_to_one_sessions')
                 .delete()
                 .eq('id', sessionId);
 
@@ -364,9 +338,12 @@ export default function TrainingPage() {
 
             setSessions(prev => prev.filter(s => s.id !== sessionId));
         } catch (err: any) {
-            alert(err?.message || 'Failed to remove training session');
+            alert(err?.message || 'Failed to remove 1-1 training session');
         }
     };
+
+    const studentName = (id: string) => students.find(s => s.id === id)?.student_name || 'Missing 1-1 student';
+    const coachName = (id: string) => coaches.find(c => c.id === id) ? getDisplayName(coaches.find(c => c.id === id)!) : 'Unassigned coach';
 
     if (userRole === 'member' || !userRole) {
         return (
@@ -380,12 +357,7 @@ export default function TrainingPage() {
 
     return (
         <div className="container">
-            <AppHeader
-                title="1-on-1 Training"
-                userName={userName}
-                userRole={userRole}
-                mode="dashboard"
-            />
+            <AppHeader title="1-on-1 Training" userName={userName} userRole={userRole} mode="dashboard" />
 
             <main>
                 <div className="filter-box" style={{ width: '100%' }}>
@@ -424,7 +396,7 @@ export default function TrainingPage() {
                                             })}
                                         </h2>
                                         <p className="timestamp" style={{ textAlign: 'left', margin: '6px 0 0' }}>
-                                            {dateSessions.length} pair{dateSessions.length === 1 ? '' : 's'} assigned
+                                            {dateSessions.length} student{dateSessions.length === 1 ? '' : 's'} added
                                         </p>
                                     </div>
                                 </div>
@@ -433,7 +405,7 @@ export default function TrainingPage() {
                                     <div style={{ marginTop: '14px' }}>
                                         {dateSessions.map((session) => (
                                             <div key={session.id} style={rowStyle}>
-                                                <label style={selectGroupStyle}>
+                                                <div style={selectGroupStyle}>
                                                     <span style={selectLabelStyle}>Coach</span>
                                                     <select
                                                         className="student-field-select"
@@ -448,34 +420,28 @@ export default function TrainingPage() {
                                                             </option>
                                                         ))}
                                                     </select>
-                                                </label>
+                                                </div>
 
-                                                <span aria-hidden="true" style={relationArrowStyle}>
-                                                    →
-                                                </span>
+                                                <span style={relationArrowStyle}>→</span>
 
-                                                <label style={selectGroupStyle}>
-                                                    <span style={selectLabelStyle}>Student</span>
+                                                <div style={selectGroupStyle}>
+                                                    <span style={selectLabelStyle}>1-1 Student</span>
                                                     <select
                                                         className="student-field-select"
                                                         value={session.student_id}
                                                         onChange={(e) => updateSession(session.id, { student_id: e.target.value })}
-                                                        aria-label="Student"
+                                                        aria-label="1-1 Student"
                                                     >
-                                                        <option value="">Select student</option>
+                                                        <option value="">Select 1-1 student</option>
                                                         {students.map((s) => (
-                                                            <option key={s.student_id} value={s.student_id}>
+                                                            <option key={s.id} value={s.id}>
                                                                 {s.student_name}
                                                             </option>
                                                         ))}
                                                     </select>
-                                                </label>
+                                                </div>
 
-                                                <button
-                                                    className="btn share-btn logout"
-                                                    onClick={() => deleteSession(session.id)}
-                                                    type="button"
-                                                >
+                                                <button className="btn share-btn logout" onClick={() => deleteSession(session.id)} type="button">
                                                     Remove
                                                 </button>
                                             </div>
@@ -484,7 +450,7 @@ export default function TrainingPage() {
                                 )}
 
                                 <div style={addRowStyle}>
-                                    <label style={selectGroupStyle}>
+                                    <div style={selectGroupStyle}>
                                         <span style={selectLabelStyle}>Coach</span>
                                         <select
                                             className="student-field-select"
@@ -499,34 +465,28 @@ export default function TrainingPage() {
                                                 </option>
                                             ))}
                                         </select>
-                                    </label>
+                                    </div>
 
-                                    <span aria-hidden="true" style={relationArrowStyle}>
-                                        →
-                                    </span>
+                                    <span style={relationArrowStyle}>→</span>
 
-                                    <label style={selectGroupStyle}>
-                                        <span style={selectLabelStyle}>Student</span>
+                                    <div style={selectGroupStyle}>
+                                        <span style={selectLabelStyle}>1-1 Student</span>
                                         <select
                                             className="student-field-select"
                                             value={draft.studentId}
                                             onChange={(e) => updateDraft(dateKey, { studentId: e.target.value })}
-                                            aria-label="Add student"
+                                            aria-label="Add 1-1 student"
                                         >
-                                            <option value="">Choose student</option>
+                                            <option value="">Choose 1-1 student</option>
                                             {students.map((s) => (
-                                                <option key={s.student_id} value={s.student_id}>
+                                                <option key={s.id} value={s.id}>
                                                     {s.student_name}
                                                 </option>
                                             ))}
                                         </select>
-                                    </label>
+                                    </div>
 
-                                    <button
-                                        className="btn share-btn"
-                                        onClick={() => createSession(dateKey)}
-                                        type="button"
-                                    >
+                                    <button className="btn share-btn" onClick={() => createSession(dateKey)} type="button">
                                         Add Pair
                                     </button>
                                 </div>
