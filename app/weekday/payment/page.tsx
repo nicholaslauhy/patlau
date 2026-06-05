@@ -2,26 +2,27 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
+import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../../components/AppHeader';
 import './../../styles.css';
 import './../../dashboard/dashboard.css';
 import './../../payment/payment.css';
 
 type UserRole = 'superuser' | 'admin' | 'member';
+type WeekdayName = 'Monday' | 'Wednesday' | 'Thursday';
 type PaymentFilter = 'all' | 'paid' | 'unpaid';
 
 interface WeekdaySchedule {
-    day: 'Monday' | 'Wednesday' | 'Thursday';
-    duration: number;
+    day: WeekdayName;
+    duration_hours?: number;
+    duration?: number;
 }
 
 interface WeekdayStudent {
     id: string;
     student_name: string;
     schedules: WeekdaySchedule[];
-    total_payment_amount: number;
     hourly_rate: number;
     active: boolean;
 }
@@ -30,8 +31,11 @@ interface WeekdayPayment {
     id: number;
     weekday_student_id: string;
     payment_month: string;
+    day_name: WeekdayName;
     paid: boolean;
     amount: number;
+    scheduled_hours?: number | null;
+    manual_hours?: number | null;
     created_at: string;
     updated_at?: string;
 }
@@ -41,12 +45,38 @@ const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+const DAY_OPTIONS: WeekdayName[] = ['Monday', 'Wednesday', 'Thursday'];
+const DAY_INDEX: Record<WeekdayName, number> = { Monday: 1, Wednesday: 3, Thursday: 4 };
+const DEFAULT_HOURLY_RATE = 80;
+
+const getUserRole = (user: any): UserRole => {
+    return (user?.app_metadata?.role || user?.user_metadata?.role || 'member') as UserRole;
+};
+
 const getReadableMonth = (monthValue: string) => {
     const [year, month] = monthValue.split('-').map(Number);
     return new Date(year, month - 1, 1).toLocaleDateString(undefined, {
         month: 'long',
-        year: 'numeric'
+        year: 'numeric',
     });
+};
+
+const scheduleHours = (schedule: WeekdaySchedule) => {
+    return Number(schedule.duration_hours ?? schedule.duration ?? 0) || 0;
+};
+
+const countWeekdayInMonth = (monthValue: string, day: WeekdayName) => {
+    const [year, month] = monthValue.split('-').map(Number);
+    const date = new Date(year, month - 1, 1);
+    const countUntil = new Date(year, month, 0);
+    let count = 0;
+
+    while (date <= countUntil) {
+        if (date.getDay() === DAY_INDEX[day]) count += 1;
+        date.setDate(date.getDate() + 1);
+    }
+
+    return count;
 };
 
 export default function WeekdayPaymentPage() {
@@ -73,7 +103,7 @@ export default function WeekdayPaymentPage() {
                 return;
             }
 
-            const role = (user.app_metadata?.role || user.user_metadata?.role || 'member') as UserRole;
+            const role = getUserRole(user);
             setUserRole(role);
             setUserName(user.user_metadata?.name || user.email || 'User');
         };
@@ -88,7 +118,7 @@ export default function WeekdayPaymentPage() {
 
             const { data: studentData, error: studentError } = await supabase
                 .from('weekday_students')
-                .select('id, student_name, schedules, total_payment_amount, hourly_rate, active')
+                .select('*')
                 .eq('active', true)
                 .order('student_name', { ascending: true });
 
@@ -97,44 +127,180 @@ export default function WeekdayPaymentPage() {
             const { data: paymentData, error: paymentError } = await supabase
                 .from('weekday_payments')
                 .select('*')
-                .eq('payment_month', selectedMonth);
+                .eq('payment_month', selectedMonth)
+                .order('day_name', { ascending: true });
 
             if (paymentError) throw paymentError;
 
             setStudents((studentData || []) as WeekdayStudent[]);
             setPayments((paymentData || []) as WeekdayPayment[]);
         } catch (err: any) {
-            console.error(err);
-            setMessage(err?.message || 'Failed to load weekday payment data.');
+            setMessage(err?.message || 'Failed to load weekday payments.');
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        loadData();
-    }, [selectedMonth]);
+        if (userRole) loadData();
+    }, [userRole, selectedMonth]);
 
-    const getPayment = (studentId: string) => {
-        return payments.find(payment => payment.weekday_student_id === studentId);
+    const getPayment = (studentId: string, day: WeekdayName) => {
+        return payments.find(
+            (payment) =>
+                payment.weekday_student_id === studentId &&
+                payment.payment_month === selectedMonth &&
+                payment.day_name === day
+        );
     };
 
-    const savePayment = async (student: WeekdayStudent, paid: boolean) => {
-        try {
-            const amount = Number(student.total_payment_amount || 0);
-            const now = new Date().toISOString();
+    const rows = useMemo(() => {
+        const normalizedSearch = searchTerm.trim().toLowerCase();
 
+        return students.flatMap((student) => {
+            const schedules = Array.isArray(student.schedules) ? student.schedules : [];
+
+            return schedules.map((schedule) => {
+                const rate = Number(student.hourly_rate || DEFAULT_HOURLY_RATE);
+                const weeklyHours = scheduleHours(schedule);
+                const occurrences = countWeekdayInMonth(selectedMonth, schedule.day);
+                const scheduledMonthlyHours = weeklyHours * occurrences;
+                const payment = getPayment(student.id, schedule.day);
+                const payableHours = Number(payment?.manual_hours ?? scheduledMonthlyHours);
+                const amount = payableHours * rate;
+                const isPaid = payment?.paid ?? false;
+
+                return {
+                    student,
+                    schedule,
+                    rate,
+                    occurrences,
+                    scheduledMonthlyHours,
+                    payableHours,
+                    amount,
+                    isPaid,
+                    payment,
+                };
+            });
+        }).filter((row) => {
+            const matchesPaymentFilter =
+                paymentFilter === 'all' ||
+                (paymentFilter === 'paid' && row.isPaid) ||
+                (paymentFilter === 'unpaid' && !row.isPaid);
+
+            if (!matchesPaymentFilter) return false;
+
+            if (!normalizedSearch) return true;
+
+            const searchable = [
+                row.student.student_name,
+                row.schedule.day,
+                `${row.payableHours}h`,
+                `S$${row.amount.toFixed(2)}`,
+                row.isPaid ? 'paid' : 'unpaid',
+            ].join(' ').toLowerCase();
+
+            return searchable.includes(normalizedSearch);
+        });
+    }, [students, payments, selectedMonth, searchTerm, paymentFilter]);
+
+    const groupedRows = DAY_OPTIONS.map((day) => ({
+        day,
+        rows: rows.filter((row) => row.schedule.day === day),
+    }));
+
+    const paidRows = rows.filter((row) => row.isPaid);
+    const unpaidRows = rows.filter((row) => !row.isPaid);
+    const totalCollected = paidRows.reduce((sum, row) => sum + row.amount, 0);
+    const possibleTotal = rows.reduce((sum, row) => sum + row.amount, 0);
+    const totalSessions = rows.reduce((sum, row) => sum + row.occurrences, 0);
+    const totalPayableHours = rows.reduce((sum, row) => sum + row.payableHours, 0);
+
+    const monthlySummaryRows = useMemo(() => {
+        const summaryMap = new Map<string, {
+            studentName: string;
+            days: WeekdayName[];
+            sessions: number;
+            scheduledHours: number;
+            payableHours: number;
+            amount: number;
+            paidRows: number;
+            totalRows: number;
+        }>();
+
+        rows.forEach((row) => {
+            const existing = summaryMap.get(row.student.id) || {
+                studentName: row.student.student_name,
+                days: [],
+                sessions: 0,
+                scheduledHours: 0,
+                payableHours: 0,
+                amount: 0,
+                paidRows: 0,
+                totalRows: 0,
+            };
+
+            existing.days.push(row.schedule.day);
+            existing.sessions += row.occurrences;
+            existing.scheduledHours += row.scheduledMonthlyHours;
+            existing.payableHours += row.payableHours;
+            existing.amount += row.amount;
+            existing.paidRows += row.isPaid ? 1 : 0;
+            existing.totalRows += 1;
+
+            summaryMap.set(row.student.id, existing);
+        });
+
+        return Array.from(summaryMap.values())
+            .map((summary) => {
+                let paymentStatus = 'Unpaid';
+
+                if (summary.totalRows > 0 && summary.paidRows === summary.totalRows) {
+                    paymentStatus = 'Paid';
+                } else if (summary.paidRows > 0) {
+                    paymentStatus = 'Partially Paid';
+                }
+
+                return {
+                    ...summary,
+                    days: Array.from(new Set(summary.days)),
+                    paymentStatus,
+                };
+            })
+            .sort((a, b) => a.studentName.localeCompare(b.studentName));
+    }, [rows]);
+
+    const summaryFullyPaidCount = monthlySummaryRows.filter((row) => row.paymentStatus === 'Paid').length;
+    const summaryPartialPaidCount = monthlySummaryRows.filter((row) => row.paymentStatus === 'Partially Paid').length;
+    const summaryUnpaidCount = monthlySummaryRows.filter((row) => row.paymentStatus === 'Unpaid').length;
+
+    const upsertPayment = async (
+        studentId: string,
+        day: WeekdayName,
+        patch: Partial<Pick<WeekdayPayment, 'paid' | 'manual_hours'>>,
+        scheduledHours: number,
+        rate: number
+    ) => {
+        const existing = getPayment(studentId, day);
+        const manualHours = patch.manual_hours ?? existing?.manual_hours ?? null;
+        const payableHours = Number(manualHours ?? scheduledHours);
+        const amount = payableHours * rate;
+
+        try {
             const { data, error } = await supabase
                 .from('weekday_payments')
                 .upsert(
                     {
-                        weekday_student_id: student.id,
+                        weekday_student_id: studentId,
                         payment_month: selectedMonth,
-                        paid,
+                        day_name: day,
+                        paid: patch.paid ?? existing?.paid ?? false,
+                        scheduled_hours: scheduledHours,
+                        manual_hours: manualHours,
                         amount,
-                        updated_at: now
+                        updated_at: new Date().toISOString(),
                     },
-                    { onConflict: 'weekday_student_id,payment_month' }
+                    { onConflict: 'weekday_student_id,payment_month,day_name' }
                 )
                 .select('*')
                 .single();
@@ -142,125 +308,29 @@ export default function WeekdayPaymentPage() {
             if (error) throw error;
 
             const savedPayment = data as WeekdayPayment;
-
-            setPayments(prev => {
-                const exists = prev.some(payment => payment.weekday_student_id === student.id && payment.payment_month === selectedMonth);
+            setPayments((prev) => {
+                const exists = prev.some((p) => p.id === savedPayment.id);
                 if (exists) {
-                    return prev.map(payment =>
-                        payment.weekday_student_id === student.id && payment.payment_month === selectedMonth ? savedPayment : payment
-                    );
+                    return prev.map((p) => (p.id === savedPayment.id ? savedPayment : p));
                 }
+
                 return [...prev, savedPayment];
             });
 
-            setLastUpdated(`${student.student_name} marked as ${paid ? 'paid' : 'unpaid'} at ${new Date().toLocaleString()}`);
+            setLastUpdated(`Updated at ${new Date().toLocaleString()}`);
         } catch (err: any) {
             alert(err?.message || 'Failed to update weekday payment.');
             await loadData();
         }
     };
 
-    const sendMonthlySummary = async () => {
-        const paidStudents = students.filter(student => getPayment(student.id)?.paid ?? false);
-        const unpaidStudents = students.filter(student => !(getPayment(student.id)?.paid ?? false));
-        const totalCollected = paidStudents.reduce((sum, student) => sum + Number(student.total_payment_amount || 0), 0);
-        const possibleTotal = students.reduce((sum, student) => sum + Number(student.total_payment_amount || 0), 0);
-
-        const messageText =
-            `📊 Weekday Payment Summary 📊\n\n` +
-            `Month: ${getReadableMonth(selectedMonth)}\n` +
-            `Total Collected: S$${totalCollected.toFixed(2)}\n` +
-            `Paid Students: ${paidStudents.length}\n` +
-            `Unpaid Students: ${unpaidStudents.length}\n` +
-            `Possible Total: S$${possibleTotal.toFixed(2)}\n\n` +
-            `Paid:\n${paidStudents.length ? paidStudents.map(student => `- ${student.student_name}: S$${Number(student.total_payment_amount || 0).toFixed(2)}`).join('\n') : '- None'}\n\n` +
-            `Unpaid:\n${unpaidStudents.length ? unpaidStudents.map(student => `- ${student.student_name}: S$${Number(student.total_payment_amount || 0).toFixed(2)}`).join('\n') : '- None'}`;
-
-        const response = await fetch('/api/telegram-reminder', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: messageText })
-        });
-
-        if (!response.ok) throw new Error('Failed to send Telegram summary.');
-    };
-
-    const resetMonth = async () => {
-        if (!confirm(`Send ${getReadableMonth(selectedMonth)} weekday payment summary and reset paid statuses?`)) {
-            return;
-        }
-
-        try {
-            await sendMonthlySummary();
-
-            const paidPaymentIds = payments.filter(payment => payment.paid).map(payment => payment.id);
-            if (paidPaymentIds.length > 0) {
-                const { error } = await supabase
-                    .from('weekday_payments')
-                    .update({ paid: false, updated_at: new Date().toISOString() })
-                    .in('id', paidPaymentIds);
-
-                if (error) throw error;
-            }
-
-            await loadData();
-            setLastUpdated('Weekday payment summary sent and statuses reset.');
-        } catch (err: any) {
-            alert(err?.message || 'Failed to reset weekday payments.');
-        }
-    };
-
-    const undoLatest = async () => {
-        const latestPaid = payments
-            .filter(payment => payment.paid)
-            .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())[0];
-
-        if (!latestPaid) {
-            alert('No paid weekday payment found to undo.');
-            return;
-        }
-
-        try {
-            const { error } = await supabase
-                .from('weekday_payments')
-                .update({ paid: false, updated_at: new Date().toISOString() })
-                .eq('id', latestPaid.id);
-
-            if (error) throw error;
-
-            await loadData();
-            setLastUpdated('Latest weekday payment was undone.');
-        } catch (err: any) {
-            alert(err?.message || 'Failed to undo latest weekday payment.');
-        }
-    };
-
-    const filteredStudents = useMemo(() => {
-        const normalizedSearch = searchTerm.trim().toLowerCase();
-
-        return students.filter(student => {
-            const paid = getPayment(student.id)?.paid ?? false;
-            const matchesSearch = !normalizedSearch || student.student_name.toLowerCase().includes(normalizedSearch);
-            const matchesPaymentFilter =
-                paymentFilter === 'all' ||
-                (paymentFilter === 'paid' && paid) ||
-                (paymentFilter === 'unpaid' && !paid);
-
-            return matchesSearch && matchesPaymentFilter;
-        });
-    }, [students, payments, searchTerm, paymentFilter]);
-
-    const paidStudents = students.filter(student => getPayment(student.id)?.paid ?? false);
-    const totalCollected = paidStudents.reduce((sum, student) => sum + Number(student.total_payment_amount || 0), 0);
-    const possibleTotal = students.reduce((sum, student) => sum + Number(student.total_payment_amount || 0), 0);
-
     if (userRole !== 'superuser') {
         return (
             <div className="container" style={{ padding: '3rem 1rem' }}>
                 <div className="form-card" style={{ maxWidth: 600, margin: '0 auto', textAlign: 'center' }}>
                     <h1 style={{ color: '#dc2626' }}>403</h1>
-                    <p>Only superusers can access weekday payment.</p>
-                    <Link href="/dashboard" className="btn share-btn">Go to Dashboard</Link>
+                    <p>Only superusers can access weekday payments.</p>
+                    <Link href="/dashboard" className="btn share-btn">Back to Dashboard</Link>
                 </div>
             </div>
         );
@@ -274,9 +344,9 @@ export default function WeekdayPaymentPage() {
                 <div className="search-box">
                     <input
                         type="text"
-                        placeholder="Search weekday student..."
+                        placeholder="Search by student, day, amount, paid/unpaid..."
                         value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
+                        onChange={(event) => setSearchTerm(event.target.value)}
                     />
                 </div>
 
@@ -289,34 +359,27 @@ export default function WeekdayPaymentPage() {
                                     type="month"
                                     className="filter-input"
                                     value={selectedMonth}
-                                    onChange={(e) => setSelectedMonth(e.target.value)}
+                                    onChange={(event) => setSelectedMonth(event.target.value)}
                                 />
                             </label>
                         </div>
-
                         <div className="filter-group">
                             <label className="filter-label">
                                 Payment Status
                                 <select
                                     value={paymentFilter}
-                                    onChange={(e) => setPaymentFilter(e.target.value as PaymentFilter)}
+                                    onChange={(event) => setPaymentFilter(event.target.value as PaymentFilter)}
                                     className="filter-input"
                                 >
-                                    <option value="all">All Payments</option>
+                                    <option value="all">All</option>
                                     <option value="paid">Paid Only</option>
                                     <option value="unpaid">Unpaid Only</option>
                                 </select>
                             </label>
                         </div>
                     </div>
-
                     <div className="filter-buttons">
-                        <button onClick={() => { setSearchTerm(''); setPaymentFilter('all'); }} className="filter-button secondary">
-                            Clear Filters
-                        </button>
-                        <button onClick={loadData} className="filter-button">
-                            Refresh
-                        </button>
+                        <button type="button" className="filter-button" onClick={loadData}>Refresh</button>
                     </div>
                 </div>
 
@@ -324,71 +387,187 @@ export default function WeekdayPaymentPage() {
                     <div className="summary-card">
                         <h3>Weekday Payments Collected</h3>
                         <p className="amount">S${totalCollected.toFixed(2)}</p>
-                        <p className="timestamp">Monthly Tracking Period: {getReadableMonth(selectedMonth)}</p>
+                        <p className="timestamp">Month: {getReadableMonth(selectedMonth)}</p>
                         <p className="timestamp">
-                            Paid: {paidStudents.length} · Unpaid: {students.length - paidStudents.length} · Possible Total: S${possibleTotal.toFixed(2)}
+                            Paid rows: {paidRows.length} · Unpaid rows: {unpaidRows.length} · Possible Total: S${possibleTotal.toFixed(2)}
+                        </p>
+                        <p className="timestamp">
+                            Total Sessions: {totalSessions} · Total Payable Hours: {totalPayableHours.toFixed(2).replace(/\.00$/, '')}h
                         </p>
                         {lastUpdated && <p className="timestamp">{lastUpdated}</p>}
-
-                        <div className="payment-actions">
-                            <button className="payment-action-btn danger" onClick={resetMonth}>Reset Total</button>
-                            <button className="payment-action-btn warning" onClick={undoLatest}>Undo Add</button>
-                        </div>
                     </div>
                 </div>
 
-                <div className="search-results-display">
-                    {message && <p className="dashboard-error-message">{message}</p>}
-                    {loading && <p>Loading weekday payments...</p>}
+                {message && <p className="dashboard-error-message">{message}</p>}
+                {loading && <p className="muted">Loading weekday payments...</p>}
 
-                    {!loading && !message && filteredStudents.length === 0 && (
-                        <p>No weekday payment records found.</p>
-                    )}
+                {!loading && groupedRows.map((group) => (
+                    <section key={group.day} style={{ marginTop: 22 }}>
+                        <h2>{group.day}</h2>
 
-                    {!loading && !message && filteredStudents.length > 0 && (
+                        {group.rows.length === 0 ? (
+                            <p className="muted">No payment rows found for {group.day}.</p>
+                        ) : (
+                            <div className="table-container">
+                                <div className="table-scroll">
+                                    <table>
+                                        <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Sessions This Month</th>
+                                            <th>Default Monthly Hours</th>
+                                            <th>Payable Hours</th>
+                                            <th>Rate</th>
+                                            <th>Amount</th>
+                                            <th>Status</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        {group.rows.map((row) => (
+                                            <tr key={`${row.student.id}-${row.schedule.day}`}>
+                                                <td>{row.student.student_name}</td>
+                                                <td>{row.occurrences}</td>
+                                                <td>{row.scheduledMonthlyHours.toFixed(2).replace(/\.00$/, '')}h</td>
+                                                <td>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                        <input
+                                                            className="weeks-input"
+                                                            type="number"
+                                                            min="0"
+                                                            step="0.25"
+                                                            value={row.payableHours}
+                                                            onChange={(event) =>
+                                                                upsertPayment(
+                                                                    row.student.id,
+                                                                    row.schedule.day,
+                                                                    { manual_hours: Number(event.target.value) },
+                                                                    row.scheduledMonthlyHours,
+                                                                    row.rate
+                                                                )
+                                                            }
+                                                        />
+                                                        <strong>h</strong>
+                                                    </div>
+                                                </td>
+                                                <td>S${row.rate.toFixed(2)}/h</td>
+                                                <td>S${row.amount.toFixed(2)}</td>
+                                                <td>
+                                                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={row.isPaid}
+                                                            onChange={(event) =>
+                                                                upsertPayment(
+                                                                    row.student.id,
+                                                                    row.schedule.day,
+                                                                    { paid: event.target.checked },
+                                                                    row.scheduledMonthlyHours,
+                                                                    row.rate
+                                                                )
+                                                            }
+                                                        />
+                                                        {row.isPaid ? 'Paid' : 'Unpaid'}
+                                                    </label>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </section>
+                ))}
+
+                {!loading && rows.length > 0 && (
+                    <section style={{ marginTop: 30 }}>
+                        <div
+                            className="summary-card"
+                            style={{
+                                marginBottom: 14,
+                                border: '1px solid #dbeafe',
+                                background: '#f8fbff',
+                            }}
+                        >
+                            <h2 style={{ marginTop: 0 }}>Monthly Weekday Payment Summary</h2>
+                            <p className="timestamp">
+                                This combines Monday, Wednesday, and Thursday into one monthly total per student.
+                            </p>
+                            <p className="timestamp">
+                                Fully Paid: {summaryFullyPaidCount} · Partially Paid: {summaryPartialPaidCount} · Unpaid: {summaryUnpaidCount}
+                            </p>
+                        </div>
+
                         <div className="table-container">
                             <div className="table-scroll">
                                 <table>
                                     <thead>
                                     <tr>
-                                        <th>Student</th>
-                                        <th>Schedule</th>
-                                        <th>Payment Amount</th>
+                                        <th>Name</th>
+                                        <th>Days</th>
+                                        <th>Total Sessions</th>
+                                        <th>Default Monthly Hours</th>
+                                        <th>Payable Hours</th>
+                                        <th>Total Amount</th>
                                         <th>Payment Status</th>
                                     </tr>
                                     </thead>
                                     <tbody>
-                                    {filteredStudents.map(student => {
-                                        const payment = getPayment(student.id);
-                                        const isPaid = payment?.paid ?? false;
-                                        const scheduleText = student.schedules
-                                            .map(schedule => `${schedule.day}: ${schedule.duration}h`)
-                                            .join(', ');
+                                    {monthlySummaryRows.map((summary) => (
+                                        <tr key={summary.studentName}>
+                                            <td>{summary.studentName}</td>
+                                            <td>{summary.days.join(', ')}</td>
+                                            <td>{summary.sessions}</td>
+                                            <td>{summary.scheduledHours.toFixed(2).replace(/\.00$/, '')}h</td>
+                                            <td>{summary.payableHours.toFixed(2).replace(/\.00$/, '')}h</td>
+                                            <td><strong>S${summary.amount.toFixed(2)}</strong></td>
+                                            <td>
+                          <span
+                              style={{
+                                  display: 'inline-flex',
+                                  padding: '6px 10px',
+                                  borderRadius: 999,
+                                  fontWeight: 800,
+                                  fontSize: '0.82rem',
+                                  color:
+                                      summary.paymentStatus === 'Paid'
+                                          ? '#047857'
+                                          : summary.paymentStatus === 'Partially Paid'
+                                              ? '#92400e'
+                                              : '#b91c1c',
+                                  background:
+                                      summary.paymentStatus === 'Paid'
+                                          ? '#d1fae5'
+                                          : summary.paymentStatus === 'Partially Paid'
+                                              ? '#fef3c7'
+                                              : '#fee2e2',
+                              }}
+                          >
+                            {summary.paymentStatus}
+                          </span>
+                                            </td>
+                                        </tr>
+                                    ))}
 
-                                        return (
-                                            <tr key={student.id}>
-                                                <td>{student.student_name}</td>
-                                                <td>{scheduleText}</td>
-                                                <td>S${Number(student.total_payment_amount || 0).toFixed(2)}</td>
-                                                <td>
-                                                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={isPaid}
-                                                            onChange={(e) => savePayment(student, e.target.checked)}
-                                                        />
-                                                        {isPaid ? 'Paid' : 'Unpaid'}
-                                                    </label>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
+                                    <tr>
+                                        <td><strong>Monthly Total</strong></td>
+                                        <td>-</td>
+                                        <td><strong>{totalSessions}</strong></td>
+                                        <td>-</td>
+                                        <td><strong>{totalPayableHours.toFixed(2).replace(/\.00$/, '')}h</strong></td>
+                                        <td><strong>S${possibleTotal.toFixed(2)}</strong></td>
+                                        <td>
+                                            <strong>
+                                                Collected: S${totalCollected.toFixed(2)}
+                                            </strong>
+                                        </td>
+                                    </tr>
                                     </tbody>
                                 </table>
                             </div>
                         </div>
-                    )}
-                </div>
+                    </section>
+                )}
             </main>
         </div>
     );

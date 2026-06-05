@@ -1,4 +1,4 @@
-'use client'
+'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -10,29 +10,33 @@ import './../../dashboard/dashboard.css';
 
 type UserRole = 'superuser' | 'admin' | 'member';
 type WeekdayName = 'Monday' | 'Wednesday' | 'Thursday';
-type WeekdayStatus = 'attended' | 'missed' | 'makeup';
+type AttendanceStatus = 'attended' | 'missed' | 'makeup';
 
 interface WeekdaySchedule {
     day: WeekdayName;
-    duration: number;
+    duration_hours?: number;
+    duration?: number;
 }
 
 interface WeekdayStudent {
     id: string;
     student_name: string;
     schedules: WeekdaySchedule[];
-    total_payment_amount: number;
+    hourly_rate: number;
     active: boolean;
+    created_at?: string;
+    updated_at?: string;
 }
 
-interface WeekdayAttendanceRecord {
+interface WeekdayAttendance {
     id: number;
     weekday_student_id: string;
     attendance_date: string;
     day_name: WeekdayName;
-    status: WeekdayStatus;
+    status: AttendanceStatus;
     duration_hours: number;
     created_at: string;
+    updated_at?: string;
 }
 
 const supabase = createBrowserClient(
@@ -40,32 +44,36 @@ const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-const getDateKey = (date: Date) => {
+const DAY_OPTIONS: WeekdayName[] = ['Monday', 'Wednesday', 'Thursday'];
+const DAY_INDEX: Record<WeekdayName, number> = { Monday: 1, Wednesday: 3, Thursday: 4 };
+
+const getUserRole = (user: any): UserRole => {
+    return (user?.app_metadata?.role || user?.user_metadata?.role || 'member') as UserRole;
+};
+
+const formatDateLocal = (date: Date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
 };
 
-const getMonthRange = (monthValue: string) => {
-    const [yearStr, monthStr] = monthValue.split('-');
-    const year = Number(yearStr);
-    const month = Number(monthStr);
-    const nextMonth = month === 12 ? 1 : month + 1;
-    const nextYear = month === 12 ? year + 1 : year;
-    return {
-        start: `${monthValue}-01`,
-        end: `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`
-    };
+const readableDate = (dateKey: string) => {
+    const [year, month, day] = dateKey.slice(0, 10).split('-').map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+        day: 'numeric',
+        month: 'numeric',
+        year: '2-digit',
+    });
 };
 
-const readableDate = (dateKey: string) => {
-    const [year, month, day] = dateKey.split('-').map(Number);
-    return new Date(year, month - 1, day).toLocaleDateString(undefined, {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short'
-    });
+const statusLabel = (status: AttendanceStatus) => {
+    if (status === 'attended') return 'marked';
+    return status;
+};
+
+const scheduleHours = (schedule: WeekdaySchedule) => {
+    return Number(schedule.duration_hours ?? schedule.duration ?? 0) || 0;
 };
 
 export default function WeekdayAttendancePage() {
@@ -73,15 +81,16 @@ export default function WeekdayAttendancePage() {
     const [userName, setUserName] = useState('');
     const [userRole, setUserRole] = useState<UserRole | null>(null);
     const [students, setStudents] = useState<WeekdayStudent[]>([]);
-    const [records, setRecords] = useState<WeekdayAttendanceRecord[]>([]);
-    const [selectedMonth, setSelectedMonth] = useState(() => {
-        const d = new Date();
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    });
-    const [selectedDay, setSelectedDay] = useState<'all' | 'Monday' | 'Wednesday' | 'Thursday'>('all');
+    const [attendance, setAttendance] = useState<WeekdayAttendance[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
+    const [selectedDay, setSelectedDay] = useState<'all' | WeekdayName>('all');
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
+    const [rowHours, setRowHours] = useState<Record<string, number>>({});
+
+    const today = new Date();
+    const todayKey = formatDateLocal(today);
+    const todayDayName = DAY_OPTIONS.find((day) => DAY_INDEX[day] === today.getDay());
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -91,7 +100,7 @@ export default function WeekdayAttendancePage() {
                 return;
             }
 
-            const role = (user.app_metadata?.role || user.user_metadata?.role || 'member') as UserRole;
+            const role = getUserRole(user);
             setUserRole(role);
             setUserName(user.user_metadata?.name || user.email || 'User');
         };
@@ -104,11 +113,9 @@ export default function WeekdayAttendancePage() {
             setLoading(true);
             setMessage('');
 
-            const { start, end } = getMonthRange(selectedMonth);
-
             const { data: studentData, error: studentError } = await supabase
                 .from('weekday_students')
-                .select('id, student_name, schedules, total_payment_amount, active')
+                .select('*')
                 .eq('active', true)
                 .order('student_name', { ascending: true });
 
@@ -117,20 +124,17 @@ export default function WeekdayAttendancePage() {
             const { data: attendanceData, error: attendanceError } = await supabase
                 .from('weekday_attendance')
                 .select('*')
-                .gte('attendance_date', start)
-                .lt('attendance_date', end)
                 .order('attendance_date', { ascending: false })
                 .order('created_at', { ascending: false });
 
             if (attendanceError) throw attendanceError;
 
             setStudents((studentData || []) as WeekdayStudent[]);
-            setRecords(((attendanceData || []) as WeekdayAttendanceRecord[]).map(record => ({
+            setAttendance(((attendanceData || []) as WeekdayAttendance[]).map((record) => ({
                 ...record,
-                attendance_date: record.attendance_date.slice(0, 10)
+                attendance_date: record.attendance_date.slice(0, 10),
             })));
         } catch (err: any) {
-            console.error(err);
             setMessage(err?.message || 'Failed to load weekday attendance.');
         } finally {
             setLoading(false);
@@ -138,100 +142,160 @@ export default function WeekdayAttendancePage() {
     };
 
     useEffect(() => {
-        loadData();
-    }, [selectedMonth]);
+        if (userRole) loadData();
+    }, [userRole]);
 
-    const todaysDayName = new Date().toLocaleDateString(undefined, { weekday: 'long' }) as WeekdayName;
-
-    const filteredStudents = useMemo(() => {
+    const rows = useMemo(() => {
         const normalizedSearch = searchTerm.trim().toLowerCase();
 
-        return students.filter(student => {
-            const studentRecords = records.filter(record => record.weekday_student_id === student.id);
-            const scheduleText = student.schedules
-                .map(schedule => `${schedule.day} ${schedule.duration}h`)
-                .join(' ')
-                .toLowerCase();
+        return students.flatMap((student) => {
+            const schedules = Array.isArray(student.schedules) ? student.schedules : [];
 
-            const historyText = studentRecords
-                .map(record => `${readableDate(record.attendance_date)} ${record.day_name} ${record.status} ${record.duration_hours}h`)
-                .join(' ')
-                .toLowerCase();
+            return schedules
+                .filter((schedule) => selectedDay === 'all' || schedule.day === selectedDay)
+                .map((schedule) => {
+                    const records = attendance.filter(
+                        (record) => record.weekday_student_id === student.id && record.day_name === schedule.day
+                    );
 
-            const matchesDay = selectedDay === 'all' || student.schedules.some(schedule => schedule.day === selectedDay);
-            const matchesSearch =
-                !normalizedSearch ||
-                student.student_name.toLowerCase().includes(normalizedSearch) ||
-                scheduleText.includes(normalizedSearch) ||
-                historyText.includes(normalizedSearch) ||
-                String(student.total_payment_amount).includes(normalizedSearch);
+                    const missedHours = records
+                        .filter((record) => record.status === 'missed')
+                        .reduce((sum, record) => sum + Number(record.duration_hours || 0), 0);
 
-            return matchesDay && matchesSearch;
+                    const makeupHours = records
+                        .filter((record) => record.status === 'makeup')
+                        .reduce((sum, record) => sum + Number(record.duration_hours || 0), 0);
+
+                    const makeupBalance = Math.max(0, missedHours - makeupHours);
+
+                    return {
+                        student,
+                        schedule,
+                        records,
+                        makeupBalance,
+                    };
+                });
+        }).filter((row) => {
+            if (!normalizedSearch) return true;
+
+            const searchable = [
+                row.student.student_name,
+                row.schedule.day,
+                `${scheduleHours(row.schedule)}h`,
+                ...row.records.map((record) => `${readableDate(record.attendance_date)} ${record.duration_hours}h ${record.status}`),
+            ].join(' ').toLowerCase();
+
+            return searchable.includes(normalizedSearch);
         });
-    }, [students, records, selectedDay, searchTerm]);
+    }, [students, attendance, searchTerm, selectedDay]);
 
-    const getScheduleForSelectedDay = (student: WeekdayStudent) => {
-        const day = selectedDay === 'all' ? todaysDayName : selectedDay;
-        return student.schedules.find(schedule => schedule.day === day);
+    const groupedRows = DAY_OPTIONS.map((day) => ({
+        day,
+        rows: rows.filter((row) => row.schedule.day === day),
+    })).filter((group) => selectedDay === 'all' || group.day === selectedDay);
+
+    const getRowKey = (studentId: string, day: WeekdayName) => `${studentId}-${day}`;
+
+    const getHoursForRow = (studentId: string, schedule: WeekdaySchedule) => {
+        const key = getRowKey(studentId, schedule.day);
+        return Number(rowHours[key] ?? scheduleHours(schedule) ?? 0) || 0;
     };
 
-    const addAttendance = async (student: WeekdayStudent, status: WeekdayStatus) => {
-        const schedule = getScheduleForSelectedDay(student);
+    const setHoursForRow = (studentId: string, day: WeekdayName, value: number) => {
+        setRowHours((prev) => ({ ...prev, [getRowKey(studentId, day)]: value }));
+    };
 
-        if (!schedule) {
-            alert(`This student does not have training on ${selectedDay === 'all' ? todaysDayName : selectedDay}.`);
+    const insertAttendance = async (
+        studentId: string,
+        day: WeekdayName,
+        status: AttendanceStatus,
+        hours: number
+    ) => {
+        if (hours <= 0) {
+            alert('Number of hours must be more than 0.');
             return;
         }
 
-        const dateKey = getDateKey(new Date());
+        if ((status === 'attended' || status === 'missed') && todayDayName !== day) {
+            alert(`You can only ${status === 'attended' ? 'mark attendance' : 'mark missed'} on ${day}.`);
+            return;
+        }
 
         try {
             const { data, error } = await supabase
                 .from('weekday_attendance')
                 .insert({
-                    weekday_student_id: student.id,
-                    attendance_date: dateKey,
-                    day_name: schedule.day,
+                    weekday_student_id: studentId,
+                    attendance_date: todayKey,
+                    day_name: day,
                     status,
-                    duration_hours: schedule.duration,
-                    updated_at: new Date().toISOString()
+                    duration_hours: hours,
+                    updated_at: new Date().toISOString(),
                 })
                 .select('*')
                 .single();
 
             if (error) throw error;
 
-            if (data) {
-                setRecords(prev => [{ ...data, attendance_date: String(data.attendance_date).slice(0, 10) } as WeekdayAttendanceRecord, ...prev]);
-            }
+            setAttendance((prev) => [
+                { ...(data as WeekdayAttendance), attendance_date: (data as WeekdayAttendance).attendance_date.slice(0, 10) },
+                ...prev,
+            ]);
         } catch (err: any) {
-            alert(err?.message || `Failed to mark ${status}.`);
+            alert(err?.message || 'Failed to update weekday attendance.');
+            await loadData();
         }
     };
 
-    const undoLatest = async (studentId: string) => {
-        const latest = records.find(record => record.weekday_student_id === studentId);
+    const undoLatest = async (studentId: string, day: WeekdayName) => {
+        const latestRecord = attendance
+            .filter((record) => record.weekday_student_id === studentId && record.day_name === day)
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
 
-        if (!latest) {
-            alert('No weekday attendance action to undo for this month.');
+        if (!latestRecord) {
+            alert('Nothing to undo for this student/session.');
             return;
         }
 
-        if (!confirm(`Undo latest weekday attendance entry on ${readableDate(latest.attendance_date)}?`)) {
-            return;
-        }
+        if (!confirm(`Undo latest ${statusLabel(latestRecord.status)} record for ${day}?`)) return;
 
         try {
             const { error } = await supabase
                 .from('weekday_attendance')
                 .delete()
-                .eq('id', latest.id);
+                .eq('id', latestRecord.id);
 
             if (error) throw error;
 
-            setRecords(prev => prev.filter(record => record.id !== latest.id));
+            setAttendance((prev) => prev.filter((record) => record.id !== latestRecord.id));
         } catch (err: any) {
-            alert(err?.message || 'Failed to undo weekday attendance.');
+            alert(err?.message || 'Failed to undo latest weekday attendance action.');
+            await loadData();
+        }
+    };
+
+    const removeSchedule = async (student: WeekdayStudent, day: WeekdayName) => {
+        if (!confirm(`Remove ${student.student_name} from ${day}? Other days will stay unchanged.`)) return;
+
+        const nextSchedules = (student.schedules || []).filter((schedule) => schedule.day !== day);
+
+        try {
+            const { data, error } = await supabase
+                .from('weekday_students')
+                .update({
+                    schedules: nextSchedules,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', student.id)
+                .select('*')
+                .single();
+
+            if (error) throw error;
+
+            setStudents((prev) => prev.map((s) => (s.id === student.id ? (data as WeekdayStudent) : s)));
+        } catch (err: any) {
+            alert(err?.message || 'Failed to remove weekday session.');
+            await loadData();
         }
     };
 
@@ -240,8 +304,8 @@ export default function WeekdayAttendancePage() {
             <div className="container" style={{ padding: '3rem 1rem' }}>
                 <div className="form-card" style={{ maxWidth: 600, margin: '0 auto', textAlign: 'center' }}>
                     <h1 style={{ color: '#dc2626' }}>403</h1>
-                    <p>Only superusers and admins can access weekday attendance.</p>
-                    <Link href="/dashboard" className="btn share-btn">Go to Dashboard</Link>
+                    <p>Only admins and superusers can access weekday attendance.</p>
+                    <Link href="/dashboard" className="btn share-btn">Back to Dashboard</Link>
                 </div>
             </div>
         );
@@ -255,9 +319,9 @@ export default function WeekdayAttendancePage() {
                 <div className="search-box">
                     <input
                         type="text"
-                        placeholder="Search by student, day, status, date, hours..."
+                        placeholder="Search by student, day, date, status, or hours..."
                         value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
+                        onChange={(event) => setSearchTerm(event.target.value)}
                     />
                 </div>
 
@@ -265,94 +329,144 @@ export default function WeekdayAttendancePage() {
                     <div className="filter-grid">
                         <div className="filter-group">
                             <label className="filter-label">
-                                Month
-                                <input
-                                    type="month"
-                                    className="filter-input"
-                                    value={selectedMonth}
-                                    onChange={(e) => setSelectedMonth(e.target.value)}
-                                />
-                            </label>
-                        </div>
-
-                        <div className="filter-group">
-                            <label className="filter-label">
                                 Day
                                 <select
-                                    className="filter-input"
                                     value={selectedDay}
-                                    onChange={(e) => setSelectedDay(e.target.value as any)}
+                                    onChange={(event) => setSelectedDay(event.target.value as 'all' | WeekdayName)}
+                                    className="filter-input"
                                 >
                                     <option value="all">All</option>
-                                    <option value="Monday">Monday</option>
-                                    <option value="Wednesday">Wednesday</option>
-                                    <option value="Thursday">Thursday</option>
+                                    {DAY_OPTIONS.map((day) => (
+                                        <option key={day} value={day}>{day}</option>
+                                    ))}
                                 </select>
                             </label>
                         </div>
                     </div>
 
                     <div className="filter-buttons">
-                        <button className="filter-button secondary" onClick={loadData}>Refresh</button>
+                        <button type="button" className="filter-button" onClick={loadData}>Refresh</button>
                     </div>
                 </div>
 
                 {message && <p className="dashboard-error-message">{message}</p>}
-                {loading && <p>Loading weekday attendance...</p>}
-                {!loading && !message && filteredStudents.length === 0 && <p className="muted">No weekday students found.</p>}
+                {loading && <p className="muted">Loading weekday attendance...</p>}
 
-                {!loading && filteredStudents.length > 0 && (
-                    <div className="table-container">
-                        <div className="table-scroll">
-                            <table>
-                                <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Schedule</th>
-                                    <th>Actions</th>
-                                    <th>This Month History</th>
-                                </tr>
-                                </thead>
-                                <tbody>
-                                {filteredStudents.map(student => {
-                                    const studentRecords = records.filter(record => record.weekday_student_id === student.id);
-                                    const scheduleText = student.schedules
-                                        .map(schedule => `${schedule.day}: ${schedule.duration}h`)
-                                        .join(', ');
+                {!loading && groupedRows.map((group) => (
+                    <section key={group.day} style={{ marginTop: 22 }}>
+                        <h2 style={{ marginBottom: 10 }}>{group.day}</h2>
 
-                                    return (
-                                        <tr key={student.id}>
-                                            <td>{student.student_name}</td>
-                                            <td>{scheduleText}</td>
-                                            <td className="actions-cell">
-                                                <div className="actions-row">
-                                                    <button className="attendance-btn" onClick={() => addAttendance(student, 'attended')}>Mark</button>
-                                                    <button className="missed-btn" onClick={() => addAttendance(student, 'missed')}>Missed</button>
-                                                    <button className="makeup-btn" onClick={() => addAttendance(student, 'makeup')}>Makeup</button>
-                                                    <button className="undo-btn" onClick={() => undoLatest(student.id)} disabled={studentRecords.length === 0}>Undo</button>
-                                                </div>
-                                            </td>
-                                            <td className="attendance-history">
-                                                {studentRecords.length === 0 ? (
-                                                    <span className="muted">No records</span>
-                                                ) : (
-                                                    <ul>
-                                                        {studentRecords.slice(0, 8).map(record => (
-                                                            <li key={record.id}>
-                                                                {readableDate(record.attendance_date)} — {record.day_name} — {record.status} ({Number(record.duration_hours).toFixed(2)}h)
-                                                            </li>
-                                                        ))}
-                                                    </ul>
-                                                )}
-                                            </td>
+                        {group.rows.length === 0 ? (
+                            <p className="muted">No students found for {group.day}.</p>
+                        ) : (
+                            <div className="table-container">
+                                <div className="table-scroll">
+                                    <table>
+                                        <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Session Hours</th>
+                                            <th>Makeup Balance</th>
+                                            <th>Actions</th>
+                                            <th>Attendance History</th>
+                                            <th>Remove Day</th>
                                         </tr>
-                                    );
-                                })}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
+                                        </thead>
+                                        <tbody>
+                                        {group.rows.map(({ student, schedule, records, makeupBalance }) => {
+                                            const hours = getHoursForRow(student.id, schedule);
+                                            const canMarkScheduled = todayDayName === schedule.day;
+                                            const hasRecords = records.length > 0;
+
+                                            return (
+                                                <tr key={getRowKey(student.id, schedule.day)}>
+                                                    <td>{student.student_name}</td>
+                                                    <td>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                            <input
+                                                                className="weeks-input"
+                                                                type="number"
+                                                                min="0.25"
+                                                                step="0.25"
+                                                                value={hours}
+                                                                onChange={(event) => setHoursForRow(student.id, schedule.day, Number(event.target.value))}
+                                                            />
+                                                            <strong>h</strong>
+                                                        </div>
+                                                    </td>
+                                                    <td>{makeupBalance.toFixed(2)}h</td>
+                                                    <td className="actions-cell">
+                                                        <div className="actions-row" style={{ flexWrap: 'nowrap' }}>
+                                                            <button
+                                                                type="button"
+                                                                className="attendance-btn"
+                                                                disabled={!canMarkScheduled}
+                                                                title={canMarkScheduled ? 'Mark attended' : `Can only mark on ${schedule.day}`}
+                                                                onClick={() => insertAttendance(student.id, schedule.day, 'attended', hours)}
+                                                            >
+                                                                Mark
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="missed-btn"
+                                                                disabled={!canMarkScheduled}
+                                                                title={canMarkScheduled ? 'Mark missed' : `Can only mark missed on ${schedule.day}`}
+                                                                onClick={() => insertAttendance(student.id, schedule.day, 'missed', hours)}
+                                                            >
+                                                                Missed
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="makeup-btn"
+                                                                disabled={makeupBalance <= 0}
+                                                                title={makeupBalance <= 0 ? 'No missed hours to makeup' : 'Record makeup hours'}
+                                                                onClick={() => insertAttendance(student.id, schedule.day, 'makeup', Math.min(hours, makeupBalance))}
+                                                            >
+                                                                Makeup
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="undo-btn"
+                                                                disabled={!hasRecords}
+                                                                onClick={() => undoLatest(student.id, schedule.day)}
+                                                            >
+                                                                Undo
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                    <td className="attendance-history">
+                                                        {records.length === 0 ? (
+                                                            <span className="muted">No history</span>
+                                                        ) : (
+                                                            <ul>
+                                                                {records.slice(0, 8).map((record) => (
+                                                                    <li key={record.id}>
+                                                                        {readableDate(record.attendance_date)}, {Number(record.duration_hours).toFixed(2).replace(/\.00$/, '')}h
+                                                                        {record.status !== 'attended' ? ` (${record.status})` : ''}
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
+                                                        )}
+                                                    </td>
+                                                    <td>
+                                                        <button
+                                                            type="button"
+                                                            className="delete-btn"
+                                                            onClick={() => removeSchedule(student, schedule.day)}
+                                                        >
+                                                            Remove
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </section>
+                ))}
             </main>
         </div>
     );
