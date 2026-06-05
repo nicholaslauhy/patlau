@@ -290,7 +290,7 @@ export default function WeekdayPaymentPage() {
     };
 
     const sendWeekdayTelegramNotification = async (message: string) => {
-        const response = await fetch('/api/telegram-reminder', {
+        const response = await fetch('/api/telegram-weekday-payment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message }),
@@ -470,6 +470,24 @@ export default function WeekdayPaymentPage() {
             });
 
             const studentName = targetRows[0]?.student.student_name || 'Student';
+            const totalAmount = targetRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+            const totalHours = targetRows.reduce((sum, row) => sum + Number(row.payableHours || 0), 0);
+            const totalSessionsForStudent = targetRows.reduce((sum, row) => sum + Number(row.occurrences || 0), 0);
+            const daysText = targetRows.map((row) => row.schedule.day).join(', ');
+
+            const telegramMessage =
+                `${paid ? '✅ Weekday Payment Received!' : '↩️ Weekday Payment Reversed!'}\n\n` +
+                `Student: ${studentName}\n` +
+                `Month: ${getReadableMonth(selectedMonth)}\n` +
+                `Days: ${daysText}\n` +
+                `Sessions: ${totalSessionsForStudent}\n` +
+                `Payable Hours: ${totalHours.toFixed(2).replace(/\\.00$/, '')}h\n` +
+                `Amount: ${paid ? '+' : '-'}S$${totalAmount.toFixed(2)}\n` +
+                `Recorded At: ${new Date().toLocaleString()}\n` +
+                `Status: ${paid ? 'Paid' : 'Unpaid'}`;
+
+            await sendWeekdayTelegramNotification(telegramMessage);
+
             setLastUpdated(`${studentName} marked as ${paid ? 'Paid' : 'Unpaid'} at ${new Date().toLocaleString()}`);
         } catch (err: any) {
             alert(err?.message || 'Failed to update student weekday payment status.');

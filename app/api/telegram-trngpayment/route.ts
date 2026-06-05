@@ -12,7 +12,8 @@ export async function POST(request: Request) {
         }
 
         const botToken = process.env.TELEGRAM_TRNGPAYMENT_BOT_TOKEN;
-        const chatId = process.env.TELEGRAM_CHAT_IDS;
+        const chatId = process.env.TELEGRAM_CHAT_ID;
+        const threadId = process.env.TELEGRAM_TRNGPAYMENT_THREAD_ID;
 
         if (!botToken) {
             return NextResponse.json(
@@ -28,6 +29,13 @@ export async function POST(request: Request) {
             );
         }
 
+        if (!threadId) {
+            return NextResponse.json(
+                { error: 'Missing TELEGRAM_TRNGPAYMENT_THREAD_ID.' },
+                { status: 500 }
+            );
+        }
+
         const telegramResponse = await fetch(
             `https://api.telegram.org/bot${botToken}/sendMessage`,
             {
@@ -37,6 +45,7 @@ export async function POST(request: Request) {
                 },
                 body: JSON.stringify({
                     chat_id: chatId,
+                    message_thread_id: Number(threadId),
                     text: message,
                 }),
             }
@@ -45,11 +54,11 @@ export async function POST(request: Request) {
         const telegramData = await telegramResponse.json();
 
         if (!telegramResponse.ok) {
-            console.error('Telegram trngpayment error:', telegramData);
+            console.error('Telegram 1-on-1 payment topic error:', telegramData);
 
             return NextResponse.json(
                 {
-                    error: 'Failed to send Telegram 1-on-1 payment message.',
+                    error: 'Failed to send Telegram 1-on-1 payment topic message.',
                     details: telegramData,
                 },
                 { status: 500 }
@@ -61,7 +70,7 @@ export async function POST(request: Request) {
             result: telegramData,
         });
     } catch (error: any) {
-        console.error('Telegram trngpayment route error:', error);
+        console.error('Telegram 1-on-1 payment topic route error:', error);
 
         return NextResponse.json(
             {

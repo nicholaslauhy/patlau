@@ -31,9 +31,9 @@ const supabase = createBrowserClient(
  * Weekday → MatchPlay → 1-1 → Weekend
  *
  * Role rules:
- * - superuser: can access everything
- * - admin: can access operational pages, but not superuser-only payment pages
- * - member: only Weekend → Dashboard
+ * - superuser: everything
+ * - admin: operational pages only
+ * - member: Weekend Dashboard only
  */
 const weekdayItems: NavItem[] = [
     { label: 'Add Weekday Student', href: '/weekday/add', allowedRoles: ['superuser', 'admin'] },
@@ -42,7 +42,9 @@ const weekdayItems: NavItem[] = [
 ];
 
 const matchPlayItems: NavItem[] = [
-    { label: 'MatchPlay', href: '/matchplay', allowedRoles: ['superuser', 'admin'] },
+    { label: 'Add MatchPlay Student', href: '/matchplay/add', allowedRoles: ['superuser', 'admin'] },
+    { label: 'MatchPlay Attendance', href: '/matchplay/attendance', allowedRoles: ['superuser', 'admin'] },
+    { label: 'MatchPlay Payment', href: '/matchplay/payment', allowedRoles: ['superuser'] },
 ];
 
 const oneToOneItems: NavItem[] = [
@@ -62,7 +64,7 @@ const menuBoxStyle: React.CSSProperties = {
     position: 'absolute',
     right: 0,
     top: 'calc(100% + 8px)',
-    minWidth: '220px',
+    minWidth: '230px',
     background: 'white',
     border: '1px solid #e5e7eb',
     borderRadius: '14px',
@@ -112,17 +114,6 @@ const activePillStyle: React.CSSProperties = {
     color: 'white',
 };
 
-const navRowStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: '8px',
-    flexWrap: 'nowrap',
-    whiteSpace: 'nowrap',
-    overflow: 'visible',
-    minWidth: 'max-content',
-};
-
 const navButtonStyle: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -170,13 +161,7 @@ function MenuLink({
     );
 }
 
-function MenuButton({
-                        children,
-                        onClick,
-                    }: {
-    children: React.ReactNode;
-    onClick: () => void;
-}) {
+function MenuButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
     const [hovered, setHovered] = useState(false);
 
     return (
@@ -211,13 +196,8 @@ function NavDropdown({
     const pathname = usePathname();
     const dropdownRef = useRef<HTMLDivElement | null>(null);
 
-    const visibleItems = items.filter(
-        (item) => userRole && item.allowedRoles.includes(userRole)
-    );
-
-    const active = visibleItems.some(
-        (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
-    );
+    const visibleItems = items.filter((item) => userRole && item.allowedRoles.includes(userRole));
+    const active = visibleItems.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
 
     useEffect(() => {
         const handlePointerDown = (event: MouseEvent | TouchEvent) => {
@@ -256,7 +236,8 @@ function NavDropdown({
                 style={{
                     ...navButtonStyle,
                     borderColor: active ? '#2563eb' : undefined,
-                    color: active ? '#1d4ed8' : undefined,
+                    color: active ? '#1d4ed8' : '#111827',
+                    background: active ? '#eff6ff' : undefined,
                     boxShadow: active ? '0 0 0 2px rgba(37, 99, 235, 0.08)' : undefined,
                 }}
             >
@@ -265,20 +246,16 @@ function NavDropdown({
 
             {open && (
                 <div role="menu" style={menuBoxStyle}>
-                    {visibleItems.map((item) => {
-                        const isActive = pathname === item.href;
-
-                        return (
-                            <MenuLink
-                                key={item.href}
-                                href={item.href}
-                                active={isActive}
-                                onClick={() => setOpen(false)}
-                            >
-                                {item.label}
-                            </MenuLink>
-                        );
-                    })}
+                    {visibleItems.map((item) => (
+                        <MenuLink
+                            key={item.href}
+                            href={item.href}
+                            active={pathname === item.href}
+                            onClick={() => setOpen(false)}
+                        >
+                            {item.label}
+                        </MenuLink>
+                    ))}
                 </div>
             )}
         </div>
@@ -378,24 +355,12 @@ export default function AppHeader({
                                 <p className="account-name" style={{ margin: 0, fontWeight: 700, color: '#111827' }}>
                                     {userName || 'User'}
                                 </p>
-                                <p
-                                    className="account-role"
-                                    style={{
-                                        margin: '4px 0 0',
-                                        fontSize: '0.78rem',
-                                        color: '#6b7280',
-                                        letterSpacing: '0.04em',
-                                    }}
-                                >
+                                <p className="account-role" style={{ margin: '4px 0 0', fontSize: '0.78rem', color: '#6b7280' }}>
                                     {userRole?.toUpperCase() || 'MEMBER'}
                                 </p>
                             </div>
 
-                            <MenuLink
-                                href="/settings"
-                                active={pathname === '/settings'}
-                                onClick={() => setShowAccountMenu(false)}
-                            >
+                            <MenuLink href="/settings" active={pathname === '/settings'} onClick={() => setShowAccountMenu(false)}>
                                 <span>⚙️</span>
                                 <span>Settings</span>
                             </MenuLink>
@@ -424,7 +389,14 @@ export default function AppHeader({
             <div
                 className="user-controls"
                 style={{
-                    ...navRowStyle,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'flex-end',
+                    gap: '8px',
+                    flexWrap: 'nowrap',
+                    whiteSpace: 'nowrap',
+                    overflow: 'visible',
+                    minWidth: 'max-content',
                     flex: '0 0 auto',
                 }}
             >

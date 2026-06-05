@@ -71,7 +71,7 @@ export default function PaymentPage() {
         `Recorded At: ${new Date(recordedAt).toLocaleString()}\n` +
         `Status: ${isPaid ? 'Paid' : 'Unpaid'}`;
 
-    await fetch('/api/telegram-reminder', {
+    await fetch('/api/telegram-weekend-payment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message }),
@@ -112,7 +112,7 @@ export default function PaymentPage() {
           `Payment Details:\n${paymentLines}\n\n` +
           `Starting new tracking period from today.`;
 
-      const response = await fetch('/api/telegram-reminder', {
+      const response = await fetch('/api/telegram-weekend-payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message }),
@@ -428,7 +428,7 @@ export default function PaymentPage() {
                     if (deleteError) throw deleteError;
 
                     const message = `↩️ Payment Undone ↩️\n\nStudent: ${student?.student_name || 'Unknown'}\nAmount: S$${Math.abs(lastPayment.amount).toFixed(2)}\nRecorded at: ${new Date(lastPayment.recorded_at).toLocaleString()}\nStatus: Marked as unpaid`;
-                    await fetch('/api/telegram-reminder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message }) });
+                    await fetch('/api/telegram-weekend-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message }) });
 
                     await fetchData();
                     setLastUpdated('Undid last payment. Notification sent.');
