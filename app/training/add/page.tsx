@@ -89,13 +89,17 @@ export default function AddOneToOneStudentPage() {
 
         if (!normalized) return students;
 
-        return students.filter((student) =>
-            [
-                student.student_name,
-                `S$${Number(student.payment_amount || 0).toFixed(2)}`,
-            ].join(' ').toLowerCase().includes(normalized)
-        );
-    }, [students, searchTerm]);
+        return students.filter((student) => {
+            const searchableFields = userRole === 'superuser'
+                ? [
+                    student.student_name,
+                    `S$${Number(student.payment_amount || 0).toFixed(2)}`,
+                ]
+                : [student.student_name];
+
+            return searchableFields.join(' ').toLowerCase().includes(normalized);
+        });
+    }, [students, searchTerm, userRole]);
 
     const updateStudentAmount = async (studentId: string, amount: number) => {
         const safeAmount = Number(amount) || 0;
@@ -166,7 +170,7 @@ export default function AddOneToOneStudentPage() {
             return;
         }
 
-        const amount = Number(paymentAmount);
+        const amount = userRole === 'superuser' ? Number(paymentAmount) : DEFAULT_PAYMENT_AMOUNT;
         if (!amount || amount <= 0) {
             setError('Payment amount must be more than 0.');
             return;
@@ -237,19 +241,21 @@ export default function AddOneToOneStudentPage() {
                             />
                         </div>
 
-                        <div className="form-group">
-                            <label htmlFor="paymentAmount">Payment Amount (S$)</label>
-                            <input
-                                id="paymentAmount"
-                                className="form-input"
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={paymentAmount}
-                                onChange={(e) => setPaymentAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                                placeholder="80"
-                            />
-                        </div>
+                        {userRole === 'superuser' && (
+                            <div className="form-group">
+                                <label htmlFor="paymentAmount">Payment Amount (S$)</label>
+                                <input
+                                    id="paymentAmount"
+                                    className="form-input"
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={paymentAmount}
+                                    onChange={(e) => setPaymentAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                                    placeholder="80"
+                                />
+                            </div>
+                        )}
 
                         <button className="login-btn" type="submit" disabled={isSubmitting}>
                             {isSubmitting ? 'Adding...' : 'Add 1-1 Student'}
@@ -262,7 +268,9 @@ export default function AddOneToOneStudentPage() {
                         <div>
                             <h2 style={{ marginTop: 0 }}>Existing 1-1 Students</h2>
                             <p className="muted" style={{ marginTop: -6 }}>
-                                Use this list to check who has already been registered. You can also edit each student's payment amount here.
+                                {userRole === 'superuser'
+                                    ? "Use this list to check who has already been registered. You can also edit each student's payment amount here."
+                                    : 'Use this list to check who has already been registered.'}
                             </p>
                         </div>
 
@@ -291,7 +299,7 @@ export default function AddOneToOneStudentPage() {
                                     <thead>
                                     <tr>
                                         <th>Name</th>
-                                        <th>Payment Amount</th>
+                                        {userRole === 'superuser' && <th>Payment Amount</th>}
                                         <th>Added</th>
                                         <th>Actions</th>
                                     </tr>
@@ -300,21 +308,23 @@ export default function AddOneToOneStudentPage() {
                                     {filteredStudents.map((student) => (
                                         <tr key={student.id}>
                                             <td>{student.student_name}</td>
-                                            <td>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                    <span>S$</span>
-                                                    <input
-                                                        className="weeks-input"
-                                                        type="number"
-                                                        min="0"
-                                                        step="0.01"
-                                                        value={Number(student.payment_amount || 0)}
-                                                        onChange={(event) =>
-                                                            updateStudentAmount(student.id, Number(event.target.value))
-                                                        }
-                                                    />
-                                                </div>
-                                            </td>
+                                            {userRole === 'superuser' && (
+                                                <td>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                        <span>S$</span>
+                                                        <input
+                                                            className="weeks-input"
+                                                            type="number"
+                                                            min="0"
+                                                            step="0.01"
+                                                            value={Number(student.payment_amount || 0)}
+                                                            onChange={(event) =>
+                                                                updateStudentAmount(student.id, Number(event.target.value))
+                                                            }
+                                                        />
+                                                    </div>
+                                                </td>
+                                            )}
                                             <td>
                                                 {student.created_at
                                                     ? new Date(student.created_at).toLocaleDateString()
