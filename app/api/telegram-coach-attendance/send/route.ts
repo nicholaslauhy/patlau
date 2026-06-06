@@ -59,6 +59,7 @@ export async function POST(request: Request) {
         const introText = String(bodyJson.introText || '').trim();
         const venueText = String(bodyJson.venueText || '').trim();
         const slots = bodyJson.slots as CoachSlotInput[] | undefined;
+        const topic = String(bodyJson.topic || '').trim().toLowerCase();
 
         if (!introText) {
             return NextResponse.json({ error: 'introText is required.' }, { status: 400 });
@@ -83,7 +84,13 @@ export async function POST(request: Request) {
 
         const botToken = process.env.TELEGRAM_COACH_ATTENDANCE_BOT_TOKEN;
         const chatId = process.env.TELEGRAM_COACH_ATTENDANCE_CHAT_ID;
-        const threadId = process.env.TELEGRAM_COACH_ATTENDANCE_THREAD_ID;
+
+        const threadId =
+            topic === 'saturday'
+                ? process.env.TELEGRAM_COACH_ATTENDANCE_SATURDAY_THREAD_ID
+                : topic === 'sunday'
+                    ? process.env.TELEGRAM_COACH_ATTENDANCE_SUNDAY_THREAD_ID
+                    : process.env.TELEGRAM_COACH_ATTENDANCE_THREAD_ID;
 
         if (!botToken) {
             return NextResponse.json({ error: 'Missing TELEGRAM_COACH_ATTENDANCE_BOT_TOKEN.' }, { status: 500 });
@@ -91,6 +98,20 @@ export async function POST(request: Request) {
 
         if (!chatId) {
             return NextResponse.json({ error: 'Missing TELEGRAM_COACH_ATTENDANCE_CHAT_ID.' }, { status: 500 });
+        }
+
+        if (!threadId) {
+            return NextResponse.json(
+                {
+                    error:
+                        topic === 'saturday'
+                            ? 'Missing TELEGRAM_COACH_ATTENDANCE_SATURDAY_THREAD_ID.'
+                            : topic === 'sunday'
+                                ? 'Missing TELEGRAM_COACH_ATTENDANCE_SUNDAY_THREAD_ID.'
+                                : 'Missing TELEGRAM_COACH_ATTENDANCE_THREAD_ID.',
+                },
+                { status: 500 }
+            );
         }
 
         const { data: poll, error: pollError } = await supabaseAdmin

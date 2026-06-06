@@ -183,6 +183,7 @@ export default function CoachAttendancePage() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                    topic: activePreset.id,
                     introText: activePreset.introText,
                     venueText: activePreset.venueText,
                     slots: activePreset.slots,
