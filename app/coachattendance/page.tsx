@@ -204,13 +204,44 @@ export default function CoachAttendancePage() {
         }
     };
 
-    if (userRole === 'member') {
+    const handleForbiddenLogout = async () => {
+        await supabase.auth.signOut();
+        router.push('/');
+    };
+
+    if (userRole === null) {
         return (
             <div className="container" style={{ padding: '3rem 1rem' }}>
                 <div className="form-card" style={{ maxWidth: 600, margin: '0 auto', textAlign: 'center' }}>
-                    <h1 style={{ color: '#dc2626' }}>403</h1>
-                    <p>Only admins and superusers can send coach attendance polls.</p>
-                    <Link href="/dashboard" className="btn share-btn">Back to Dashboard</Link>
+                    <p className="muted">Checking access...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (userRole !== 'admin' && userRole !== 'superuser') {
+        return (
+            <div className="container" style={{ padding: '3rem 1rem' }}>
+                <div className="form-card" style={{ maxWidth: 640, margin: '0 auto', textAlign: 'center' }}>
+                    <h1 style={{ color: '#dc2626', fontSize: '3rem', marginBottom: '0.5rem' }}>403</h1>
+                    <h2 style={{ marginTop: 0 }}>Forbidden</h2>
+                    <p style={{ color: '#6b7280', marginBottom: '1.5rem' }}>
+                        Only admins and superusers can access Coach Attendance and craft attendance messages.
+                    </p>
+
+                    <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+                        <Link href="/dashboard" className="btn share-btn">
+                            Return to Dashboard
+                        </Link>
+
+                        <button
+                            type="button"
+                            className="btn share-btn logout"
+                            onClick={handleForbiddenLogout}
+                        >
+                            Logout
+                        </button>
+                    </div>
                 </div>
             </div>
         );
@@ -218,201 +249,446 @@ export default function CoachAttendancePage() {
 
     return (
         <div className="container">
-            <AppHeader title="Coach Attendance" userName={userName} userRole={userRole} mode="dashboard" />
+            <AppHeader
+                title="Coach Attendance"
+                userName={userName}
+                userRole={userRole}
+                mode="dashboard"
+            />
 
-            <main>
-                <div
-                    className="form-card"
+            <main style={{ padding: '28px 16px 48px' }}>
+                <section
                     style={{
-                        maxWidth: 1120,
-                        width: '100%',
-                        margin: '24px auto',
-                        padding: 24,
+                        maxWidth: 1100,
+                        margin: '0 auto',
+                        border: '1px solid #dbe4f0',
+                        borderRadius: 22,
+                        background: '#ffffff',
+                        boxShadow: '0 18px 45px rgba(15, 23, 42, 0.08)',
                         overflow: 'hidden',
-                        boxSizing: 'border-box',
                     }}
                 >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                        <div>
-                            <h2 style={{ marginTop: 0, marginBottom: 6 }}>Send Weekend Coach Attendance Poll</h2>
-                            <p className="muted" style={{ marginTop: 0 }}>
-                                Choose Saturday or Sunday. Coaches will tap the buttons to add or remove their Telegram handle from each list.
-                            </p>
-                        </div>
-
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                            {presets.map((preset) => (
-                                <button
-                                    key={preset.id}
-                                    type="button"
-                                    className="btn share-btn"
-                                    onClick={() => setActivePresetId(preset.id)}
+                    <div
+                        style={{
+                            padding: '28px 30px 22px',
+                            borderBottom: '1px solid #e5e7eb',
+                            background: 'linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)',
+                        }}
+                    >
+                        <div
+                            style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'flex-start',
+                                gap: 20,
+                                flexWrap: 'wrap',
+                            }}
+                        >
+                            <div style={{ minWidth: 0 }}>
+                                <div
                                     style={{
-                                        background: activePresetId === preset.id ? '#2563eb' : undefined,
-                                        color: activePresetId === preset.id ? 'white' : undefined,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 8,
+                                        padding: '7px 11px',
+                                        borderRadius: 999,
+                                        background: '#eff6ff',
+                                        color: '#1d4ed8',
+                                        fontSize: '0.78rem',
+                                        fontWeight: 800,
+                                        letterSpacing: '0.02em',
+                                        marginBottom: 12,
                                     }}
                                 >
-                                    {preset.title}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                                    WEEKEND COACHING
+                                </div>
 
-                    {message && (
-                        <div
-                            className={message.toLowerCase().includes('success') ? 'success-message' : 'error-message'}
-                            style={{ marginTop: 16 }}
-                        >
-                            {message}
+                                <h1
+                                    style={{
+                                        margin: 0,
+                                        fontSize: 'clamp(1.65rem, 2.5vw, 2.15rem)',
+                                        lineHeight: 1.15,
+                                        color: '#0f172a',
+                                    }}
+                                >
+                                    Send Coach Attendance Poll
+                                </h1>
+
+                                <p
+                                    style={{
+                                        margin: '10px 0 0',
+                                        color: '#64748b',
+                                        maxWidth: 700,
+                                        lineHeight: 1.6,
+                                    }}
+                                >
+                                    Choose Saturday or Sunday, customise the message, then send it to the correct Telegram topic.
+                                </p>
+                            </div>
+
+                            <div
+                                style={{
+                                    display: 'inline-flex',
+                                    gap: 6,
+                                    padding: 5,
+                                    borderRadius: 14,
+                                    background: '#f1f5f9',
+                                    border: '1px solid #e2e8f0',
+                                }}
+                            >
+                                {presets.map((preset) => {
+                                    const isActive = activePresetId === preset.id;
+
+                                    return (
+                                        <button
+                                            key={preset.id}
+                                            type="button"
+                                            onClick={() => setActivePresetId(preset.id)}
+                                            style={{
+                                                border: 'none',
+                                                borderRadius: 10,
+                                                padding: '10px 16px',
+                                                cursor: 'pointer',
+                                                fontWeight: 800,
+                                                fontSize: '0.9rem',
+                                                background: isActive ? '#2563eb' : 'transparent',
+                                                color: isActive ? '#ffffff' : '#334155',
+                                                boxShadow: isActive ? '0 6px 14px rgba(37, 99, 235, 0.24)' : 'none',
+                                                transition: 'all 0.18s ease',
+                                            }}
+                                        >
+                                            {preset.title}
+                                        </button>
+                                    );
+                                })}
+                            </div>
                         </div>
-                    )}
+
+                        {message && (
+                            <div
+                                className={message.toLowerCase().includes('success') ? 'success-message' : 'error-message'}
+                                style={{
+                                    marginTop: 18,
+                                    borderRadius: 12,
+                                    padding: '11px 14px',
+                                }}
+                            >
+                                {message}
+                            </div>
+                        )}
+                    </div>
 
                     <div
                         style={{
+                            padding: 30,
                             display: 'grid',
-                            gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-                            gap: 22,
-                            marginTop: 20,
-                            alignItems: 'stretch',
+                            gap: 24,
+                            background: '#f8fafc',
                         }}
                     >
                         <section
                             style={{
-                                minWidth: 0,
-                                border: '1px solid #e5e7eb',
-                                borderRadius: 16,
-                                padding: 18,
+                                border: '1px solid #dbe4f0',
+                                borderRadius: 18,
                                 background: '#ffffff',
-                                boxSizing: 'border-box',
+                                padding: 24,
+                                boxShadow: '0 8px 24px rgba(15, 23, 42, 0.05)',
                             }}
                         >
-                            <h3 style={{ marginTop: 0 }}>{activePreset.title}</h3>
-                            <p className="muted">{activePreset.description}</p>
-
-                            <div className="form-group">
-                                <label>Opening Message</label>
-                                <textarea
-                                    className="form-input"
-                                    rows={3}
-                                    value={activePreset.introText}
-                                    onChange={(event) => updatePreset({ introText: event.target.value })}
-                                    style={{ resize: 'vertical', width: '100%', boxSizing: 'border-box' }}
-                                />
-                            </div>
-
-                            <div style={{ marginTop: 18 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-                                    <h4 style={{ margin: 0 }}>
-                                        {activePreset.id === 'saturday' ? 'Date Option' : 'Timing Options'}
-                                    </h4>
-                                    <button type="button" className="btn share-btn" onClick={addSlot}>
-                                        Add Option
-                                    </button>
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    gap: 16,
+                                    alignItems: 'flex-start',
+                                    flexWrap: 'wrap',
+                                    marginBottom: 22,
+                                }}
+                            >
+                                <div>
+                                    <h2 style={{ margin: 0, color: '#0f172a', fontSize: '1.35rem' }}>
+                                        {activePreset.title}
+                                    </h2>
+                                    <p style={{ margin: '6px 0 0', color: '#64748b', lineHeight: 1.5 }}>
+                                        {activePreset.description}
+                                    </p>
                                 </div>
 
-                                <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
-                                    {activePreset.slots.map((slot, index) => (
-                                        <div
-                                            key={`${slot.key}-${index}`}
+                                <div
+                                    style={{
+                                        padding: '8px 11px',
+                                        borderRadius: 10,
+                                        background: '#f8fafc',
+                                        border: '1px solid #e2e8f0',
+                                        color: '#475569',
+                                        fontSize: '0.82rem',
+                                        fontWeight: 700,
+                                    }}
+                                >
+                                    {activePreset.slots.length} voting option{activePreset.slots.length === 1 ? '' : 's'}
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gap: 22 }}>
+                                <div>
+                                    <label
+                                        style={{
+                                            display: 'block',
+                                            marginBottom: 8,
+                                            fontWeight: 800,
+                                            color: '#1e293b',
+                                        }}
+                                    >
+                                        Opening message
+                                    </label>
+
+                                    <textarea
+                                        className="form-input"
+                                        rows={4}
+                                        value={activePreset.introText}
+                                        onChange={(event) => updatePreset({ introText: event.target.value })}
+                                        style={{
+                                            width: '100%',
+                                            boxSizing: 'border-box',
+                                            resize: 'vertical',
+                                            minHeight: 118,
+                                            borderRadius: 12,
+                                            padding: 14,
+                                            lineHeight: 1.55,
+                                            background: '#fbfdff',
+                                        }}
+                                    />
+                                </div>
+
+                                <div>
+                                    <div
+                                        style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            gap: 12,
+                                            alignItems: 'center',
+                                            flexWrap: 'wrap',
+                                            marginBottom: 12,
+                                        }}
+                                    >
+                                        <div>
+                                            <h3 style={{ margin: 0, fontSize: '1rem', color: '#1e293b' }}>
+                                                {activePreset.id === 'saturday' ? 'Date option' : 'Timing options'}
+                                            </h3>
+                                            <p style={{ margin: '5px 0 0', color: '#64748b', fontSize: '0.84rem' }}>
+                                                These labels appear in the Telegram poll.
+                                            </p>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={addSlot}
                                             style={{
-                                                display: 'grid',
-                                                gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) auto',
-                                                gap: 10,
-                                                alignItems: 'end',
-                                                padding: 12,
-                                                borderRadius: 12,
-                                                border: '1px solid #e5e7eb',
-                                                background: '#f9fafb',
-                                                boxSizing: 'border-box',
+                                                border: '1px solid #bfdbfe',
+                                                borderRadius: 10,
+                                                padding: '9px 13px',
+                                                background: '#eff6ff',
+                                                color: '#1d4ed8',
+                                                fontWeight: 800,
+                                                cursor: 'pointer',
                                             }}
                                         >
-                                            <label style={{ display: 'grid', gap: 6, fontWeight: 700, minWidth: 0 }}>
-                                                Internal Key
-                                                <input
-                                                    className="filter-input"
-                                                    value={slot.key}
-                                                    onChange={(event) => updateSlot(index, { key: event.target.value })}
-                                                    style={{ width: '100%', boxSizing: 'border-box' }}
-                                                />
-                                            </label>
+                                            + Add option
+                                        </button>
+                                    </div>
 
-                                            <label style={{ display: 'grid', gap: 6, fontWeight: 700, minWidth: 0 }}>
-                                                Display Label
-                                                <input
-                                                    className="filter-input"
-                                                    value={slot.label}
-                                                    onChange={(event) => updateSlot(index, { label: event.target.value })}
-                                                    style={{ width: '100%', boxSizing: 'border-box' }}
-                                                />
-                                            </label>
-
-                                            <button
-                                                type="button"
-                                                className="delete-btn"
-                                                onClick={() => removeSlot(index)}
-                                                disabled={activePreset.slots.length === 1}
+                                    <div style={{ display: 'grid', gap: 10 }}>
+                                        {activePreset.slots.map((slot, index) => (
+                                            <div
+                                                key={`${slot.key}-${index}`}
+                                                style={{
+                                                    display: 'grid',
+                                                    gridTemplateColumns: 'minmax(0, 1fr) auto',
+                                                    gap: 12,
+                                                    alignItems: 'center',
+                                                    padding: 14,
+                                                    borderRadius: 14,
+                                                    border: '1px solid #e2e8f0',
+                                                    background: '#f8fafc',
+                                                }}
                                             >
-                                                Remove
-                                            </button>
-                                        </div>
-                                    ))}
+                                                <div style={{ minWidth: 0 }}>
+                                                    <label
+                                                        style={{
+                                                            display: 'block',
+                                                            fontSize: '0.8rem',
+                                                            fontWeight: 800,
+                                                            color: '#475569',
+                                                            marginBottom: 7,
+                                                        }}
+                                                    >
+                                                        {activePreset.id === 'saturday' ? 'Date label' : 'Timing label'}
+                                                    </label>
+
+                                                    <input
+                                                        className="filter-input"
+                                                        value={slot.label}
+                                                        onChange={(event) => updateSlot(index, { label: event.target.value })}
+                                                        style={{
+                                                            width: '100%',
+                                                            boxSizing: 'border-box',
+                                                            borderRadius: 10,
+                                                            background: '#ffffff',
+                                                        }}
+                                                    />
+                                                </div>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeSlot(index)}
+                                                    disabled={activePreset.slots.length === 1}
+                                                    style={{
+                                                        border: '1px solid #fecaca',
+                                                        borderRadius: 10,
+                                                        padding: '9px 12px',
+                                                        background: activePreset.slots.length === 1 ? '#f8fafc' : '#fff1f2',
+                                                        color: activePreset.slots.length === 1 ? '#94a3b8' : '#dc2626',
+                                                        fontWeight: 800,
+                                                        cursor: activePreset.slots.length === 1 ? 'not-allowed' : 'pointer',
+                                                    }}
+                                                >
+                                                    Remove
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label
+                                        style={{
+                                            display: 'block',
+                                            marginBottom: 8,
+                                            fontWeight: 800,
+                                            color: '#1e293b',
+                                        }}
+                                    >
+                                        Venue and closing message
+                                    </label>
+
+                                    <textarea
+                                        className="form-input"
+                                        rows={5}
+                                        value={activePreset.venueText}
+                                        onChange={(event) => updatePreset({ venueText: event.target.value })}
+                                        style={{
+                                            width: '100%',
+                                            boxSizing: 'border-box',
+                                            resize: 'vertical',
+                                            minHeight: 132,
+                                            borderRadius: 12,
+                                            padding: 14,
+                                            lineHeight: 1.55,
+                                            background: '#fbfdff',
+                                        }}
+                                    />
                                 </div>
                             </div>
 
-                            <div className="form-group" style={{ marginTop: 18 }}>
-                                <label>Venue / Closing Message</label>
-                                <textarea
-                                    className="form-input"
-                                    rows={5}
-                                    value={activePreset.venueText}
-                                    onChange={(event) => updatePreset({ venueText: event.target.value })}
-                                    style={{ resize: 'vertical', width: '100%', boxSizing: 'border-box' }}
-                                />
-                            </div>
-
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 20 }}>
-                                <button type="button" className="btn share-btn" onClick={sendPoll} disabled={sending}>
-                                    {sending ? 'Sending...' : `Send ${activePreset.title}`}
+                            <div
+                                style={{
+                                    marginTop: 24,
+                                    paddingTop: 20,
+                                    borderTop: '1px solid #e5e7eb',
+                                    display: 'flex',
+                                    justifyContent: 'flex-end',
+                                }}
+                            >
+                                <button
+                                    type="button"
+                                    onClick={sendPoll}
+                                    disabled={sending}
+                                    style={{
+                                        minWidth: 220,
+                                        border: 'none',
+                                        borderRadius: 12,
+                                        padding: '12px 18px',
+                                        background: sending ? '#93c5fd' : '#2563eb',
+                                        color: '#ffffff',
+                                        fontWeight: 900,
+                                        cursor: sending ? 'not-allowed' : 'pointer',
+                                        boxShadow: sending ? 'none' : '0 8px 18px rgba(37, 99, 235, 0.22)',
+                                    }}
+                                >
+                                    {sending ? 'Sending…' : `Send ${activePreset.title}`}
                                 </button>
                             </div>
                         </section>
 
                         <section
                             style={{
-                                minWidth: 0,
-                                border: '1px solid #e5e7eb',
-                                borderRadius: 16,
-                                padding: 18,
+                                border: '1px solid #dbe4f0',
+                                borderRadius: 18,
                                 background: '#ffffff',
-                                boxSizing: 'border-box',
-                                display: 'flex',
-                                flexDirection: 'column',
+                                padding: 24,
+                                boxShadow: '0 8px 24px rgba(15, 23, 42, 0.05)',
                             }}
                         >
-                            <h3 style={{ marginTop: 0 }}>Preview</h3>
                             <div
                                 style={{
-                                    flex: 1,
-                                    minHeight: 520,
-                                    maxHeight: 720,
-                                    overflow: 'auto',
-                                    border: '1px solid #dbeafe',
-                                    borderRadius: 14,
-                                    background: '#f8fafc',
-                                    padding: 16,
-                                    boxSizing: 'border-box',
-                                    width: '100%',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    gap: 12,
+                                    alignItems: 'center',
+                                    marginBottom: 14,
+                                    flexWrap: 'wrap',
+                                }}
+                            >
+                                <div>
+                                    <h2 style={{ margin: 0, color: '#0f172a', fontSize: '1.25rem' }}>
+                                        Telegram preview
+                                    </h2>
+                                    <p style={{ margin: '5px 0 0', color: '#64748b', fontSize: '0.86rem' }}>
+                                        This is how the message will appear before coaches respond.
+                                    </p>
+                                </div>
+
+                                <div
+                                    style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 7,
+                                        padding: '7px 10px',
+                                        borderRadius: 999,
+                                        background: '#ecfdf5',
+                                        color: '#047857',
+                                        fontSize: '0.78rem',
+                                        fontWeight: 800,
+                                    }}
+                                >
+                                    ● Live preview
+                                </div>
+                            </div>
+
+                            <div
+                                style={{
+                                    border: '1px solid #bfdbfe',
+                                    borderRadius: 16,
+                                    background: '#f8fbff',
+                                    padding: 20,
+                                    minHeight: 300,
+                                    maxHeight: 520,
+                                    overflowY: 'auto',
+                                    overflowX: 'hidden',
                                 }}
                             >
                 <pre
                     style={{
                         margin: 0,
+                        width: '100%',
                         whiteSpace: 'pre-wrap',
-                        overflowWrap: 'anywhere',
-                        wordBreak: 'break-word',
-                        lineHeight: 1.5,
+                        overflowWrap: 'break-word',
+                        wordBreak: 'normal',
+                        lineHeight: 1.65,
                         fontFamily: 'inherit',
-                        color: '#111827',
+                        fontSize: '0.96rem',
+                        color: '#0f172a',
+                        textAlign: 'left',
                     }}
                 >
                   {previewText}
@@ -420,7 +696,7 @@ export default function CoachAttendancePage() {
                             </div>
                         </section>
                     </div>
-                </div>
+                </section>
             </main>
         </div>
     );

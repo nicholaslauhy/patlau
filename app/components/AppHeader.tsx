@@ -58,6 +58,7 @@ const weekendItems: NavItem[] = [
     { label: 'Add Student', href: '/add', allowedRoles: ['superuser', 'admin'] },
     { label: 'Attendance', href: '/attendance', allowedRoles: ['superuser'] },
     { label: 'Payment', href: '/payment', allowedRoles: ['superuser'] },
+    { label: 'Coach Attendance', href: '/coachattendance', allowedRoles: ['superuser', 'admin'] },
 ];
 
 const menuBoxStyle: React.CSSProperties = {
