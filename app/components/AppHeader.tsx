@@ -1,4 +1,4 @@
-'use client'
+'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
@@ -36,14 +36,14 @@ const supabase = createBrowserClient(
  * - member: Weekend Dashboard only
  */
 const weekdayItems: NavItem[] = [
-    { label: 'Add Weekday Student', href: '/weekday/add', allowedRoles: ['superuser', 'admin'] },
-    { label: 'Weekday Attendance', href: '/weekday/attendance', allowedRoles: ['superuser', 'admin'] },
+    { label: 'Add Weekday Student', href: '/weekday/add', allowedRoles: ['superuser'] },
+    { label: 'Weekday Attendance', href: '/weekday/attendance', allowedRoles: ['superuser'] },
     { label: 'Weekday Payment', href: '/weekday/payment', allowedRoles: ['superuser'] },
 ];
 
 const matchPlayItems: NavItem[] = [
-    { label: 'Add MatchPlay Student', href: '/matchplay/add', allowedRoles: ['superuser', 'admin'] },
-    { label: 'MatchPlay Attendance', href: '/matchplay/attendance', allowedRoles: ['superuser', 'admin'] },
+    { label: 'Add MatchPlay Student', href: '/matchplay/add', allowedRoles: ['superuser'] },
+    { label: 'MatchPlay Attendance', href: '/matchplay/attendance', allowedRoles: ['superuser'] },
     { label: 'MatchPlay Payment', href: '/matchplay/payment', allowedRoles: ['superuser'] },
 ];
 

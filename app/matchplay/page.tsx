@@ -1,4 +1,4 @@
-'use client'
+'use client';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -41,13 +41,27 @@ export default function MatchPlayPage() {
         checkAuth();
     }, [router]);
 
-    if (userRole === 'member') {
+    const handleForbiddenLogout = async () => {
+        await supabase.auth.signOut();
+        router.push('/');
+    };
+
+
+    if (userRole !== 'superuser') {
         return (
             <div className="container" style={{ padding: '3rem 1rem' }}>
-                <div className="form-card" style={{ maxWidth: 600, margin: '0 auto', textAlign: 'center' }}>
-                    <h1 style={{ color: '#dc2626' }}>403</h1>
-                    <p>Only admins and superusers can access MatchPlay.</p>
-                    <Link href="/dashboard" className="btn share-btn">Back to Dashboard</Link>
+                <div className="form-card" style={{ maxWidth: 640, margin: '0 auto', textAlign: 'center' }}>
+                    <h1 style={{ color: '#dc2626', fontSize: '3rem', marginBottom: '0.5rem' }}>403</h1>
+                    <h2 style={{ marginTop: 0 }}>Forbidden</h2>
+                    <p style={{ color: '#6b7280', marginBottom: '1.5rem' }}>
+                        You do not have permission to access MatchPlay. Please return to the dashboard or logout.
+                    </p>
+                    <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+                        <Link href="/dashboard" className="btn share-btn">Return to Dashboard</Link>
+                        <button type="button" className="btn share-btn logout" onClick={handleForbiddenLogout}>
+                            Logout
+                        </button>
+                    </div>
                 </div>
             </div>
         );

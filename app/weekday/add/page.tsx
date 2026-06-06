@@ -22,7 +22,7 @@ interface WeekdaySchedule {
 }
 
 const WEEKDAY_OPTIONS: WeekdayName[] = ['Monday', 'Wednesday', 'Thursday'];
-const HOURLY_RATE = 80;
+const DEFAULT_HOURLY_RATE = 80;
 
 const getUserRole = (user: any): UserRole => {
     return (user?.app_metadata?.role || user?.user_metadata?.role || 'member') as UserRole;
@@ -36,6 +36,7 @@ export default function AddWeekdayStudentPage() {
     const [schedules, setSchedules] = useState<WeekdaySchedule[]>([
         { day: 'Monday', duration_hours: 1 },
     ]);
+    const [hourlyRate, setHourlyRate] = useState(DEFAULT_HOURLY_RATE);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState('');
 
@@ -59,7 +60,7 @@ export default function AddWeekdayStudentPage() {
         return schedules.reduce((sum, item) => sum + (Number(item.duration_hours) || 0), 0);
     }, [schedules]);
 
-    const estimatedWeeklyAmount = weeklyHours * HOURLY_RATE;
+    const estimatedWeeklyAmount = weeklyHours * hourlyRate;
     const estimatedFourWeekAmount = estimatedWeeklyAmount * 4;
 
     const usedDays = schedules.map((item) => item.day);
@@ -129,7 +130,7 @@ export default function AddWeekdayStudentPage() {
                 .insert({
                     student_name: studentName.trim(),
                     schedules: cleanedSchedules,
-                    hourly_rate: HOURLY_RATE,
+                    hourly_rate: Number(hourlyRate) || DEFAULT_HOURLY_RATE,
                     total_payment_amount: estimatedFourWeekAmount,
                     active: true,
                     updated_at: new Date().toISOString(),
@@ -145,13 +146,27 @@ export default function AddWeekdayStudentPage() {
         }
     };
 
-    if (userRole === 'member') {
+    const handleForbiddenLogout = async () => {
+        await supabase.auth.signOut();
+        router.push('/');
+    };
+
+
+    if (userRole !== 'superuser') {
         return (
             <div className="container" style={{ padding: '3rem 1rem' }}>
-                <div className="form-card" style={{ maxWidth: 600, margin: '0 auto', textAlign: 'center' }}>
-                    <h1 style={{ color: '#dc2626' }}>403</h1>
-                    <p>Only admins and superusers can add weekday students.</p>
-                    <Link href="/dashboard" className="btn share-btn">Back to Dashboard</Link>
+                <div className="form-card" style={{ maxWidth: 640, margin: '0 auto', textAlign: 'center' }}>
+                    <h1 style={{ color: '#dc2626', fontSize: '3rem', marginBottom: '0.5rem' }}>403</h1>
+                    <h2 style={{ marginTop: 0 }}>Forbidden</h2>
+                    <p style={{ color: '#6b7280', marginBottom: '1.5rem' }}>
+                        You do not have permission to access Weekday. Please return to the dashboard or logout.
+                    </p>
+                    <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+                        <Link href="/dashboard" className="btn share-btn">Return to Dashboard</Link>
+                        <button type="button" className="btn share-btn logout" onClick={handleForbiddenLogout}>
+                            Logout
+                        </button>
+                    </div>
                 </div>
             </div>
         );
@@ -185,12 +200,27 @@ export default function AddWeekdayStudentPage() {
                         />
                     </div>
 
+                    <div className="form-group">
+                        <label htmlFor="hourlyRate">Hourly Rate (S$/hour)</label>
+                        <input
+                            id="hourlyRate"
+                            className="form-input"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={hourlyRate}
+                            onChange={(event) => setHourlyRate(Number(event.target.value))}
+                            placeholder="80"
+                        />
+                        <small className="muted">Default is S${DEFAULT_HOURLY_RATE}/hour, but you can change it for this student.</small>
+                    </div>
+
                     <div style={{ marginTop: 22 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
                             <div>
                                 <h3 style={{ margin: 0 }}>Training Sessions</h3>
                                 <p className="muted" style={{ margin: '4px 0 0' }}>
-                                    Standard rate: S${HOURLY_RATE}/hour. Add each weekday separately.
+                                    Default rate: S${DEFAULT_HOURLY_RATE}/hour. You can customise this student's hourly rate below.
                                 </p>
                             </div>
 
