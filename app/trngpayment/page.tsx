@@ -29,9 +29,11 @@ interface AppUser {
     };
 }
 
-interface Student {
-    student_id: string;
+interface OneToOneStudent {
+    id: string;
     student_name: string;
+    payment_amount: number;
+    active?: boolean;
 }
 
 interface TrainingPayment {
@@ -39,6 +41,7 @@ interface TrainingPayment {
     training_student_id: string;
     week_date: string;
     paid: boolean;
+    amount?: number | null;
     created_at: string;
     updated_at?: string;
 }
@@ -50,9 +53,14 @@ interface TrainingSession {
     coach_id: string;
     student_name: string;
     coach_name: string;
+    payment_amount: number;
+    removed_from_training?: boolean;
+    removed_at?: string | null;
+    payment_exempt?: boolean;
+    payment_exempt_at?: string | null;
 }
 
-const TRAINING_PRICE = 80;
+const DEFAULT_TRAINING_PRICE = 80;
 
 const getUserRole = (user: any): UserRole => {
     return (
@@ -143,8 +151,9 @@ export default function TrngPaymentPage() {
             const endDateKey = getNextMonthDateKey(selectedMonth);
 
             const { data: rawSessions, error: sessionError } = await supabase
-                .from('training_sessions')
-                .select('id, session_date, student_id, coach_id')
+                .from('one_to_one_sessions')
+                .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, payment_exempt, payment_exempt_at, created_at, updated_at')
+                .or('payment_exempt.is.null,payment_exempt.eq.false')
                 .gte('session_date', startDateKey)
                 .lt('session_date', endDateKey)
                 .order('session_date', { ascending: true })
@@ -157,6 +166,8 @@ export default function TrngPaymentPage() {
                 session_date: string;
                 student_id: string;
                 coach_id: string;
+                removed_from_training?: boolean;
+                removed_at?: string | null;
             }>).map(session => ({
                 ...session,
                 session_date: normalizeDateKey(session.session_date)
@@ -165,17 +176,17 @@ export default function TrngPaymentPage() {
             const studentIds = [...new Set(sessionRows.map(session => session.student_id).filter(Boolean))];
             const coachIds = [...new Set(sessionRows.map(session => session.coach_id).filter(Boolean))];
 
-            let studentsById = new Map<string, string>();
+            let studentsById = new Map<string, OneToOneStudent>();
             if (studentIds.length > 0) {
                 const { data: studentData, error: studentError } = await supabase
-                    .from('students')
-                    .select('student_id, student_name')
-                    .in('student_id', studentIds);
+                    .from('one_to_one_students')
+                    .select('id, student_name, payment_amount, active')
+                    .in('id', studentIds);
 
                 if (studentError) throw studentError;
 
                 studentsById = new Map(
-                    ((studentData || []) as Student[]).map(student => [student.student_id, student.student_name])
+                    ((studentData || []) as OneToOneStudent[]).map(student => [student.id, student])
                 );
             }
 
@@ -200,16 +211,24 @@ export default function TrngPaymentPage() {
 
             if (paymentError) throw paymentError;
 
-            setSessions(sessionRows.map(session => ({
-                ...session,
-                student_name: studentsById.get(session.student_id) || 'Missing student record',
-                coach_name: coachesById.get(session.coach_id) || 'Unassigned coach'
-            })));
+            const hydratedSessions = sessionRows.map(session => {
+                const student = studentsById.get(session.student_id);
 
-            setPayments(((paymentData || []) as TrainingPayment[]).map(payment => ({
+                return {
+                    ...session,
+                    student_name: student?.student_name || 'Missing 1-1 student record',
+                    coach_name: coachesById.get(session.coach_id) || 'Unassigned coach',
+                    payment_amount: Number(student?.payment_amount || DEFAULT_TRAINING_PRICE)
+                };
+            });
+
+            const normalizedPayments = ((paymentData || []) as TrainingPayment[]).map(payment => ({
                 ...payment,
                 week_date: normalizeDateKey(payment.week_date)
-            })));
+            }));
+
+            setSessions(hydratedSessions);
+            setPayments(normalizedPayments);
         } catch (err: any) {
             console.error(err);
             setMessage(err?.message || 'Failed to load 1-on-1 payment data');
@@ -219,8 +238,8 @@ export default function TrngPaymentPage() {
     };
 
     useEffect(() => {
-        loadData();
-    }, [selectedMonth]);
+        if (userRole) loadData();
+    }, [selectedMonth, userRole]);
 
     const getPayment = (weekDate: string, studentId: string) => {
         return payments.find(p => p.week_date === weekDate && p.training_student_id === studentId);
@@ -230,10 +249,105 @@ export default function TrngPaymentPage() {
         return sessions.find(s => s.session_date === weekDate && s.student_id === studentId);
     };
 
+    const getSessionAmount = (session: TrainingSession, payment?: TrainingPayment) => {
+        return Number(payment?.amount ?? session.payment_amount ?? DEFAULT_TRAINING_PRICE);
+    };
+
+    const updateStudentPaymentAmount = async (studentId: string, amount: number) => {
+        const safeAmount = Number(amount) || 0;
+
+        if (safeAmount <= 0) {
+            alert('Payment amount must be more than 0.');
+            return;
+        }
+
+        try {
+            const { data, error } = await supabase
+                .from('one_to_one_students')
+                .update({
+                    payment_amount: safeAmount,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', studentId)
+                .select('id, student_name, payment_amount, active')
+                .single();
+
+            if (error) throw error;
+
+            const updatedStudent = data as OneToOneStudent;
+
+            setSessions(prev =>
+                prev.map(session =>
+                    session.student_id === studentId
+                        ? {
+                            ...session,
+                            student_name: updatedStudent.student_name,
+                            payment_amount: Number(updatedStudent.payment_amount || DEFAULT_TRAINING_PRICE)
+                        }
+                        : session
+                )
+            );
+
+            const sessionPaymentIds = payments
+                .filter(payment => payment.training_student_id === studentId && !payment.paid)
+                .map(payment => payment.id);
+
+            if (sessionPaymentIds.length > 0) {
+                await supabase
+                    .from('training_payments')
+                    .update({ amount: safeAmount, updated_at: new Date().toISOString() })
+                    .in('id', sessionPaymentIds);
+            }
+
+            setLastUpdated(`Updated ${updatedStudent.student_name}'s 1-on-1 payment amount.`);
+        } catch (err: any) {
+            alert(err?.message || 'Failed to update 1-on-1 payment amount.');
+            await loadData();
+        }
+    };
+
+    const deletePaymentRecord = async (payment: TrainingPayment | undefined, session: TrainingSession) => {
+        const confirmed = confirm(
+            `Delete this payment transaction for ${session.student_name} on ${getReadableDate(session.session_date)}?\n\nThis means the student does NOT need to pay for this lesson anymore. The lesson will be removed from /trngpayment totals, but the training record will still remain in the attendance/training system.`
+        );
+
+        if (!confirmed) return;
+
+        try {
+            if (payment) {
+                const { error: deleteError } = await supabase
+                    .from('training_payments')
+                    .delete()
+                    .eq('id', payment.id);
+
+                if (deleteError) throw deleteError;
+            }
+
+            const { error: sessionError } = await supabase
+                .from('one_to_one_sessions')
+                .update({
+                    payment_exempt: true,
+                    payment_exempt_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', session.id);
+
+            if (sessionError) throw sessionError;
+
+            setPayments(prev => payment ? prev.filter(item => item.id !== payment.id) : prev);
+            setSessions(prev => prev.filter(item => item.id !== session.id));
+            setLastUpdated(`Deleted payment transaction for ${session.student_name}. They no longer need to pay for this lesson.`);
+        } catch (err: any) {
+            alert(err?.message || 'Failed to delete payment transaction.');
+            await loadData();
+        }
+    };
+
     const sendTrainingPaymentNotification = async (
         studentName: string,
         coachName: string,
         weekDate: string,
+        amount: number,
         isPaid: boolean
     ) => {
         const recordedAt = new Date().toISOString();
@@ -242,7 +356,7 @@ export default function TrngPaymentPage() {
             `Student: ${studentName}\n` +
             `Coach: ${coachName}\n` +
             `Session Date: ${getReadableDate(weekDate)}\n` +
-            `Amount: ${isPaid ? '+' : '-'}S$${TRAINING_PRICE.toFixed(2)}\n` +
+            `Amount: ${isPaid ? '+' : '-'}S$${amount.toFixed(2)}\n` +
             `Recorded At: ${new Date(recordedAt).toLocaleString()}\n` +
             `Status: ${isPaid ? 'Paid' : 'Unpaid'}`;
 
@@ -269,19 +383,32 @@ export default function TrngPaymentPage() {
         });
 
         const paidLines = paidSessions.length > 0
-            ? paidSessions.map(session => (
-                `- ${session.student_name} (${getReadableDate(session.session_date)}, Coach: ${session.coach_name}): +S$${TRAINING_PRICE.toFixed(2)}`
-            )).join('\n')
+            ? paidSessions.map(session => {
+                const payment = getPayment(session.session_date, session.student_id);
+                const amount = getSessionAmount(session, payment);
+                const removedNote = session.removed_from_training ? ' [removed from attendance]' : '';
+                return `- ${session.student_name} (${getReadableDate(session.session_date)}, Coach: ${session.coach_name}${removedNote}): +S$${amount.toFixed(2)}`;
+            }).join('\n')
             : '- No paid 1-on-1 sessions recorded.';
 
         const unpaidLines = unpaidSessions.length > 0
-            ? unpaidSessions.map(session => (
-                `- ${session.student_name} (${getReadableDate(session.session_date)}, Coach: ${session.coach_name})`
-            )).join('\n')
+            ? unpaidSessions.map(session => {
+                const payment = getPayment(session.session_date, session.student_id);
+                const amount = getSessionAmount(session, payment);
+                const removedNote = session.removed_from_training ? ' [removed from attendance]' : '';
+                return `- ${session.student_name} (${getReadableDate(session.session_date)}, Coach: ${session.coach_name}${removedNote}): S$${amount.toFixed(2)}`;
+            }).join('\n')
             : '- None';
 
-        const totalCollected = paidSessions.length * TRAINING_PRICE;
-        const possibleTotal = sessions.length * TRAINING_PRICE;
+        const totalCollected = paidSessions.reduce((sum, session) => {
+            const payment = getPayment(session.session_date, session.student_id);
+            return sum + getSessionAmount(session, payment);
+        }, 0);
+
+        const possibleTotal = sessions.reduce((sum, session) => {
+            const payment = getPayment(session.session_date, session.student_id);
+            return sum + getSessionAmount(session, payment);
+        }, 0);
 
         return `📊 1-on-1 Monthly Payment Summary 📊\n\n` +
             `Month: ${getReadableMonth(selectedMonth)}\n` +
@@ -316,7 +443,9 @@ export default function TrngPaymentPage() {
                 throw new Error('Training session not found. Please refresh and try again.');
             }
 
+            const amount = getSessionAmount(session, oldPayment);
             const now = new Date().toISOString();
+
             const { data, error } = await supabase
                 .from('training_payments')
                 .upsert(
@@ -324,6 +453,7 @@ export default function TrngPaymentPage() {
                         training_student_id: studentId,
                         week_date: weekDate,
                         paid,
+                        amount,
                         updated_at: now
                     },
                     { onConflict: 'training_student_id,week_date' }
@@ -359,6 +489,7 @@ export default function TrngPaymentPage() {
                     session.student_name,
                     session.coach_name,
                     weekDate,
+                    amount,
                     paid
                 );
             }
@@ -420,9 +551,11 @@ export default function TrngPaymentPage() {
 
         const session = getSession(latestPaidPayment.week_date, latestPaidPayment.training_student_id);
         if (!session) {
-            alert('Could not find the matching training session for the latest payment.');
+            alert('Could not find the matching 1-on-1 session for the latest payment.');
             return;
         }
+
+        const amount = getSessionAmount(session, latestPaidPayment);
 
         if (!confirm(`Undo latest 1-on-1 payment for ${session.student_name} on ${getReadableDate(session.session_date)}?`)) {
             return;
@@ -442,6 +575,7 @@ export default function TrngPaymentPage() {
                 session.student_name,
                 session.coach_name,
                 session.session_date,
+                amount,
                 false
             );
 
@@ -460,11 +594,14 @@ export default function TrngPaymentPage() {
         return sessions.filter(session => {
             const payment = getPayment(session.session_date, session.student_id);
             const isPaid = payment?.paid ?? false;
+            const amount = getSessionAmount(session, payment);
 
             const matchesSearch =
                 !normalizedSearch ||
                 session.student_name.toLowerCase().includes(normalizedSearch) ||
-                session.coach_name.toLowerCase().includes(normalizedSearch);
+                session.coach_name.toLowerCase().includes(normalizedSearch) ||
+                `s$${amount.toFixed(2)}`.toLowerCase().includes(normalizedSearch) ||
+                (session.removed_from_training ? 'removed attendance hidden' : 'active attendance').includes(normalizedSearch);
 
             const matchesPaymentFilter =
                 paymentFilter === 'all' ||
@@ -475,14 +612,21 @@ export default function TrngPaymentPage() {
         });
     }, [sessions, payments, searchTerm, paymentFilter]);
 
-    const paidCount = sessions.filter(session => {
+    const paidSessions = sessions.filter(session => {
         const payment = getPayment(session.session_date, session.student_id);
         return payment?.paid ?? false;
-    }).length;
+    });
 
+    const paidCount = paidSessions.length;
     const unpaidCount = sessions.length - paidCount;
-    const monthTotal = paidCount * TRAINING_PRICE;
-    const possibleTotal = sessions.length * TRAINING_PRICE;
+    const monthTotal = paidSessions.reduce((sum, session) => {
+        const payment = getPayment(session.session_date, session.student_id);
+        return sum + getSessionAmount(session, payment);
+    }, 0);
+    const possibleTotal = sessions.reduce((sum, session) => {
+        const payment = getPayment(session.session_date, session.student_id);
+        return sum + getSessionAmount(session, payment);
+    }, 0);
 
     if (userRole !== 'superuser') {
         return (
@@ -521,7 +665,7 @@ export default function TrngPaymentPage() {
                 <div className="search-box">
                     <input
                         type="text"
-                        placeholder="Search by student or coach..."
+                        placeholder="Search by student, coach, amount, or removed..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
@@ -559,15 +703,20 @@ export default function TrngPaymentPage() {
 
                     <div className="filter-buttons">
                         <button
+                            type="button"
+                            className="filter-button secondary"
                             onClick={() => {
                                 setSearchTerm('');
                                 setPaymentFilter('all');
                             }}
-                            className="filter-button secondary"
                         >
-                            Clear Filters
+                            Clear
                         </button>
-                        <button onClick={loadData} className="filter-button">
+                        <button
+                            type="button"
+                            className="filter-button"
+                            onClick={loadData}
+                        >
                             Refresh
                         </button>
                     </div>
@@ -577,21 +726,24 @@ export default function TrngPaymentPage() {
                     <div className="summary-card">
                         <h3>1-on-1 Payments Collected</h3>
                         <p className="amount">S${monthTotal.toFixed(2)}</p>
-                        <p className="timestamp">Monthly Tracking Period: {getReadableMonth(selectedMonth)}</p>
+                        <p className="timestamp">Month: {getReadableMonth(selectedMonth)}</p>
                         <p className="timestamp">
-                            Paid: {paidCount} · Unpaid: {unpaidCount} · Possible Total: S${possibleTotal.toFixed(2)}
+                            Paid Sessions: {paidCount} · Unpaid Sessions: {unpaidCount} · Possible Total: S${possibleTotal.toFixed(2)}
                         </p>
                         {lastUpdated && <p className="timestamp">{lastUpdated}</p>}
 
                         <div className="payment-actions">
                             <button
+                                type="button"
                                 className="payment-action-btn danger"
                                 onClick={handleResetTotal}
                                 disabled={isResetting || loading}
                             >
                                 {isResetting ? 'Resetting...' : 'Reset Total'}
                             </button>
+
                             <button
+                                type="button"
                                 className="payment-action-btn warning"
                                 onClick={handleUndoAdd}
                                 disabled={isUndoing || loading}
@@ -602,61 +754,131 @@ export default function TrngPaymentPage() {
                     </div>
                 </div>
 
-                <div className="search-results-display">
-                    {message && <p className="dashboard-error-message">{message}</p>}
-                    {loading && <p>Loading 1-on-1 payments...</p>}
+                {message && <p className="dashboard-error-message">{message}</p>}
+                {loading && <p className="muted">Loading 1-on-1 payments...</p>}
 
-                    {!loading && !message && filteredSessions.length === 0 && (
-                        <p>No 1-on-1 payment records found for this filter.</p>
-                    )}
+                {!loading && filteredSessions.length === 0 && (
+                    <p className="muted">No 1-on-1 sessions found for this month.</p>
+                )}
 
-                    {!loading && !message && filteredSessions.length > 0 && (
-                        <div className="table-container">
-                            <div className="user-scroll">
-                                <table>
-                                    <thead>
-                                    <tr>
-                                        <th>Student</th>
-                                        <th>Sunday</th>
-                                        <th>Coach</th>
-                                        <th>Payment Amount</th>
-                                        <th>Payment Status</th>
-                                    </tr>
-                                    </thead>
-                                    <tbody>
-                                    {filteredSessions.map(session => {
-                                        const payment = getPayment(session.session_date, session.student_id);
-                                        const isPaid = payment?.paid ?? false;
+                {!loading && filteredSessions.length > 0 && (
+                    <div className="table-container">
+                        <div className="table-scroll">
+                            <table>
+                                <thead>
+                                <tr>
+                                    <th>Student</th>
+                                    <th>Sunday</th>
+                                    <th>Coach</th>
+                                    <th>Training Status</th>
+                                    <th>Payment Amount</th>
+                                    <th>Payment Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                {filteredSessions.map(session => {
+                                    const payment = getPayment(session.session_date, session.student_id);
+                                    const isPaid = payment?.paid ?? false;
+                                    const amount = getSessionAmount(session, payment);
 
-                                        return (
-                                            <tr key={session.id}>
-                                                <td>{session.student_name}</td>
-                                                <td>{getReadableDate(session.session_date)}</td>
-                                                <td>{session.coach_name}</td>
-                                                <td>S${TRAINING_PRICE.toFixed(2)}</td>
-                                                <td>
-                                                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={isPaid}
-                                                            onChange={(e) => savePayment(
-                                                                session.session_date,
+                                    return (
+                                        <tr key={session.id}>
+                                            <td>{session.student_name}</td>
+                                            <td>{getReadableDate(session.session_date)}</td>
+                                            <td>{session.coach_name}</td>
+                                            <td>
+                                                {session.removed_from_training ? (
+                                                    <span
+                                                        style={{
+                                                            display: 'inline-flex',
+                                                            padding: '6px 10px',
+                                                            borderRadius: 999,
+                                                            fontWeight: 800,
+                                                            fontSize: '0.82rem',
+                                                            color: '#92400e',
+                                                            background: '#fef3c7',
+                                                            whiteSpace: 'nowrap'
+                                                        }}
+                                                    >
+                              Removed from attendance
+                            </span>
+                                                ) : (
+                                                    <span
+                                                        style={{
+                                                            display: 'inline-flex',
+                                                            padding: '6px 10px',
+                                                            borderRadius: 999,
+                                                            fontWeight: 800,
+                                                            fontSize: '0.82rem',
+                                                            color: '#047857',
+                                                            background: '#d1fae5',
+                                                            whiteSpace: 'nowrap'
+                                                        }}
+                                                    >
+                              Active
+                            </span>
+                                                )}
+                                            </td>
+                                            <td>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <span>S$</span>
+                                                    <input
+                                                        className="weeks-input"
+                                                        type="number"
+                                                        min="0"
+                                                        step="0.01"
+                                                        value={amount}
+                                                        onChange={(event) =>
+                                                            updateStudentPaymentAmount(
                                                                 session.student_id,
-                                                                e.target.checked
-                                                            )}
-                                                        />
-                                                        {isPaid ? 'Paid' : 'Unpaid'}
-                                                    </label>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                    </tbody>
-                                </table>
-                            </div>
+                                                                Number(event.target.value)
+                                                            )
+                                                        }
+                                                    />
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isPaid}
+                                                        onChange={(e) => savePayment(
+                                                            session.session_date,
+                                                            session.student_id,
+                                                            e.target.checked
+                                                        )}
+                                                    />
+                                                    {isPaid ? 'Paid' : 'Unpaid'}
+                                                </label>
+                                            </td>
+                                            <td>
+                                                <button
+                                                    type="button"
+                                                    className="delete-btn"
+                                                    onClick={() => payment ? deletePaymentRecord(payment, session) : alert('No payment transaction exists for this row yet.')}
+                                                >
+                                                    Delete Transaction
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+
+                                <tr>
+                                    <td><strong>Monthly Total</strong></td>
+                                    <td>-</td>
+                                    <td>-</td>
+                                    <td>-</td>
+                                    <td><strong>S${possibleTotal.toFixed(2)}</strong></td>
+                                    <td><strong>Collected: S${monthTotal.toFixed(2)}</strong></td>
+                                    <td>-</td>
+                                </tr>
+                                </tbody>
+                            </table>
                         </div>
-                    )}
-                </div>
+                    </div>
+                )}
             </main>
         </div>
     );

@@ -34,6 +34,10 @@ interface OneToOneSession {
     session_date: string;
     student_id: string;
     coach_id: string;
+    removed_from_training?: boolean;
+    removed_at?: string | null;
+    payment_exempt?: boolean;
+    payment_exempt_at?: string | null;
     created_at?: string;
     updated_at?: string;
 }
@@ -191,7 +195,8 @@ export default function TrainingPage() {
 
             const { data: sessionData, error: sessionError } = await supabase
                 .from('one_to_one_sessions')
-                .select('id, session_date, student_id, coach_id, created_at, updated_at')
+                .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, created_at, updated_at')
+                .or('removed_from_training.is.null,removed_from_training.eq.false')
                 .gte('session_date', startDateKey)
                 .lt('session_date', endDateKey)
                 .order('session_date', { ascending: true })
@@ -248,30 +253,90 @@ export default function TrainingPage() {
         }
 
         try {
-            const { data, error } = await supabase
+            const selectedStudent = students.find(student => student.id === draft.studentId);
+            const paymentAmount = Number(selectedStudent?.payment_amount || 80);
+
+            const { data: existingRows, error: existingError } = await supabase
                 .from('one_to_one_sessions')
-                .insert({
-                    session_date: sessionDate,
-                    student_id: draft.studentId,
-                    coach_id: draft.coachId,
-                    updated_at: new Date().toISOString()
-                })
-                .select('id, session_date, student_id, coach_id, created_at, updated_at')
-                .single();
+                .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, payment_exempt, payment_exempt_at, created_at, updated_at')
+                .eq('session_date', sessionDate)
+                .eq('student_id', draft.studentId)
+                .limit(1);
 
-            if (error) throw error;
+            if (existingError) throw existingError;
 
-            const newSession = {
-                ...(data as OneToOneSession),
-                session_date: normalizeDateKey((data as OneToOneSession).session_date)
-            };
+            const existingSession = existingRows?.[0];
 
-            setSessions(prev =>
-                [...prev, newSession].sort((a, b) => {
+            let savedSession: OneToOneSession;
+
+            if (existingSession) {
+                const { data, error } = await supabase
+                    .from('one_to_one_sessions')
+                    .update({
+                        coach_id: draft.coachId,
+                        removed_from_training: false,
+                        removed_at: null,
+                        payment_exempt: false,
+                        payment_exempt_at: null,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', existingSession.id)
+                    .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, created_at, updated_at')
+                    .single();
+
+                if (error) throw error;
+
+                savedSession = {
+                    ...(data as OneToOneSession),
+                    session_date: normalizeDateKey((data as OneToOneSession).session_date)
+                };
+            } else {
+                const { data, error } = await supabase
+                    .from('one_to_one_sessions')
+                    .insert({
+                        session_date: sessionDate,
+                        student_id: draft.studentId,
+                        coach_id: draft.coachId,
+                        removed_from_training: false,
+                        removed_at: null,
+                        payment_exempt: false,
+                        payment_exempt_at: null,
+                        updated_at: new Date().toISOString()
+                    })
+                    .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, created_at, updated_at')
+                    .single();
+
+                if (error) throw error;
+
+                savedSession = {
+                    ...(data as OneToOneSession),
+                    session_date: normalizeDateKey((data as OneToOneSession).session_date)
+                };
+            }
+
+            const { error: paymentError } = await supabase
+                .from('training_payments')
+                .upsert(
+                    {
+                        training_student_id: draft.studentId,
+                        week_date: sessionDate,
+                        paid: false,
+                        amount: paymentAmount,
+                        updated_at: new Date().toISOString()
+                    },
+                    { onConflict: 'training_student_id,week_date' }
+                );
+
+            if (paymentError) throw paymentError;
+
+            setSessions(prev => {
+                const withoutDuplicate = prev.filter(session => session.id !== savedSession.id);
+
+                return [...withoutDuplicate, savedSession].sort((a, b) => {
                     const dateCompare = a.session_date.localeCompare(b.session_date);
                     return dateCompare !== 0 ? dateCompare : a.id - b.id;
-                })
-            );
+                });
+            });
 
             setDraftSessions(prev => ({
                 ...prev,
@@ -308,7 +373,7 @@ export default function TrainingPage() {
                 .from('one_to_one_sessions')
                 .update({ ...patch, updated_at: new Date().toISOString() })
                 .eq('id', sessionId)
-                .select('id, session_date, student_id, coach_id, created_at, updated_at')
+                .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, created_at, updated_at')
                 .single();
 
             if (error) throw error;
@@ -318,6 +383,26 @@ export default function TrainingPage() {
                 session_date: normalizeDateKey((data as OneToOneSession).session_date)
             };
 
+            if (patch.student_id) {
+                const selectedStudent = students.find(student => student.id === patch.student_id);
+                const paymentAmount = Number(selectedStudent?.payment_amount || 80);
+
+                const { error: paymentError } = await supabase
+                    .from('training_payments')
+                    .upsert(
+                        {
+                            training_student_id: patch.student_id,
+                            week_date: updatedSession.session_date,
+                            paid: false,
+                            amount: paymentAmount,
+                            updated_at: new Date().toISOString()
+                        },
+                        { onConflict: 'training_student_id,week_date' }
+                    );
+
+                if (paymentError) throw paymentError;
+            }
+
             setSessions(prev => prev.map(s => s.id === sessionId ? updatedSession : s));
         } catch (err: any) {
             alert(err?.message || 'Failed to update 1-1 training session');
@@ -325,13 +410,19 @@ export default function TrainingPage() {
     };
 
     const deleteSession = async (sessionId: number) => {
-        const confirmed = window.confirm('Remove this student from 1-on-1 training for this Sunday?');
+        const confirmed = window.confirm(
+            'Remove this pair from the 1-on-1 training attendance page?\n\nThis will NOT remove it from /trngpayment because the student still has to pay for the booked lesson.'
+        );
         if (!confirmed) return;
 
         try {
             const { error } = await supabase
                 .from('one_to_one_sessions')
-                .delete()
+                .update({
+                    removed_from_training: true,
+                    removed_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                })
                 .eq('id', sessionId);
 
             if (error) throw error;
@@ -371,6 +462,11 @@ export default function TrainingPage() {
                                 onChange={(e) => setSelectedMonth(e.target.value)}
                             />
                         </div>
+                    </div>
+                    <div className="filter-buttons">
+                        <Link href="/training/add" className="filter-button" style={{ textAlign: 'center', textDecoration: 'none' }}>
+                            Add 1-1 Student
+                        </Link>
                     </div>
                 </div>
 
