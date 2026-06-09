@@ -59,6 +59,8 @@ const weekendItems: NavItem[] = [
     { label: 'Attendance', href: '/attendance', allowedRoles: ['superuser'] },
     { label: 'Payment', href: '/payment', allowedRoles: ['superuser'] },
     { label: 'Coach Attendance', href: '/coachattendance', allowedRoles: ['superuser', 'admin'] },
+    { label: 'Makeup Credits', href: '/makeup', allowedRoles: ['superuser', 'admin'] },
+    { label: 'Makeup Payment', href: '/makeup/payment', allowedRoles: ['superuser'] },
 ];
 
 const menuBoxStyle: React.CSSProperties = {
