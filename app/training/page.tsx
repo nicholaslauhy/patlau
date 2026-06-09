@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
 import AppHeader from './../components/AppHeader';
+import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../components/CrossProgrammeMakeupModal';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 
@@ -38,6 +39,10 @@ interface OneToOneSession {
     removed_at?: string | null;
     payment_exempt?: boolean;
     payment_exempt_at?: string | null;
+    attendance_status?: 'scheduled' | 'attended' | 'missed' | 'makeup';
+    makeup_target_type?: string | null;
+    makeup_usage_id?: string | null;
+    attendance_updated_at?: string | null;
     created_at?: string;
     updated_at?: string;
 }
@@ -125,6 +130,7 @@ export default function TrainingPage() {
     const [draftSessions, setDraftSessions] = useState<Record<string, DraftSession>>({});
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
+    const [makeupSession, setMakeupSession] = useState<OneToOneSession | null>(null);
     const [selectedMonth, setSelectedMonth] = useState(() => {
         const d = new Date();
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -195,7 +201,7 @@ export default function TrainingPage() {
 
             const { data: sessionData, error: sessionError } = await supabase
                 .from('one_to_one_sessions')
-                .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, created_at, updated_at')
+                .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, attendance_status, attendance_updated_at, makeup_target_type, makeup_usage_id, created_at, updated_at')
                 .or('removed_from_training.is.null,removed_from_training.eq.false')
                 .gte('session_date', startDateKey)
                 .lt('session_date', endDateKey)
@@ -258,7 +264,7 @@ export default function TrainingPage() {
 
             const { data: existingRows, error: existingError } = await supabase
                 .from('one_to_one_sessions')
-                .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, payment_exempt, payment_exempt_at, created_at, updated_at')
+                .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, payment_exempt, payment_exempt_at, attendance_status, attendance_updated_at, makeup_target_type, makeup_usage_id, created_at, updated_at')
                 .eq('session_date', sessionDate)
                 .eq('student_id', draft.studentId)
                 .limit(1);
@@ -278,10 +284,12 @@ export default function TrainingPage() {
                         removed_at: null,
                         payment_exempt: false,
                         payment_exempt_at: null,
+                        attendance_status: 'scheduled',
+                        attendance_updated_at: null,
                         updated_at: new Date().toISOString()
                     })
                     .eq('id', existingSession.id)
-                    .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, created_at, updated_at')
+                    .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, attendance_status, attendance_updated_at, makeup_target_type, makeup_usage_id, created_at, updated_at')
                     .single();
 
                 if (error) throw error;
@@ -301,9 +309,11 @@ export default function TrainingPage() {
                         removed_at: null,
                         payment_exempt: false,
                         payment_exempt_at: null,
+                        attendance_status: 'scheduled',
+                        attendance_updated_at: null,
                         updated_at: new Date().toISOString()
                     })
-                    .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, created_at, updated_at')
+                    .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, attendance_status, attendance_updated_at, makeup_target_type, makeup_usage_id, created_at, updated_at')
                     .single();
 
                 if (error) throw error;
@@ -373,7 +383,7 @@ export default function TrainingPage() {
                 .from('one_to_one_sessions')
                 .update({ ...patch, updated_at: new Date().toISOString() })
                 .eq('id', sessionId)
-                .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, created_at, updated_at')
+                .select('id, session_date, student_id, coach_id, removed_from_training, removed_at, attendance_status, attendance_updated_at, makeup_target_type, makeup_usage_id, created_at, updated_at')
                 .single();
 
             if (error) throw error;
@@ -406,6 +416,145 @@ export default function TrainingPage() {
             setSessions(prev => prev.map(s => s.id === sessionId ? updatedSession : s));
         } catch (err: any) {
             alert(err?.message || 'Failed to update 1-1 training session');
+        }
+    };
+
+    const updateAttendanceStatus = async (
+        sessionId: number,
+        nextStatus: 'scheduled' | 'attended' | 'missed'
+    ) => {
+        const session = sessions.find((item) => item.id === sessionId);
+        if (!session) return;
+
+        const currentStatus = session.attendance_status || 'scheduled';
+
+        if (currentStatus === nextStatus) {
+            alert(`This lesson is already marked as ${nextStatus}.`);
+            return;
+        }
+
+        if (currentStatus === 'makeup' && nextStatus !== 'scheduled') {
+            alert('Please press Undo first to return the makeup lesson to Missed.');
+            return;
+        }
+
+        const actionText =
+            currentStatus === 'makeup' && nextStatus === 'scheduled'
+                ? 'undo this makeup and return it to Missed'
+                : nextStatus === 'missed'
+                    ? 'mark this lesson as missed'
+                    : nextStatus === 'attended'
+                        ? 'mark this lesson as attended'
+                        : 'undo the attendance status';
+
+        if (!window.confirm(`Are you sure you want to ${actionText}?`)) {
+            return;
+        }
+
+        try {
+            if (currentStatus === 'makeup' && nextStatus === 'scheduled') {
+                const { data, error } = await supabase.rpc(
+                    'undo_one_to_one_makeup_status',
+                    {
+                        input_session_id: sessionId,
+                    }
+                );
+
+                if (error) throw error;
+
+                const updatedRow = Array.isArray(data) ? data[0] : data;
+
+                if (!updatedRow) {
+                    throw new Error('The 1-1 makeup could not be undone.');
+                }
+
+                const updatedSession = {
+                    ...(updatedRow as OneToOneSession),
+                    session_date: normalizeDateKey(
+                        (updatedRow as OneToOneSession).session_date
+                    ),
+                };
+
+                setSessions((prev) =>
+                    prev.map((item) =>
+                        item.id === sessionId ? updatedSession : item
+                    )
+                );
+
+                return;
+            }
+
+            const { data, error } = await supabase
+                .from('one_to_one_sessions')
+                .update({
+                    attendance_status: nextStatus,
+                    attendance_updated_at:
+                        nextStatus === 'scheduled' ? null : new Date().toISOString(),
+                    makeup_target_type: null,
+                    makeup_usage_id: null,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', sessionId)
+                .select(
+                    'id, session_date, student_id, coach_id, removed_from_training, removed_at, payment_exempt, payment_exempt_at, attendance_status, attendance_updated_at, makeup_target_type, makeup_usage_id, created_at, updated_at'
+                )
+                .single();
+
+            if (error) throw error;
+
+            const updatedSession = {
+                ...(data as OneToOneSession),
+                session_date: normalizeDateKey(
+                    (data as OneToOneSession).session_date
+                )
+            };
+
+            setSessions((prev) =>
+                prev.map((item) =>
+                    item.id === sessionId ? updatedSession : item
+                )
+            );
+        } catch (err: any) {
+            alert(err?.message || 'Failed to update 1-1 attendance.');
+        }
+    };
+
+    const completeOneToOneMakeup = async (selection: MakeupSelectionResult) => {
+        if (!makeupSession) return;
+
+        try {
+            const { data, error } = await supabase
+                .from('one_to_one_sessions')
+                .update({
+                    attendance_status: 'makeup',
+                    attendance_updated_at: new Date().toISOString(),
+                    makeup_target_type: selection.targetTrainingType,
+                    makeup_usage_id: selection.usageId,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', makeupSession.id)
+                .select(
+                    'id, session_date, student_id, coach_id, removed_from_training, removed_at, payment_exempt, payment_exempt_at, attendance_status, attendance_updated_at, makeup_target_type, makeup_usage_id, created_at, updated_at'
+                )
+                .single();
+
+            if (error) throw error;
+
+            setSessions((prev) =>
+                prev.map((item) =>
+                    item.id === makeupSession.id
+                        ? {
+                            ...(data as OneToOneSession),
+                            session_date: normalizeDateKey((data as OneToOneSession).session_date),
+                        }
+                        : item
+                )
+            );
+        } catch (err) {
+            await supabase.rpc('undo_cross_programme_makeup', {
+                input_usage_id: selection.usageId,
+            });
+            throw err;
         }
     };
 
@@ -540,6 +689,75 @@ export default function TrainingPage() {
                                                 <button className="btn share-btn logout" onClick={() => deleteSession(session.id)} type="button">
                                                     Remove
                                                 </button>
+
+                                                <div
+                                                    style={{
+                                                        gridColumn: '1 / -1',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'space-between',
+                                                        gap: '12px',
+                                                        flexWrap: 'wrap',
+                                                        paddingTop: '10px',
+                                                        borderTop: '1px solid #e5e7eb'
+                                                    }}
+                                                >
+                                                    <div>
+                            <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#64748b' }}>
+                              ATTENDANCE
+                            </span>
+                                                        <div style={{ marginTop: '4px', fontWeight: 800, color: '#111827' }}>
+                                                            {session.attendance_status === 'makeup'
+                                                                ? `MAKEUP${session.makeup_target_type && session.makeup_target_type !== 'one_to_one'
+                                                                    ? `, ${session.makeup_target_type === 'weekend' ? 'WEEKEND' : session.makeup_target_type.toUpperCase()}`
+                                                                    : ''}`
+                                                                : (session.attendance_status || 'scheduled').toUpperCase()}
+                                                        </div>
+                                                    </div>
+
+                                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                                        <button
+                                                            type="button"
+                                                            className="btn share-btn"
+                                                            onClick={() => updateAttendanceStatus(session.id, 'attended')}
+                                                            disabled={
+                                                                (session.attendance_status || 'scheduled') === 'attended'
+                                                                || session.attendance_status === 'makeup'
+                                                            }
+                                                        >
+                                                            Attended
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            className="btn share-btn logout"
+                                                            onClick={() => updateAttendanceStatus(session.id, 'missed')}
+                                                            disabled={
+                                                                (session.attendance_status || 'scheduled') === 'missed'
+                                                                || session.attendance_status === 'makeup'
+                                                            }
+                                                        >
+                                                            Missed
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="btn share-btn"
+                                                            onClick={() => setMakeupSession(session)}
+                                                            disabled={(session.attendance_status || 'scheduled') !== 'missed'}
+                                                        >
+                                                            Makeup
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            className="btn share-btn"
+                                                            onClick={() => updateAttendanceStatus(session.id, 'scheduled')}
+                                                            disabled={(session.attendance_status || 'scheduled') === 'scheduled'}
+                                                        >
+                                                            Undo
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
@@ -590,6 +808,15 @@ export default function TrainingPage() {
                         );
                     })}
                 </div>
+
+                <CrossProgrammeMakeupModal
+                    open={Boolean(makeupSession)}
+                    sourceTrainingType="one_to_one"
+                    sourceStudentId={makeupSession?.student_id || ''}
+                    studentName={students.find((student) => student.id === makeupSession?.student_id)?.student_name || ''}
+                    onClose={() => setMakeupSession(null)}
+                    onCompleted={completeOneToOneMakeup}
+                />
             </main>
         </div>
     );

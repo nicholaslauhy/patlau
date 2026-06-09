@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../../components/AppHeader';
+import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../../components/CrossProgrammeMakeupModal';
 import './../../styles.css';
 import './../../dashboard/dashboard.css';
 
 type UserRole = 'superuser' | 'admin' | 'member';
-type AttendanceStatus = 'attended' | 'missed';
+type AttendanceStatus = 'attended' | 'missed' | 'makeup';
 
 interface MatchPlayStudent {
     id: string;
@@ -19,6 +20,8 @@ interface MatchPlayStudent {
     active: boolean;
     created_at?: string;
     updated_at?: string;
+    makeup_target_type?: string | null;
+    makeup_usage_id?: string | null;
 }
 
 interface MatchPlayAttendance {
@@ -28,6 +31,8 @@ interface MatchPlayAttendance {
     status: AttendanceStatus;
     created_at: string;
     updated_at?: string;
+    makeup_target_type?: 'weekend' | 'one_to_one' | 'weekday' | 'matchplay' | null;
+    makeup_usage_id?: string | null;
 }
 
 const supabase = createBrowserClient(
@@ -53,6 +58,7 @@ export default function MatchPlayAttendancePage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
+    const [makeupStudent, setMakeupStudent] = useState<MatchPlayStudent | null>(null);
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -176,6 +182,34 @@ export default function MatchPlayAttendancePage() {
         }
     };
 
+    const completeMatchPlayMakeup = async (selection: MakeupSelectionResult) => {
+        if (!makeupStudent) return;
+
+        try {
+            const { data, error } = await supabase
+                .from('matchplay_attendance')
+                .insert({
+                    matchplay_student_id: makeupStudent.id,
+                    attendance_date: selection.targetDate,
+                    status: 'makeup',
+                    makeup_target_type: selection.targetTrainingType,
+                    makeup_usage_id: selection.usageId,
+                    updated_at: new Date().toISOString(),
+                })
+                .select('*')
+                .single();
+
+            if (error) throw error;
+
+            setAttendanceRows((prev) => [data as MatchPlayAttendance, ...prev]);
+        } catch (err) {
+            await supabase.rpc('undo_cross_programme_makeup', {
+                input_usage_id: selection.usageId,
+            });
+            throw err;
+        }
+    };
+
     const undoLatest = async (studentId: string) => {
         const latest = getAttendanceForStudent(studentId)[0];
 
@@ -199,6 +233,39 @@ export default function MatchPlayAttendancePage() {
             setAttendanceRows((prev) => prev.filter((row) => row.id !== latest.id));
         } catch (err: any) {
             alert(err?.message || 'Failed to undo latest MatchPlay attendance action.');
+            await loadData();
+        }
+    };
+
+    const resetAttendance = async (studentId: string, studentName: string) => {
+        if (!confirm(`Reset all MatchPlay attendance for ${studentName}?`)) return;
+
+        try {
+            const history = getAttendanceForStudent(studentId);
+
+            for (const row of history) {
+                if (row.status === 'makeup' && row.makeup_usage_id) {
+                    const { error: undoError } = await supabase.rpc(
+                        'undo_cross_programme_makeup',
+                        { input_usage_id: row.makeup_usage_id }
+                    );
+
+                    if (undoError) throw undoError;
+                }
+            }
+
+            const { error } = await supabase
+                .from('matchplay_attendance')
+                .delete()
+                .eq('matchplay_student_id', studentId);
+
+            if (error) throw error;
+
+            setAttendanceRows((prev) =>
+                prev.filter((row) => row.matchplay_student_id !== studentId)
+            );
+        } catch (err: any) {
+            alert(err?.message || 'Failed to reset MatchPlay attendance.');
             await loadData();
         }
     };
@@ -258,13 +325,38 @@ export default function MatchPlayAttendancePage() {
         <div className="container">
             <AppHeader title="MatchPlay Attendance" userName={userName} userRole={userRole} mode="dashboard" />
 
-            <main>
-                <div className="search-box">
+            <main
+                style={{
+                    position: 'relative',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: 'calc(100vw - 32px)',
+                    maxWidth: 1180,
+                    margin: 0,
+                    padding: '24px 0 48px',
+                    boxSizing: 'border-box',
+                }}
+            >
+                <div
+                    className="search-box"
+                    style={{
+                        display: 'flex',
+                        justifyContent: 'center',
+                        width: '100%',
+                        margin: '0 auto 28px',
+                        boxSizing: 'border-box',
+                    }}
+                >
                     <input
                         type="text"
                         placeholder="Search by student, weeks, price, date, attended/missed..."
                         value={searchTerm}
                         onChange={(event) => setSearchTerm(event.target.value)}
+                        style={{
+                            width: 'min(520px, 100%)',
+                            maxWidth: 520,
+                            boxSizing: 'border-box',
+                        }}
                     />
                 </div>
 
@@ -276,9 +368,32 @@ export default function MatchPlayAttendancePage() {
                 )}
 
                 {!loading && filteredStudents.length > 0 && (
-                    <div className="table-container">
-                        <div className="table-scroll">
-                            <table>
+                    <div
+                        className="table-container"
+                        style={{
+                            width: '100%',
+                            maxWidth: 1180,
+                            margin: '0 auto',
+                            overflow: 'hidden',
+                            boxSizing: 'border-box',
+                        }}
+                    >
+                        <div
+                            className="table-scroll"
+                            style={{
+                                width: '100%',
+                                maxWidth: '100%',
+                                overflowX: 'auto',
+                                boxSizing: 'border-box',
+                            }}
+                        >
+                            <table
+                                style={{
+                                    minWidth: 1080,
+                                    width: '100%',
+                                    margin: '0 auto',
+                                }}
+                            >
                                 <thead>
                                 <tr>
                                     <th>Name</th>
@@ -328,20 +443,88 @@ export default function MatchPlayAttendancePage() {
                                             </td>
                                             <td className="lessons-count">{attended}</td>
                                             <td className="missed-count">{missed}</td>
-                                            <td className="actions-cell">
-                                                <div className="actions-row actions-row-member">
-                                                    <button type="button" className="attendance-btn" onClick={() => addAttendance(student.id, 'attended')}>
-                                                        Mark
-                                                    </button>
-                                                    <button type="button" className="missed-btn" onClick={() => addAttendance(student.id, 'missed')}>
-                                                        Missed
-                                                    </button>
-                                                    <button type="button" className="undo-btn" onClick={() => undoLatest(student.id)} disabled={history.length === 0}>
-                                                        Undo
-                                                    </button>
-                                                    <button type="button" className="delete-btn" onClick={() => removeStudent(student.id, student.student_name)}>
-                                                        Remove
-                                                    </button>
+                                            <td
+                                                className="actions-cell"
+                                                style={{
+                                                    minWidth: 330,
+                                                    width: 330,
+                                                    verticalAlign: 'middle',
+                                                }}
+                                            >
+                                                <div
+                                                    style={{
+                                                        display: 'flex',
+                                                        flexDirection: 'column',
+                                                        gap: 8,
+                                                        width: '100%',
+                                                    }}
+                                                >
+                                                    <div
+                                                        style={{
+                                                            display: 'flex',
+                                                            flexWrap: 'nowrap',
+                                                            gap: 7,
+                                                            alignItems: 'center',
+                                                            width: '100%',
+                                                        }}
+                                                    >
+                                                        <button type="button" className="attendance-btn" onClick={() => addAttendance(student.id, 'attended')}>
+                                                            Mark
+                                                        </button>
+                                                        <button type="button" className="missed-btn" onClick={() => addAttendance(student.id, 'missed')}>
+                                                            Missed
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="attendance-btn"
+                                                            onClick={() => setMakeupStudent(student)}
+                                                            disabled={missed <= 0}
+                                                        >
+                                                            Makeup
+                                                        </button>
+                                                        <button type="button" className="undo-btn" onClick={() => undoLatest(student.id)} disabled={history.length === 0}>
+                                                            Undo
+                                                        </button>
+                                                    </div>
+
+                                                    <div
+                                                        style={{
+                                                            display: 'flex',
+                                                            gap: 7,
+                                                            alignItems: 'center',
+                                                            justifyContent: 'flex-start',
+                                                            width: '100%',
+                                                        }}
+                                                    >
+                                                        <button
+                                                            type="button"
+                                                            className="reset-btn"
+                                                            onClick={() => resetAttendance(student.id, student.student_name)}
+                                                            disabled={history.length === 0}
+                                                            style={{
+                                                                flex: '0 0 auto',
+                                                                width: 'auto',
+                                                                minWidth: 0,
+                                                                padding: '6px 12px',
+                                                            }}
+                                                        >
+                                                            Reset
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            className="delete-btn"
+                                                            onClick={() => removeStudent(student.id, student.student_name)}
+                                                            style={{
+                                                                flex: '0 0 auto',
+                                                                width: 'auto',
+                                                                minWidth: 0,
+                                                                padding: '6px 12px',
+                                                            }}
+                                                        >
+                                                            Remove
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </td>
                                             <td className="attendance-history">
@@ -366,6 +549,15 @@ export default function MatchPlayAttendancePage() {
                         </div>
                     </div>
                 )}
+
+                <CrossProgrammeMakeupModal
+                    open={Boolean(makeupStudent)}
+                    sourceTrainingType="matchplay"
+                    sourceStudentId={makeupStudent?.id || ''}
+                    studentName={makeupStudent?.student_name || ''}
+                    onClose={() => setMakeupStudent(null)}
+                    onCompleted={completeMatchPlayMakeup}
+                />
             </main>
         </div>
     );

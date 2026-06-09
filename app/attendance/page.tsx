@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
 import AppHeader from './../components/AppHeader';
+import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../components/CrossProgrammeMakeupModal';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 import { Student } from '../../types/supabase';
@@ -58,6 +59,7 @@ export default function AttendancePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<Student[]>([]);
+  const [makeupStudent, setMakeupStudent] = useState<Student | null>(null);
 
   const [selectedDay, setSelectedDay] = useState('all');
   const [selectedTimeslot, setSelectedTimeslot] = useState('all');
@@ -90,7 +92,7 @@ export default function AttendancePage() {
     const raw = String(record || '');
 
     if (raw.includes('|')) {
-      const [dateIso, statusRaw, originalMissedDate] = raw.split('|');
+      const [dateIso, statusRaw, originalMissedDate, targetTrainingType, usageId] = raw.split('|');
       const status = ['missed', 'makeup'].includes(statusRaw)
           ? (statusRaw as AttendanceStatus)
           : 'mark';
@@ -98,7 +100,9 @@ export default function AttendancePage() {
       return {
         dateIso,
         status,
-        originalMissedDate
+        originalMissedDate,
+        targetTrainingType,
+        usageId
       };
     }
 
@@ -172,6 +176,20 @@ export default function AttendancePage() {
     }
 
     if (status === 'makeup') {
+      const parsed = parseAttendanceRecord(record);
+      const target = parsed.targetTrainingType;
+
+      if (target && target !== 'weekend') {
+        const label =
+            target === 'one_to_one'
+                ? '1-1'
+                : target === 'matchplay'
+                    ? 'MatchPlay'
+                    : target.charAt(0).toUpperCase() + target.slice(1);
+
+        return `${readableDate} (makeup, ${label})`;
+      }
+
       return `${readableDate} (makeup)`;
     }
 
@@ -246,9 +264,9 @@ export default function AttendancePage() {
   const handleDeleteLastAttendance = async (studentId: string) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
+
       if (!user) throw new Error('Not authenticated');
 
-      // Current student state
       const { data: studentData, error: fetchError } = await supabase
           .from('students')
           .select('*')
@@ -259,125 +277,98 @@ export default function AttendancePage() {
         throw fetchError || new Error('Student not found');
       }
 
-      // Pull latest audit trail for this student (include undo entries)
-      const { data: auditLogs, error: auditError } = await supabase
-          .from('student_audit')
-          .select('action, created_at')
-          .eq('student_id', studentId)
-          .in('action', ['mark', 'missed', 'makeup', 'undo'])
-          .order('created_at', { ascending: false })
-          .limit(100);
-
-      if (auditError) throw auditError;
-
-      const logs = auditLogs || [];
-
-      // Build "unconsumed" action stack:
-      // - mark/missed/makeup push
-      // - undo pops one
-      const stack: Array<'mark' | 'missed' | 'makeup'> = [];
-      for (let i = logs.length - 1; i >= 0; i--) {
-        const a = logs[i].action;
-        if (a === 'mark' || a === 'missed' || a === 'makeup') {
-          stack.push(a);
-        } else if (a === 'undo') {
-          if (stack.length > 0) stack.pop();
-        }
-      }
-
-      // last unconsumed action to reverse now
-      const lastAction = stack.length > 0 ? stack[stack.length - 1] : null;
-
-      // Fallback if no audit action found: best effort from counters
-      if (!lastAction) {
-        let newAttended = studentData.attended ?? 0;
-        let newMissed = studentData.missed ?? 0;
-        let newRecords = Array.isArray(studentData.attendance_records)
-            ? [...studentData.attendance_records]
-            : [];
-
-        if (newAttended > 0) {
-          newAttended = Math.max(0, newAttended - 1);
-          newRecords = removeLastRecordByStatus(newRecords, ['mark', 'makeup']);
-        } else if (newMissed > 0) {
-          newMissed = Math.max(0, newMissed - 1);
-          newRecords = removeLastRecordByStatus(newRecords, ['missed']);
-        } else {
-          alert('Nothing to undo.');
-          return;
-        }
-
-        const { data: updatedStudent, error } = await supabase
-            .from('students')
-            .update({
-              attended: newAttended,
-              missed: newMissed,
-              attendance_records: newRecords,
-              updated_at: new Date().toISOString()
-            })
-            .eq('student_id', studentId)
-            .select()
-            .single();
-
-        if (error || !updatedStudent) throw error || new Error('Update failed');
-
-        setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
-        await logAudit(studentId, 'undo');
-        return;
-      }
-
-      // Reverse lastAction
       let newAttended = studentData.attended ?? 0;
       let newMissed = studentData.missed ?? 0;
-      let newRecords = Array.isArray(studentData.attendance_records)
+      const newRecords = Array.isArray(studentData.attendance_records)
           ? [...studentData.attendance_records]
           : [];
 
-      if (lastAction === 'mark') {
-        newAttended = Math.max(0, newAttended - 1);
-        newRecords = removeLastRecordByStatus(newRecords, ['mark']);
-      } else if (lastAction === 'missed') {
-        newMissed = Math.max(0, newMissed - 1);
-        newRecords = removeLastRecordByStatus(newRecords, ['missed']);
-      } else if (lastAction === 'makeup') {
-        // makeup = attended +1, missed -1
-        // undo makeup => attended -1, missed +1 and restore the missed history row
-        newAttended = Math.max(0, newAttended - 1);
-        newMissed = newMissed + 1;
-
-        const makeupRecordIndex = findLastRecordIndexByStatus(newRecords, ['makeup']);
-        if (makeupRecordIndex !== -1) {
-          const makeupRecord = parseAttendanceRecord(newRecords[makeupRecordIndex]);
-          const missedDateToRestore = makeupRecord.originalMissedDate || makeupRecord.dateIso;
-          newRecords[makeupRecordIndex] = makeAttendanceRecord(missedDateToRestore, 'missed');
-        } else {
-          newRecords = removeLastRecordByStatus(newRecords, ['makeup']);
-        }
+      if (newRecords.length === 0) {
+        alert('Nothing to undo.');
+        return;
       }
 
-      const { data: updatedStudent, error } = await supabase
+      const latestIndex = newRecords.length - 1;
+      const latestRecord = parseAttendanceRecord(newRecords[latestIndex]);
+
+      if (latestRecord.status === 'makeup') {
+        // First Undo after makeup:
+        // attended 1 -> 0
+        // missed 0 -> 1
+        // history: makeup -> missed
+        if (latestRecord.usageId) {
+          const { error: undoMakeupError } = await supabase.rpc(
+              'undo_cross_programme_makeup',
+              { input_usage_id: latestRecord.usageId }
+          );
+
+          if (undoMakeupError) throw undoMakeupError;
+        }
+
+        newAttended = Math.max(0, newAttended - 1);
+        newMissed += 1;
+
+        const missedDate =
+            latestRecord.originalMissedDate || latestRecord.dateIso;
+
+        newRecords[latestIndex] = makeAttendanceRecord(
+            missedDate,
+            'missed'
+        );
+      } else if (latestRecord.status === 'missed') {
+        // Second Undo:
+        // attended stays 0
+        // missed 1 -> 0
+        // remove missed history
+        // void the matching available Weekend makeup credit
+        const { error: creditUndoError } = await supabase.rpc(
+            'cancel_weekend_missed_credit',
+            {
+              input_student_id: studentId,
+              input_missed_date: latestRecord.dateIso,
+            }
+        );
+
+        if (creditUndoError) throw creditUndoError;
+
+        newMissed = Math.max(0, newMissed - 1);
+        newRecords.splice(latestIndex, 1);
+      } else {
+        // Undo ordinary attended mark.
+        newAttended = Math.max(0, newAttended - 1);
+        newRecords.splice(latestIndex, 1);
+      }
+
+      const { data: updatedStudent, error: updateError } = await supabase
           .from('students')
           .update({
             attended: newAttended,
             missed: newMissed,
             attendance_records: newRecords,
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
           })
           .eq('student_id', studentId)
           .select()
           .single();
 
-      if (error || !updatedStudent) throw error || new Error('Update failed');
+      if (updateError || !updatedStudent) {
+        throw updateError || new Error('Update failed');
+      }
 
-      setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
+      setSearchResults((prev) =>
+          prev.map((student) =>
+              student.student_id === studentId ? updatedStudent : student
+          )
+      );
 
-      // IMPORTANT: write undo so next undo consumes previous action correctly
       await logAudit(studentId, 'undo');
     } catch (err: any) {
-      console.error('Undo error:', err);
-      alert(`Failed to undo: ${err?.message ?? 'Unknown error'}`);
+      alert(
+          `Failed to undo attendance: ${err?.message ?? 'Unknown error'}`
+      );
     }
   };
+
 
   const handleAttendanceClick = async (studentId: string) => {
     try {
@@ -418,81 +409,60 @@ export default function AttendancePage() {
     }
   };
 
-  const handleMakeupAttendance = async (studentId: string) => {
+  const handleMakeup = async (studentId: string) => {
+    const student = searchResults.find((item) => item.student_id === studentId);
+
+    if (!student) {
+      alert('Student not found.');
+      return;
+    }
+
+    if ((student.missed ?? 0) <= 0) {
+      alert('This student has no available missed lesson to use as makeup.');
+      return;
+    }
+
+    setMakeupStudent(student);
+  };
+
+  const completeWeekendMakeup = async (selection: MakeupSelectionResult) => {
+    if (!makeupStudent) return;
+
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      const { data: studentData, error: fetchError } = await supabase
-          .from('students')
-          .select('*')
-          .eq('student_id', studentId)
-          .single();
-
-      if (fetchError || !studentData) {
-        throw fetchError || new Error('Student not found');
-      }
-
-      const attended = studentData.attended ?? 0;
-      const missed = studentData.missed ?? 0;
-      const totalWeeks = studentData.total_weeks ?? 0;
-
-      if (missed <= 0) {
-        alert('No missed lessons to makeup.');
-        return;
-      }
-
-      if ((attended + missed) > totalWeeks) {
-        alert('Cannot makeup, subscription total would be exceeded.');
-        return;
-      }
-
-      const nowIso = new Date().toISOString();
-      const newAttended = attended + 1;
-      const newMissed = Math.max(0, missed - 1);
-
-      const newRecords = Array.isArray(studentData.attendance_records)
-          ? [...studentData.attendance_records]
-          : [];
-      const missedRecordIndex = findLastRecordIndexByStatus(newRecords, ['missed']);
-
-      if (missedRecordIndex !== -1) {
-        const missedRecord = parseAttendanceRecord(newRecords[missedRecordIndex]);
-        newRecords[missedRecordIndex] = makeAttendanceRecord(
-            nowIso,
-            'makeup',
-            missedRecord.dateIso
-        );
-      } else {
-        newRecords.push(makeAttendanceRecord(nowIso, 'makeup'));
-      }
-
-      const { data: updatedStudent, error } = await supabase
-          .from('students')
-          .update({
-            attended: newAttended,
-            missed: newMissed,
-            attendance_records: newRecords,
-            updated_at: nowIso
-          })
-          .eq('student_id', studentId)
-          .select()
-          .single();
-
-      if (error || !updatedStudent) {
-        throw error || new Error('Update failed');
-      }
-
-      setSearchResults(prev =>
-          prev.map(s => s.student_id === studentId ? updatedStudent : s)
+      const { data, error } = await supabase.rpc(
+          'apply_weekend_makeup_usage',
+          {
+            input_student_id: makeupStudent.student_id,
+            input_usage_id: selection.usageId,
+          }
       );
 
-      await logAudit(studentId, 'makeup');
-    } catch (err: any) {
-      console.error('Makeup error:', err);
-      alert(`Failed to record makeup: ${err?.message ?? 'Unknown error'}`);
+      if (error) throw error;
+
+      const updatedStudent = Array.isArray(data) ? data[0] : data;
+
+      if (!updatedStudent) {
+        throw new Error('Weekend attendance could not be synchronised.');
+      }
+
+      setSearchResults((prev) =>
+          prev.map((student) =>
+              student.student_id === makeupStudent.student_id
+                  ? { ...student, ...updatedStudent }
+                  : student
+          )
+      );
+
+      await logAudit(makeupStudent.student_id, 'makeup');
+    } catch (err) {
+      await supabase.rpc('undo_cross_programme_makeup', {
+        input_usage_id: selection.usageId,
+      });
+
+      throw err;
     }
   };
+
 
   const handleMissed = async (studentId: string) => {
     try {
@@ -531,57 +501,52 @@ export default function AttendancePage() {
   };
 
   const handleResetCourse = async (studentId: string) => {
-    if (!confirm('Reset this course? This will clear attended and missed counts.')) {
+    if (!confirm(
+        'Reset this course?\n\nThis will set Attended and Missed to 0, clear attendance history, and cancel all unused/used Weekend makeup records for this student.'
+    )) {
       return;
     }
 
     try {
-      const student = searchResults.find(s => s.student_id === studentId);
-
-      if (!student) {
-        throw new Error('Student not found');
-      }
+      const student = searchResults.find((item) => item.student_id === studentId);
+      if (!student) throw new Error('Student not found');
 
       const paid = Boolean(student.paid ?? false);
 
       if (!paid) {
         const override = confirm(
-            'Student must have paid for a new subscription before reset.\n\n' +
-            'Click OK to force reset anyway, or Cancel to abort.'
+            'Student must have paid for a new subscription before reset.\n\nClick OK to force reset anyway, or Cancel to abort.'
         );
 
-        if (!override) {
-          alert('Reset cancelled.');
-          return;
-        }
+        if (!override) return;
       }
 
-      const { data: updatedStudent, error } = await supabase
-          .from('students')
-          .update({
-            attended: 0,
-            missed: 0,
-            attendance_records: [],
-            paid: false,
-            updated_at: new Date().toISOString()
-          })
-          .eq('student_id', studentId)
-          .select()
-          .single();
+      const { data, error } = await supabase.rpc('reset_weekend_course_and_makeup', {
+        input_student_id: studentId,
+      });
 
-      if (error || !updatedStudent) {
-        throw error || new Error('Reset failed');
-      }
+      if (error) throw error;
 
-      setSearchResults(prev =>
-          prev.map(s => s.student_id === studentId ? updatedStudent : s)
+      const updatedStudent = Array.isArray(data) ? data[0] : data;
+
+      setSearchResults((prev) =>
+          prev.map((item) =>
+              item.student_id === studentId
+                  ? {
+                    ...item,
+                    attended: 0,
+                    missed: 0,
+                    attendance_records: [],
+                    paid: false,
+                    updated_at: new Date().toISOString(),
+                  }
+                  : item
+          )
       );
 
       await logAudit(studentId, 'reset');
-
-      alert('Course reset successfully!');
+      alert('Course reset successfully.');
     } catch (err: any) {
-      console.error('Reset error:', err);
       alert(`Failed to reset course: ${err?.message ?? 'Unknown error'}`);
     }
   };
@@ -881,7 +846,7 @@ export default function AttendancePage() {
                                     <button
                                         type="button"
                                         className="makeup-btn"
-                                        onClick={() => handleMakeupAttendance(student.student_id)}
+                                        onClick={() => handleMakeup(student.student_id)}
                                         disabled={finished || (student.missed ?? 0) <= 0}
                                         title={(student.missed ?? 0) <= 0 ? 'No missed lessons to makeup' : 'Makeup (convert one missed to attended)'}
                                     >
@@ -950,6 +915,15 @@ export default function AttendancePage() {
                 </div>
             )}
           </div>
+
+          <CrossProgrammeMakeupModal
+              open={Boolean(makeupStudent)}
+              sourceTrainingType="weekend"
+              sourceStudentId={makeupStudent?.student_id || ''}
+              studentName={makeupStudent?.student_name || ''}
+              onClose={() => setMakeupStudent(null)}
+              onCompleted={completeWeekendMakeup}
+          />
         </main>
       </div>
   );

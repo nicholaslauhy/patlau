@@ -194,15 +194,17 @@ export default function MakeupPaymentPage() {
 
             <main style={{ padding: '24px 16px 48px' }}>
                 <section className="form-card" style={{ maxWidth: 1120, margin: '0 auto', padding: 24 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                        <div>
-                            <h1 style={{ margin: 0 }}>Makeup Top-up Payments</h1>
-                            <p className="muted" style={{ marginTop: 8 }}>
-                                Top-ups are created when a student uses a lower-value missed lesson to make up into a higher-value lesson.
-                            </p>
-                        </div>
+                    <div style={{ textAlign: 'center' }}>
+                        <h1 style={{ margin: 0 }}>Makeup Top-up Payments</h1>
+                        <p className="muted" style={{ margin: '8px auto 0', maxWidth: 760 }}>
+                            Top-ups are created when a student uses a lower-value missed lesson to make up into a higher-value lesson.
+                        </p>
 
-                        <Link href="/makeup" className="btn share-btn">Back to Makeup Credits</Link>
+                        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+                            <Link href="/makeup" className="btn share-btn">
+                                Back to Makeup Credits
+                            </Link>
+                        </div>
                     </div>
 
                     {message && <div className="error-message" style={{ marginTop: 16 }}>{message}</div>}

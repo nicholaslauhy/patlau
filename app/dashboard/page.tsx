@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import AppHeader from "./../components/AppHeader";
+import CrossProgrammeMakeupModal, { MakeupSelectionResult } from "./../components/CrossProgrammeMakeupModal";
 import "./../styles.css";
 import "./dashboard.css";
 import { Student } from "../../types/supabase";
@@ -29,6 +30,7 @@ export default function DashboardPage() {
   const [userName, setUserName] = useState("");
   const [userEmail, setUserEmail] = useState("");
   const [userRole, setUserRole] = useState<UserRole | null>(null);
+  const [makeupStudent, setMakeupStudent] = useState<Student | null>(null);
 
   const days = ["all", "Saturday", "Sunday"];
   const timeslots = [
@@ -65,12 +67,12 @@ export default function DashboardPage() {
     const raw = String(record || "");
 
     if (raw.includes("|")) {
-      const [dateIso, statusRaw, originalMissedDate] = raw.split("|");
+      const [dateIso, statusRaw, originalMissedDate, targetTrainingType, usageId] = raw.split("|");
       const status = ["missed", "makeup"].includes(statusRaw)
           ? (statusRaw as AttendanceStatus)
           : "mark";
 
-      return { dateIso, status, originalMissedDate };
+      return { dateIso, status, originalMissedDate, targetTrainingType, usageId };
     }
 
     const legacyMissedMatch = raw.match(/^(.*)\s+\(missed\)$/i);
@@ -143,6 +145,20 @@ export default function DashboardPage() {
     }
 
     if (status === "makeup") {
+      const parsed = parseAttendanceRecord(record);
+      const target = parsed.targetTrainingType;
+
+      if (target) {
+        const label =
+            target === "one_to_one"
+                ? "1-1"
+                : target === "matchplay"
+                    ? "MatchPlay"
+                    : target.charAt(0).toUpperCase() + target.slice(1);
+
+        return `${readableDate} (makeup, ${label})`;
+      }
+
       return `${readableDate} (makeup)`;
     }
 
@@ -308,13 +324,10 @@ export default function DashboardPage() {
 
   const handleDeleteLastAttendance = async (studentId: string) => {
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
 
       if (!user) throw new Error("Not authenticated");
 
-      // Load current student row
       const { data: studentData, error: fetchError } = await supabase
           .from("students")
           .select("*")
@@ -325,81 +338,66 @@ export default function DashboardPage() {
         throw fetchError || new Error("Student not found");
       }
 
-      // Fetch full recent action history, INCLUDING undo
-      // This is important because every "undo" should cancel one previous
-      // mark/makeup/missed action.
-      const { data: auditLogs, error: auditError } = await supabase
-          .from("student_audit")
-          .select("*")
-          .eq("student_id", studentId)
-          .in("action", ["mark", "makeup", "missed", "undo"])
-          .order("created_at", { ascending: false })
-          .limit(100);
+      let newAttended = studentData.attended ?? 0;
+      let newMissed = studentData.missed ?? 0;
+      const newRecords = Array.isArray(studentData.attendance_records)
+          ? [...studentData.attendance_records]
+          : [];
 
-      if (auditError) throw auditError;
-
-      const logs = Array.isArray(auditLogs) ? auditLogs : [];
-
-      let undoCount = 0;
-      let actionToUndo: any = null;
-
-      for (const log of logs) {
-        if (log.action === "undo") {
-          undoCount += 1;
-          continue;
-        }
-
-        if (["mark", "makeup", "missed"].includes(log.action)) {
-          if (undoCount > 0) {
-            // This action has already been cancelled by a later undo.
-            undoCount -= 1;
-            continue;
-          }
-
-          // This is the latest attendance action that has NOT been undone yet.
-          actionToUndo = log;
-          break;
-        }
-      }
-
-      if (!actionToUndo) {
+      if (newRecords.length === 0) {
         alert("Nothing to undo.");
         return;
       }
 
-      let newAttended = studentData.attended ?? 0;
-      let newMissed = studentData.missed ?? 0;
-      let newRecords = Array.isArray(studentData.attendance_records)
-          ? [...studentData.attendance_records]
-          : [];
+      const latestIndex = newRecords.length - 1;
+      const latestRecord = parseAttendanceRecord(newRecords[latestIndex]);
 
-      if (actionToUndo.action === "mark") {
-        // Original mark: attended + 1
-        // Undo mark: attended - 1 and remove latest normal attendance record.
-        newAttended = Math.max(0, newAttended - 1);
-        newRecords = removeLastRecordByStatus(newRecords, ["mark"]);
-      } else if (actionToUndo.action === "missed") {
-        // Original missed: missed + 1
-        // Undo missed: missed - 1 and remove latest missed history row.
-        newMissed = Math.max(0, newMissed - 1);
-        newRecords = removeLastRecordByStatus(newRecords, ["missed"]);
-      } else if (actionToUndo.action === "makeup") {
-        // Original makeup: missed - 1, attended + 1
-        // Undo makeup: attended - 1, missed + 1 and restore the missed history row.
-        newAttended = Math.max(0, newAttended - 1);
-        newMissed = newMissed + 1;
+      if (latestRecord.status === "makeup") {
+        // First Undo after makeup:
+        // attended 1 -> 0
+        // missed 0 -> 1
+        // history: makeup -> missed
+        if (latestRecord.usageId) {
+          const { error: undoMakeupError } = await supabase.rpc(
+              "undo_cross_programme_makeup",
+              { input_usage_id: latestRecord.usageId }
+          );
 
-        const makeupRecordIndex = findLastRecordIndexByStatus(newRecords, ["makeup"]);
-        if (makeupRecordIndex !== -1) {
-          const makeupRecord = parseAttendanceRecord(newRecords[makeupRecordIndex]);
-          const missedDateToRestore = makeupRecord.originalMissedDate || makeupRecord.dateIso;
-          newRecords[makeupRecordIndex] = makeAttendanceRecord(missedDateToRestore, "missed");
-        } else {
-          newRecords = removeLastRecordByStatus(newRecords, ["makeup"]);
+          if (undoMakeupError) throw undoMakeupError;
         }
+
+        newAttended = Math.max(0, newAttended - 1);
+        newMissed += 1;
+
+        const missedDate =
+            latestRecord.originalMissedDate || latestRecord.dateIso;
+
+        newRecords[latestIndex] = makeAttendanceRecord(
+            missedDate,
+            "missed"
+        );
+      } else if (latestRecord.status === "missed") {
+        // Second Undo:
+        // attended stays 0
+        // missed 1 -> 0
+        // remove missed history
+        // void the matching available Weekend makeup credit
+        const { error: creditUndoError } = await supabase.rpc(
+            "cancel_weekend_missed_credit",
+            {
+              input_student_id: studentId,
+              input_missed_date: latestRecord.dateIso,
+            }
+        );
+
+        if (creditUndoError) throw creditUndoError;
+
+        newMissed = Math.max(0, newMissed - 1);
+        newRecords.splice(latestIndex, 1);
       } else {
-        alert("Last action cannot be undone.");
-        return;
+        // Undo ordinary attended mark.
+        newAttended = Math.max(0, newAttended - 1);
+        newRecords.splice(latestIndex, 1);
       }
 
       const { data: updatedStudent, error: updateError } = await supabase
@@ -418,19 +416,20 @@ export default function DashboardPage() {
         throw updateError || new Error("Update failed");
       }
 
-      // Update only this row locally instead of refetching the whole dashboard.
-      // This prevents the table from flashing/reloading after Undo.
       setSearchResults((prev) =>
-          prev.map((s) => (s.student_id === studentId ? updatedStudent : s)),
+          prev.map((student) =>
+              student.student_id === studentId ? updatedStudent : student
+          )
       );
-      setMessage(null);
 
-      // Log this undo. Future undo presses will now skip the action we just reversed.
       await logAuditAction(studentId, "undo");
     } catch (err: any) {
-      alert(`Failed to undo attendance: ${err?.message ?? "Unknown error"}`);
+      alert(
+          `Failed to undo attendance: ${err?.message ?? "Unknown error"}`
+      );
     }
   };
+
 
   const handleAttendanceClick = async (studentId: string) => {
     try {
@@ -512,10 +511,114 @@ export default function DashboardPage() {
       return;
     }
 
-    router.push(
-        `/makeup?source=weekend&studentId=${encodeURIComponent(studentId)}`,
-    );
+    if (userRole === "superuser") {
+      setMakeupStudent(student);
+      return;
+    }
+
+    try {
+      const { data: creditData, error: creditError } = await supabase.rpc(
+          "find_latest_makeup_credit",
+          {
+            input_source_type: "weekend",
+            input_source_student_id: student.student_id,
+          }
+      );
+
+      if (creditError) throw creditError;
+
+      const credit = Array.isArray(creditData) ? creditData[0] : creditData;
+
+      if (!credit?.id) {
+        throw new Error("No available Weekend makeup credit was found.");
+      }
+
+      const { data: usageData, error: usageError } = await supabase.rpc(
+          "complete_cross_programme_makeup",
+          {
+            input_credit_id: credit.id,
+            input_target_type: "weekend",
+            input_target_date: new Date().toISOString().slice(0, 10),
+            input_target_label: "Weekend makeup lesson",
+            input_target_value: Number(credit.credit_value),
+          }
+      );
+
+      if (usageError) throw usageError;
+
+      const usage = Array.isArray(usageData) ? usageData[0] : usageData;
+
+      const { data: updatedData, error: syncError } = await supabase.rpc(
+          "apply_weekend_makeup_usage",
+          {
+            input_student_id: student.student_id,
+            input_usage_id: usage.usage_id,
+          }
+      );
+
+      if (syncError) {
+        await supabase.rpc("undo_cross_programme_makeup", {
+          input_usage_id: usage.usage_id,
+        });
+        throw syncError;
+      }
+
+      const updatedStudent = Array.isArray(updatedData)
+          ? updatedData[0]
+          : updatedData;
+
+      setSearchResults((prev) =>
+          prev.map((item) =>
+              item.student_id === student.student_id
+                  ? { ...item, ...updatedStudent }
+                  : item
+          )
+      );
+
+      await logAuditAction(student.student_id, "makeup");
+    } catch (err: any) {
+      alert(err?.message || "Failed to mark Weekend makeup.");
+    }
   };
+
+  const completeWeekendMakeup = async (selection: MakeupSelectionResult) => {
+    if (!makeupStudent) return;
+
+    try {
+      const { data, error } = await supabase.rpc(
+          'apply_weekend_makeup_usage',
+          {
+            input_student_id: makeupStudent.student_id,
+            input_usage_id: selection.usageId,
+          }
+      );
+
+      if (error) throw error;
+
+      const updatedStudent = Array.isArray(data) ? data[0] : data;
+
+      if (!updatedStudent) {
+        throw new Error('Weekend attendance could not be synchronised.');
+      }
+
+      setSearchResults((prev) =>
+          prev.map((student) =>
+              student.student_id === makeupStudent.student_id
+                  ? { ...student, ...updatedStudent }
+                  : student
+          )
+      );
+
+      await logAuditAction(makeupStudent.student_id, "makeup");
+    } catch (err) {
+      await supabase.rpc('undo_cross_programme_makeup', {
+        input_usage_id: selection.usageId,
+      });
+
+      throw err;
+    }
+  };
+
 
   const handleMissed = async (studentId: string) => {
     try {
@@ -580,43 +683,45 @@ export default function DashboardPage() {
       return;
     }
 
-    if (!confirm("Reset this course? This will clear attended and missed counts.")) {
+    if (!confirm(
+        "Reset this course?\n\nThis will set Attended and Missed to 0, clear attendance history, and cancel all Weekend makeup records for this student."
+    )) {
       return;
     }
 
     try {
-      const student = searchResults.find((s) => s.student_id === studentId);
+      const student = searchResults.find((item) => item.student_id === studentId);
       if (!student) throw new Error("Student not found");
 
       const paid = Boolean(student.paid ?? false);
+
       if (!paid) {
         const override = confirm(
-            "Student must have paid for a new subscription before reset.\n\nClick OK to force reset anyway, or Cancel to abort.",
+            "Student must have paid for a new subscription before reset.\n\nClick OK to force reset anyway, or Cancel to abort."
         );
 
-        if (!override) {
-          alert("Reset cancelled.");
-          return;
-        }
+        if (!override) return;
       }
 
-      const { data: updatedStudent, error } = await supabase
-          .from("students")
-          .update({
-            attended: 0,
-            missed: 0,
-            attendance_records: [],
-            paid: false,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("student_id", studentId)
-          .select()
-          .single();
+      const { error } = await supabase.rpc("reset_weekend_course_and_makeup", {
+        input_student_id: studentId,
+      });
 
-      if (error || !updatedStudent) throw error || new Error("Reset failed");
+      if (error) throw error;
 
       setSearchResults((prev) =>
-          prev.map((s) => (s.student_id === studentId ? updatedStudent : s)),
+          prev.map((item) =>
+              item.student_id === studentId
+                  ? {
+                    ...item,
+                    attended: 0,
+                    missed: 0,
+                    attendance_records: [],
+                    paid: false,
+                    updated_at: new Date().toISOString(),
+                  }
+                  : item
+          )
       );
 
       await logAuditAction(studentId, "reset");
@@ -961,98 +1066,115 @@ export default function DashboardPage() {
                               <td
                                   className="actions-cell"
                                   style={{
-                                    width: "1%",
-                                    minWidth: "max-content",
-                                    whiteSpace: "nowrap",
+                                    minWidth: isSuperuser ? 330 : 275,
+                                    width: isSuperuser ? 330 : 275,
                                     paddingLeft: 8,
                                     paddingRight: 8,
+                                    verticalAlign: "middle",
                                   }}
                               >
                                 <div
-                                    className="actions-row"
                                     style={{
-                                      display: "inline-flex",
-                                      flexDirection: "row",
-                                      flexWrap: "nowrap",
-                                      gap: 6,
-                                      alignItems: "center",
-                                      justifyContent: "flex-start",
-                                      width: "max-content",
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: 7,
+                                      width: "100%",
                                     }}
                                 >
-                                  <button
-                                      type="button"
-                                      className="attendance-btn"
-                                      style={{ flex: "0 0 auto", width: "fit-content", minWidth: "fit-content", padding: "6px 10px" }}
-                                      onClick={() => handleAttendanceClick(student.student_id)}
-                                      disabled={finished}
-                                      title={finished ? "Subscription lessons completed" : "Mark attended"}
+                                  <div
+                                      className="actions-row"
+                                      style={{
+                                        display: "flex",
+                                        flexWrap: "nowrap",
+                                        gap: 6,
+                                        alignItems: "center",
+                                        justifyContent: "flex-start",
+                                        width: "100%",
+                                      }}
                                   >
-                                    Mark
-                                  </button>
+                                    <button
+                                        type="button"
+                                        className="attendance-btn"
+                                        style={{ flex: "0 0 auto", padding: "6px 10px" }}
+                                        onClick={() => handleAttendanceClick(student.student_id)}
+                                        disabled={finished}
+                                        title={finished ? "Subscription lessons completed" : "Mark attended"}
+                                    >
+                                      Mark
+                                    </button>
 
-                                  <button
-                                      type="button"
-                                      className="missed-btn"
-                                      style={{ flex: "0 0 auto", width: "fit-content", minWidth: "fit-content", padding: "6px 10px" }}
-                                      onClick={() => handleMissed(student.student_id)}
-                                      disabled={finished}
-                                      title={finished ? "Subscription lessons completed" : "Mark missed"}
-                                  >
-                                    Missed
-                                  </button>
+                                    <button
+                                        type="button"
+                                        className="missed-btn"
+                                        style={{ flex: "0 0 auto", padding: "6px 10px" }}
+                                        onClick={() => handleMissed(student.student_id)}
+                                        disabled={finished}
+                                        title={finished ? "Subscription lessons completed" : "Mark missed"}
+                                    >
+                                      Missed
+                                    </button>
 
-                                  <button
-                                      type="button"
-                                      className="makeup-btn"
-                                      style={{ flex: "0 0 auto", width: "fit-content", minWidth: "fit-content", padding: "6px 10px" }}
-                                      onClick={() => handleMakeupAttendance(student.student_id)}
-                                      disabled={finished || (student.missed ?? 0) <= 0}
-                                      title={
-                                        (student.missed ?? 0) <= 0
-                                            ? "No missed lessons to makeup"
-                                            : "Makeup (convert one missed to attended)"
-                                      }
-                                  >
-                                    Makeup
-                                  </button>
+                                    <button
+                                        type="button"
+                                        className="makeup-btn"
+                                        style={{ flex: "0 0 auto", padding: "6px 10px" }}
+                                        onClick={() => handleMakeupAttendance(student.student_id)}
+                                        disabled={finished || (student.missed ?? 0) <= 0}
+                                        title={
+                                          (student.missed ?? 0) <= 0
+                                              ? "No missed lessons to makeup"
+                                              : "Choose makeup programme"
+                                        }
+                                    >
+                                      Makeup
+                                    </button>
 
-                                  <button
-                                      type="button"
-                                      className="undo-btn"
-                                      style={{ flex: "0 0 auto", width: "fit-content", minWidth: "fit-content", padding: "6px 10px" }}
-                                      onClick={() => handleDeleteLastAttendance(student.student_id)}
-                                      disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
-                                      title={
-                                        (student.attended ?? 0) + (student.missed ?? 0) === 0
-                                            ? "No actions to undo"
-                                            : "Undo last action"
-                                      }
-                                  >
-                                    Undo
-                                  </button>
+                                    <button
+                                        type="button"
+                                        className="undo-btn"
+                                        style={{ flex: "0 0 auto", padding: "6px 10px" }}
+                                        onClick={() => handleDeleteLastAttendance(student.student_id)}
+                                        disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
+                                        title={
+                                          (student.attended ?? 0) + (student.missed ?? 0) === 0
+                                              ? "No actions to undo"
+                                              : "Undo last action"
+                                        }
+                                    >
+                                      Undo
+                                    </button>
+                                  </div>
 
                                   {isSuperuser && (
-                                      <>
+                                      <div
+                                          style={{
+                                            display: "flex",
+                                            gap: 6,
+                                            alignItems: "center",
+                                            justifyContent: "flex-start",
+                                            width: "100%",
+                                          }}
+                                      >
                                         <button
                                             type="button"
                                             className="reset-btn"
-                                            style={{ flex: "0 0 auto", width: "fit-content", minWidth: "fit-content", padding: "6px 10px" }}
+                                            style={{ flex: "1 1 0", padding: "6px 10px" }}
                                             onClick={() => handleResetCourse(student.student_id)}
                                         >
                                           Reset
                                         </button>
+
                                         <button
                                             type="button"
                                             className="delete-btn"
-                                            style={{ flex: "0 0 auto", width: "fit-content", minWidth: "fit-content", padding: "6px 10px" }}
+                                            style={{ flex: "1 1 0", padding: "6px 10px" }}
                                             onClick={() =>
                                                 deleteStudent(student.student_id, student.student_name)
                                             }
                                         >
                                           Delete
                                         </button>
-                                      </>
+                                      </div>
                                   )}
                                 </div>
                               </td>
@@ -1077,6 +1199,17 @@ export default function DashboardPage() {
                 </div>
             )}
           </div>
+
+          {userRole === "superuser" && (
+              <CrossProgrammeMakeupModal
+                  open={Boolean(makeupStudent)}
+                  sourceTrainingType="weekend"
+                  sourceStudentId={makeupStudent?.student_id || ""}
+                  studentName={makeupStudent?.student_name || ""}
+                  onClose={() => setMakeupStudent(null)}
+                  onCompleted={completeWeekendMakeup}
+              />
+          )}
         </main>
       </div>
   );

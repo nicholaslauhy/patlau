@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../../components/AppHeader';
+import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../../components/CrossProgrammeMakeupModal';
 import './../../styles.css';
 import './../../dashboard/dashboard.css';
 
@@ -26,6 +27,8 @@ interface WeekdayStudent {
     active: boolean;
     created_at?: string;
     updated_at?: string;
+    makeup_target_type?: string | null;
+    makeup_usage_id?: string | null;
 }
 
 interface WeekdayAttendance {
@@ -86,6 +89,7 @@ export default function WeekdayAttendancePage() {
     const [selectedDay, setSelectedDay] = useState<'all' | WeekdayName>('all');
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
+    const [makeupContext, setMakeupContext] = useState<{ student: WeekdayStudent; day: WeekdayName; hours: number } | null>(null);
     const [rowHours, setRowHours] = useState<Record<string, number>>({});
 
     const today = new Date();
@@ -219,9 +223,7 @@ export default function WeekdayAttendancePage() {
                 return;
             }
 
-            router.push(
-                `/makeup?source=weekday&studentId=${encodeURIComponent(studentId)}&day=${encodeURIComponent(day)}`
-            );
+            setMakeupContext({ student, day, hours });
             return;
         }
 
@@ -258,6 +260,39 @@ export default function WeekdayAttendancePage() {
         } catch (err: any) {
             alert(err?.message || 'Failed to update weekday attendance.');
             await loadData();
+        }
+    };
+
+    const completeWeekdayMakeup = async (selection: MakeupSelectionResult) => {
+        if (!makeupContext) return;
+
+        try {
+            const { data, error } = await supabase
+                .from('weekday_attendance')
+                .insert({
+                    weekday_student_id: makeupContext.student.id,
+                    attendance_date: selection.targetDate,
+                    day_name: makeupContext.day,
+                    status: 'makeup',
+                    duration_hours: makeupContext.hours,
+                    makeup_target_type: selection.targetTrainingType,
+                    makeup_usage_id: selection.usageId,
+                    updated_at: new Date().toISOString(),
+                })
+                .select('*')
+                .single();
+
+            if (error) throw error;
+
+            setAttendance((prev) => [
+                { ...(data as WeekdayAttendance), attendance_date: (data as WeekdayAttendance).attendance_date.slice(0, 10) },
+                ...prev,
+            ]);
+        } catch (err) {
+            await supabase.rpc('undo_cross_programme_makeup', {
+                input_usage_id: selection.usageId,
+            });
+            throw err;
         }
     };
 
@@ -495,6 +530,15 @@ export default function WeekdayAttendancePage() {
                         )}
                     </section>
                 ))}
+
+                <CrossProgrammeMakeupModal
+                    open={Boolean(makeupContext)}
+                    sourceTrainingType="weekday"
+                    sourceStudentId={makeupContext?.student.id || ''}
+                    studentName={makeupContext?.student.student_name || ''}
+                    onClose={() => setMakeupContext(null)}
+                    onCompleted={completeWeekdayMakeup}
+                />
             </main>
         </div>
     );
