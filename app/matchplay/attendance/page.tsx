@@ -335,6 +335,7 @@ export default function MatchPlayAttendancePage() {
                     margin: 0,
                     padding: '24px 0 48px',
                     boxSizing: 'border-box',
+                    zIndex: 0,
                 }}
             >
                 <div
@@ -345,6 +346,8 @@ export default function MatchPlayAttendancePage() {
                         width: '100%',
                         margin: '0 auto 28px',
                         boxSizing: 'border-box',
+                        position: 'relative',
+                        zIndex: 0,
                     }}
                 >
                     <input
