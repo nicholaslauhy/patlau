@@ -76,7 +76,8 @@ const menuBoxStyle: React.CSSProperties = {
     borderRadius: '14px',
     boxShadow: '0 14px 34px rgba(0,0,0,0.14)',
     padding: '8px',
-    zIndex: 3000,
+    zIndex: 20000,
+    pointerEvents: 'auto',
 };
 
 const menuItemStyle: React.CSSProperties = {
@@ -321,6 +322,9 @@ export default function AppHeader({
                 marginLeft: '50%',
                 transform: 'translateX(-50%)',
                 boxSizing: 'border-box',
+                position: 'relative',
+                zIndex: 10000,
+                isolation: 'isolate',
             }}
         >
             <div
@@ -374,6 +378,15 @@ export default function AppHeader({
                             <MenuLink href="/settings" active={pathname === '/settings'} onClick={() => setShowAccountMenu(false)}>
                                 <span>⚙️</span>
                                 <span>Settings</span>
+                            </MenuLink>
+
+                            <MenuLink
+                                href="/myattendance"
+                                active={pathname === '/myattendance'}
+                                onClick={() => setShowAccountMenu(false)}
+                            >
+                                <span>📅</span>
+                                <span>Attendance</span>
                             </MenuLink>
 
                             <MenuButton onClick={signOut}>
