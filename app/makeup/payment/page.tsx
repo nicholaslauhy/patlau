@@ -16,6 +16,14 @@ interface MasterStudent {
     display_name: string;
 }
 
+interface MakeupUsage {
+    target_training_type: string;
+    target_date: string;
+    target_label: string;
+    credit_value_used: number;
+    target_value: number;
+}
+
 interface MakeupTopupPayment {
     id: string;
     makeup_usage_id: string;
@@ -26,13 +34,12 @@ interface MakeupTopupPayment {
     created_at: string;
     updated_at?: string;
     master_students?: MasterStudent;
-    makeup_usages?: {
-        target_training_type: string;
-        target_date: string;
-        target_label: string;
-        credit_value_used: number;
-        target_value: number;
-    };
+    makeup_usages?: MakeupUsage;
+}
+
+interface CounterState {
+    payment_month: string;
+    reset_at: string;
 }
 
 const supabase = createBrowserClient(
@@ -46,7 +53,7 @@ const getUserRole = (user: any): UserRole => {
 
 const getReadableMonth = (monthValue: string) => {
     const [year, month] = monthValue.split('-').map(Number);
-    return new Date(year, month - 1, 1).toLocaleDateString(undefined, {
+    return new Date(year, month - 1, 1).toLocaleDateString('en-SG', {
         month: 'long',
         year: 'numeric',
     });
@@ -59,13 +66,15 @@ export default function MakeupPaymentPage() {
     const [userRole, setUserRole] = useState<UserRole | null>(null);
     const [userName, setUserName] = useState('');
     const [payments, setPayments] = useState<MakeupTopupPayment[]>([]);
+    const [counterState, setCounterState] = useState<CounterState | null>(null);
     const [selectedMonth, setSelectedMonth] = useState(() => {
-        const d = new Date();
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const date = new Date();
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
     });
     const [searchTerm, setSearchTerm] = useState('');
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
+    const [lastUpdated, setLastUpdated] = useState('');
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -78,8 +87,7 @@ export default function MakeupPaymentPage() {
                     return;
                 }
 
-                const role = getUserRole(user);
-                setUserRole(role);
+                setUserRole(getUserRole(user));
                 setUserName(user.user_metadata?.name || user.email || 'User');
             } catch {
                 await supabase.auth.signOut();
@@ -90,22 +98,31 @@ export default function MakeupPaymentPage() {
         checkAuth();
     }, [router]);
 
-    const loadPayments = async () => {
+    const loadData = async () => {
         try {
             setLoading(true);
             setMessage('');
 
-            const { data, error } = await supabase
-                .from('makeup_topup_payments')
-                .select('*, master_students(*), makeup_usages(*)')
-                .eq('payment_month', selectedMonth)
-                .order('created_at', { ascending: false });
+            const [paymentResult, counterResult] = await Promise.all([
+                supabase
+                    .from('makeup_topup_payments')
+                    .select('*, master_students(*), makeup_usages(*)')
+                    .eq('payment_month', selectedMonth)
+                    .order('created_at', { ascending: false }),
+                supabase
+                    .from('makeup_payment_counter_state')
+                    .select('*')
+                    .eq('payment_month', selectedMonth)
+                    .maybeSingle(),
+            ]);
 
-            if (error) throw error;
+            if (paymentResult.error) throw paymentResult.error;
+            if (counterResult.error) throw counterResult.error;
 
-            setPayments((data || []) as MakeupTopupPayment[]);
+            setPayments((paymentResult.data || []) as MakeupTopupPayment[]);
+            setCounterState((counterResult.data || null) as CounterState | null);
         } catch (err: any) {
-            setMessage(err?.message || 'Failed to load makeup top-up payments.');
+            setMessage(err?.message || 'Failed to load makeup payments.');
         } finally {
             setLoading(false);
         }
@@ -113,12 +130,12 @@ export default function MakeupPaymentPage() {
 
     useEffect(() => {
         if (userRole === 'superuser') {
-            loadPayments();
+            loadData();
         }
     }, [userRole, selectedMonth]);
 
     const rows = useMemo(() => {
-        const normalizedSearch = searchTerm.trim().toLowerCase();
+        const query = searchTerm.trim().toLowerCase();
 
         return payments.filter((payment) => {
             const searchable = [
@@ -129,14 +146,67 @@ export default function MakeupPaymentPage() {
                 payment.paid ? 'paid' : 'unpaid',
             ].join(' ').toLowerCase();
 
-            return !normalizedSearch || searchable.includes(normalizedSearch);
+            return !query || searchable.includes(query);
         });
     }, [payments, searchTerm]);
 
-    const totalPaid = payments.filter((p) => p.paid).reduce((sum, p) => sum + Number(p.amount || 0), 0);
-    const totalUnpaid = payments.filter((p) => !p.paid).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const paidRows = payments.filter((payment) => payment.paid);
+    const unpaidRows = payments.filter((payment) => !payment.paid);
+    const totalPaid = paidRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const totalUnpaid = unpaidRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const possibleTotal = totalPaid + totalUnpaid;
 
-    const updatePaid = async (paymentId: string, paid: boolean) => {
+    const counterTotal = useMemo(() => {
+        const resetAt = counterState?.reset_at
+            ? new Date(counterState.reset_at).getTime()
+            : 0;
+
+        return paidRows
+            .filter((payment) => {
+                const updated = new Date(payment.updated_at || payment.created_at).getTime();
+                return updated >= resetAt;
+            })
+            .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    }, [paidRows, counterState]);
+
+    const sendTelegram = async (text: string) => {
+        const response = await fetch('/api/telegram-makeup-payment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+        });
+
+        const payload = await response.json();
+
+        if (!response.ok) {
+            throw new Error(payload?.error || 'Telegram notification failed.');
+        }
+    };
+
+    const addPaymentEvent = async (
+        payment: MakeupTopupPayment,
+        eventType: 'received' | 'reversed'
+    ) => {
+        const { data: { user } } = await supabase.auth.getUser();
+
+        const { error } = await supabase
+            .from('makeup_payment_events')
+            .insert({
+                makeup_topup_payment_id: payment.id,
+                master_student_id: payment.master_student_id,
+                payment_month: payment.payment_month,
+                amount: Number(payment.amount || 0),
+                event_type: eventType,
+                actor_user_id: user?.id || null,
+            });
+
+        if (error) throw error;
+    };
+
+    const setPaidStatus = async (paymentId: string, paid: boolean) => {
+        const original = payments.find((payment) => payment.id === paymentId);
+        if (!original || original.paid === paid) return;
+
         try {
             const { data, error } = await supabase
                 .from('makeup_topup_payments')
@@ -150,38 +220,109 @@ export default function MakeupPaymentPage() {
 
             if (error) throw error;
 
-            setPayments((prev) => prev.map((payment) => payment.id === paymentId ? data as MakeupTopupPayment : payment));
+            const updated = data as MakeupTopupPayment;
+            await addPaymentEvent(updated, paid ? 'received' : 'reversed');
+
+            const student = updated.master_students?.display_name || 'Unknown student';
+            const target = updated.makeup_usages?.target_training_type || 'Unknown';
+
+            await sendTelegram(
+                `${paid ? '✅ Makeup Top-up Payment Received' : '↩️ Makeup Top-up Payment Reversed'}\n\n` +
+                `Student: ${student}\n` +
+                `Month: ${getReadableMonth(updated.payment_month)}\n` +
+                `Target Programme: ${target}\n` +
+                `Amount: ${money(updated.amount)}\n` +
+                `Status: ${paid ? 'Paid' : 'Unpaid'}`
+            );
+
+            setPayments((previous) =>
+                previous.map((payment) => payment.id === paymentId ? updated : payment)
+            );
+            setLastUpdated(`Updated ${new Date().toLocaleString('en-SG')}`);
         } catch (err: any) {
             alert(err?.message || 'Failed to update payment.');
-            await loadPayments();
+            await loadData();
         }
     };
 
-    const handleForbiddenLogout = async () => {
+    const resetTotal = async () => {
+        if (!confirm(
+            `Reset the displayed makeup-payment counter for ${getReadableMonth(selectedMonth)}?\n\n` +
+            'This does not change any Paid/Unpaid records.'
+        )) {
+            return;
+        }
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            const resetAt = new Date().toISOString();
+
+            const { error } = await supabase
+                .from('makeup_payment_counter_state')
+                .upsert(
+                    {
+                        payment_month: selectedMonth,
+                        reset_at: resetAt,
+                        reset_by: user?.id || null,
+                        updated_at: resetAt,
+                    },
+                    { onConflict: 'payment_month' }
+                );
+
+            if (error) throw error;
+
+            setCounterState({ payment_month: selectedMonth, reset_at: resetAt });
+            setLastUpdated('Counter reset to S$0.00. Payment statuses were preserved.');
+        } catch (err: any) {
+            alert(err?.message || 'Failed to reset total.');
+        }
+    };
+
+    const undoAdd = async () => {
+        const resetAt = counterState?.reset_at
+            ? new Date(counterState.reset_at).getTime()
+            : 0;
+
+        const latest = [...paidRows]
+            .filter((payment) =>
+                new Date(payment.updated_at || payment.created_at).getTime() >= resetAt
+            )
+            .sort((a, b) =>
+                new Date(b.updated_at || b.created_at).getTime() -
+                new Date(a.updated_at || a.created_at).getTime()
+            )[0];
+
+        if (!latest) {
+            alert('There is no paid makeup transaction after the last counter reset.');
+            return;
+        }
+
+        const student = latest.master_students?.display_name || 'Unknown student';
+
+        if (!confirm(`Undo the latest payment added for ${student}?`)) return;
+
+        await setPaidStatus(latest.id, false);
+    };
+
+    const handleLogout = async () => {
         await supabase.auth.signOut();
         router.push('/');
     };
 
     if (userRole === null) {
-        return (
-            <div className="container" style={{ padding: '3rem 1rem' }}>
-                <div className="form-card" style={{ maxWidth: 600, margin: '0 auto', textAlign: 'center' }}>
-                    <p className="muted">Checking access...</p>
-                </div>
-            </div>
-        );
+        return <div className="container" style={{ padding: 40 }}>Checking access...</div>;
     }
 
     if (userRole !== 'superuser') {
         return (
             <div className="container" style={{ padding: '3rem 1rem' }}>
                 <div className="form-card" style={{ maxWidth: 640, margin: '0 auto', textAlign: 'center' }}>
-                    <h1 style={{ color: '#dc2626', fontSize: '3rem', marginBottom: '0.5rem' }}>403</h1>
-                    <h2 style={{ marginTop: 0 }}>Forbidden</h2>
-                    <p style={{ color: '#6b7280', marginBottom: '1.5rem' }}>Only superusers can access Makeup Payment.</p>
-                    <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <h1 style={{ color: '#dc2626', fontSize: '3rem', marginBottom: 8 }}>403</h1>
+                    <h2>Forbidden</h2>
+                    <p className="muted">Only superusers can access Makeup Payment.</p>
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
                         <Link href="/dashboard" className="btn share-btn">Return to Dashboard</Link>
-                        <button type="button" className="btn share-btn logout" onClick={handleForbiddenLogout}>Logout</button>
+                        <button type="button" className="btn share-btn logout" onClick={handleLogout}>Logout</button>
                     </div>
                 </div>
             </div>
@@ -190,30 +331,54 @@ export default function MakeupPaymentPage() {
 
     return (
         <div className="container">
-            <AppHeader title="Makeup Payment" userName={userName} userRole={userRole} mode="dashboard" />
+            <AppHeader
+                title="Makeup Payment"
+                userName={userName}
+                userRole={userRole}
+                mode="dashboard"
+            />
 
             <main style={{ padding: '24px 16px 48px' }}>
                 <section className="form-card" style={{ maxWidth: 1120, margin: '0 auto', padding: 24 }}>
                     <div style={{ textAlign: 'center' }}>
                         <h1 style={{ margin: 0 }}>Makeup Top-up Payments</h1>
                         <p className="muted" style={{ margin: '8px auto 0', maxWidth: 760 }}>
-                            Top-ups are created when a student uses a lower-value missed lesson to make up into a higher-value lesson.
+                            Payment changes and monthly summaries are sent to the Makeup Attendance Telegram topic.
                         </p>
-
                         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
-                            <Link href="/makeup" className="btn share-btn">
-                                Back to Makeup Credits
-                            </Link>
+                            <Link href="/makeup" className="btn share-btn">Back to Makeup Credits</Link>
                         </div>
                     </div>
 
                     {message && <div className="error-message" style={{ marginTop: 16 }}>{message}</div>}
 
-                    <div className="payment-summary" style={{ marginTop: 20 }}>
+                    <div className="payment-summary" style={{ marginTop: 22 }}>
                         <div className="summary-card">
-                            <h3>{getReadableMonth(selectedMonth)} Makeup Top-ups</h3>
-                            <p className="amount">{money(totalPaid)}</p>
-                            <p className="timestamp">Unpaid: {money(totalUnpaid)} · Paid: {money(totalPaid)}</p>
+                            <h3>{getReadableMonth(selectedMonth)} Counter</h3>
+                            <p className="amount">{money(counterTotal)}</p>
+                            <p className="timestamp">
+                                Total paid: {money(totalPaid)} · Outstanding: {money(totalUnpaid)} · Possible: {money(possibleTotal)}
+                            </p>
+                            {lastUpdated && <p className="timestamp">{lastUpdated}</p>}
+
+                            <div className="payment-actions">
+                                <button
+                                    type="button"
+                                    className="payment-action-btn danger"
+                                    onClick={resetTotal}
+                                    disabled={loading}
+                                >
+                                    Reset Total
+                                </button>
+                                <button
+                                    type="button"
+                                    className="payment-action-btn warning"
+                                    onClick={undoAdd}
+                                    disabled={loading}
+                                >
+                                    Undo Add
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -221,17 +386,32 @@ export default function MakeupPaymentPage() {
                         <div className="filter-grid">
                             <label className="filter-label">
                                 Month
-                                <input type="month" className="filter-input" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} />
+                                <input
+                                    type="month"
+                                    className="filter-input"
+                                    value={selectedMonth}
+                                    onChange={(event) => setSelectedMonth(event.target.value)}
+                                />
                             </label>
 
                             <label className="filter-label">
                                 Search
-                                <input className="filter-input" placeholder="Student, target, amount..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                                <input
+                                    className="filter-input"
+                                    placeholder="Student, target, amount..."
+                                    value={searchTerm}
+                                    onChange={(event) => setSearchTerm(event.target.value)}
+                                />
                             </label>
                         </div>
 
                         <div className="filter-buttons">
-                            <button type="button" className="filter-button" onClick={loadPayments} disabled={loading}>
+                            <button
+                                type="button"
+                                className="filter-button"
+                                onClick={loadData}
+                                disabled={loading}
+                            >
                                 Refresh
                             </button>
                         </div>
@@ -262,16 +442,22 @@ export default function MakeupPaymentPage() {
                                         <tr key={payment.id}>
                                             <td>{payment.master_students?.display_name || 'Unknown student'}</td>
                                             <td>
-                                                <strong>{payment.makeup_usages?.target_training_type}</strong>
+                                                <strong>{payment.makeup_usages?.target_training_type || 'Unknown'}</strong>
                                                 <br />
-                                                <span className="muted">{payment.makeup_usages?.target_date} · {payment.makeup_usages?.target_label}</span>
+                                                <span className="muted">
+                            {payment.makeup_usages?.target_date} · {payment.makeup_usages?.target_label}
+                          </span>
                                             </td>
                                             <td>{money(Number(payment.makeup_usages?.credit_value_used || 0))}</td>
                                             <td>{money(Number(payment.makeup_usages?.target_value || 0))}</td>
                                             <td><strong>{money(payment.amount)}</strong></td>
                                             <td>
                                                 <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 700 }}>
-                                                    <input type="checkbox" checked={payment.paid} onChange={(e) => updatePaid(payment.id, e.target.checked)} />
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={payment.paid}
+                                                        onChange={(event) => setPaidStatus(payment.id, event.target.checked)}
+                                                    />
                                                     {payment.paid ? 'Paid' : 'Unpaid'}
                                                 </label>
                                             </td>
