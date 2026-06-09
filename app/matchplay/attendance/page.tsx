@@ -33,6 +33,7 @@ interface MatchPlayAttendance {
     updated_at?: string;
     makeup_target_type?: 'weekend' | 'one_to_one' | 'weekday' | 'matchplay' | null;
     makeup_usage_id?: string | null;
+    original_missed_date?: string | null;
 }
 
 const supabase = createBrowserClient(
@@ -47,6 +48,33 @@ const getUserRole = (user: any): UserRole => {
 const formatDate = (dateValue: string) => {
     const parsed = new Date(dateValue);
     return Number.isNaN(parsed.getTime()) ? dateValue : parsed.toLocaleDateString();
+};
+
+const formatTrainingType = (value?: string | null) => {
+    if (!value) return '';
+
+    if (value === 'one_to_one') return '1-1';
+    if (value === 'matchplay') return 'MatchPlay';
+
+    return value.charAt(0).toUpperCase() + value.slice(1);
+};
+
+const formatAttendanceHistory = (row: MatchPlayAttendance) => {
+    const date = formatDate(row.attendance_date);
+
+    if (row.status === 'missed') {
+        return `${date} (missed)`;
+    }
+
+    if (row.status === 'makeup') {
+        const programme = formatTrainingType(row.makeup_target_type);
+
+        return programme
+            ? `${date} (makeup, ${programme})`
+            : `${date} (makeup)`;
+    }
+
+    return date;
 };
 
 export default function MatchPlayAttendancePage() {
@@ -120,7 +148,9 @@ export default function MatchPlayAttendancePage() {
 
         return students.filter((student) => {
             const history = getAttendanceForStudent(student.id)
-                .map((row) => `${formatDate(row.attendance_date)} ${row.status}`)
+                .map((row) =>
+                    `${formatAttendanceHistory(row)} ${row.makeup_target_type || ''}`
+                )
                 .join(' ')
                 .toLowerCase();
 
@@ -182,26 +212,35 @@ export default function MatchPlayAttendancePage() {
         }
     };
 
-    const completeMatchPlayMakeup = async (selection: MakeupSelectionResult) => {
+    const completeMatchPlayMakeup = async (
+        selection: MakeupSelectionResult
+    ) => {
         if (!makeupStudent) return;
 
         try {
-            const { data, error } = await supabase
-                .from('matchplay_attendance')
-                .insert({
-                    matchplay_student_id: makeupStudent.id,
-                    attendance_date: selection.targetDate,
-                    status: 'makeup',
-                    makeup_target_type: selection.targetTrainingType,
-                    makeup_usage_id: selection.usageId,
-                    updated_at: new Date().toISOString(),
-                })
-                .select('*')
-                .single();
+            const { data, error } = await supabase.rpc(
+                'apply_matchplay_makeup_usage',
+                {
+                    input_student_id: makeupStudent.id,
+                    input_usage_id: selection.usageId,
+                }
+            );
 
             if (error) throw error;
 
-            setAttendanceRows((prev) => [data as MatchPlayAttendance, ...prev]);
+            const updatedRow = Array.isArray(data) ? data[0] : data;
+
+            if (!updatedRow) {
+                throw new Error('The missed MatchPlay session could not be converted to makeup.');
+            }
+
+            setAttendanceRows((previous) =>
+                previous.map((row) =>
+                    row.id === updatedRow.id
+                        ? (updatedRow as MatchPlayAttendance)
+                        : row
+                )
+            );
         } catch (err) {
             await supabase.rpc('undo_cross_programme_makeup', {
                 input_usage_id: selection.usageId,
@@ -218,11 +257,45 @@ export default function MatchPlayAttendancePage() {
             return;
         }
 
-        if (!confirm(`Undo latest MatchPlay attendance action on ${formatDate(latest.attendance_date)}?`)) {
+        const actionText =
+            latest.status === 'makeup'
+                ? 'return this makeup session to Missed'
+                : 'remove this attendance action';
+
+        if (!confirm(
+            `Are you sure you want to ${actionText} for ${formatDate(latest.attendance_date)}?`
+        )) {
             return;
         }
 
         try {
+            if (latest.status === 'makeup') {
+                const { data, error } = await supabase.rpc(
+                    'undo_matchplay_makeup_status',
+                    {
+                        input_attendance_id: latest.id,
+                    }
+                );
+
+                if (error) throw error;
+
+                const restoredRow = Array.isArray(data) ? data[0] : data;
+
+                if (!restoredRow) {
+                    throw new Error('The MatchPlay makeup could not be restored to Missed.');
+                }
+
+                setAttendanceRows((previous) =>
+                    previous.map((row) =>
+                        row.id === latest.id
+                            ? (restoredRow as MatchPlayAttendance)
+                            : row
+                    )
+                );
+
+                return;
+            }
+
             const { error } = await supabase
                 .from('matchplay_attendance')
                 .delete()
@@ -230,7 +303,9 @@ export default function MatchPlayAttendancePage() {
 
             if (error) throw error;
 
-            setAttendanceRows((prev) => prev.filter((row) => row.id !== latest.id));
+            setAttendanceRows((previous) =>
+                previous.filter((row) => row.id !== latest.id)
+            );
         } catch (err: any) {
             alert(err?.message || 'Failed to undo latest MatchPlay attendance action.');
             await loadData();
@@ -335,7 +410,6 @@ export default function MatchPlayAttendancePage() {
                     margin: 0,
                     padding: '24px 0 48px',
                     boxSizing: 'border-box',
-                    zIndex: 0,
                 }}
             >
                 <div
@@ -346,8 +420,6 @@ export default function MatchPlayAttendancePage() {
                         width: '100%',
                         margin: '0 auto 28px',
                         boxSizing: 'border-box',
-                        position: 'relative',
-                        zIndex: 0,
                     }}
                 >
                     <input
@@ -411,7 +483,9 @@ export default function MatchPlayAttendancePage() {
                                 <tbody>
                                 {filteredStudents.map((student) => {
                                     const history = getAttendanceForStudent(student.id);
-                                    const attended = history.filter((row) => row.status === 'attended').length;
+                                    const attended = history.filter(
+                                        (row) => row.status === 'attended' || row.status === 'makeup'
+                                    ).length;
                                     const missed = history.filter((row) => row.status === 'missed').length;
 
                                     return (
@@ -537,8 +611,7 @@ export default function MatchPlayAttendancePage() {
                                                     <ul>
                                                         {history.slice(0, 8).map((row) => (
                                                             <li key={row.id}>
-                                                                {formatDate(row.attendance_date)}
-                                                                {row.status === 'missed' ? ' (missed)' : ''}
+                                                                {formatAttendanceHistory(row)}
                                                             </li>
                                                         ))}
                                                     </ul>
