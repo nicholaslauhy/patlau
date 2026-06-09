@@ -1,0 +1,13 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/monthly-payment-summaries",
+      "schedule": "5 0 1 * *"
+    },
+    {
+      "path": "/api/cron/makeup-payment-summary",
+      "schedule": "10 0 1 * *"
+    }
+  ]
+}
+

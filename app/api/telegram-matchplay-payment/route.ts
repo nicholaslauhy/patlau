@@ -2,9 +2,10 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
     try {
-        const { message } = await request.json();
+        const body = await request.json();
+        const message = String(body?.message || body?.text || '').trim();
 
-        if (!message || typeof message !== 'string') {
+        if (!message) {
             return NextResponse.json(
                 { error: 'Message is required.' },
                 { status: 400 }
@@ -15,23 +16,12 @@ export async function POST(request: Request) {
         const chatId = process.env.TELEGRAM_CHAT_ID;
         const threadId = process.env.TELEGRAM_MATCHPLAY_THREAD_ID;
 
-        if (!botToken) {
+        if (!botToken || !chatId || !threadId) {
             return NextResponse.json(
-                { error: 'Missing TELEGRAM_MATCHPLAY_PAYMENT_BOT_TOKEN.' },
-                { status: 500 }
-            );
-        }
-
-        if (!chatId) {
-            return NextResponse.json(
-                { error: 'Missing TELEGRAM_CHAT_ID.' },
-                { status: 500 }
-            );
-        }
-
-        if (!threadId) {
-            return NextResponse.json(
-                { error: 'Missing TELEGRAM_MATCHPLAY_THREAD_ID.' },
+                {
+                    error:
+                        'Missing TELEGRAM_MATCHPLAY_PAYMENT_BOT_TOKEN, TELEGRAM_CHAT_ID, or TELEGRAM_MATCHPLAY_THREAD_ID.',
+                },
                 { status: 500 }
             );
         }
@@ -40,9 +30,7 @@ export async function POST(request: Request) {
             `https://api.telegram.org/bot${botToken}/sendMessage`,
             {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     chat_id: chatId,
                     message_thread_id: Number(threadId),
@@ -54,11 +42,13 @@ export async function POST(request: Request) {
         const telegramData = await telegramResponse.json();
 
         if (!telegramResponse.ok) {
-            console.error('Telegram matchplay payment topic error:', telegramData);
+            console.error('MatchPlay payment Telegram error:', telegramData);
 
             return NextResponse.json(
                 {
-                    error: 'Failed to send Telegram matchplay payment topic message.',
+                    error:
+                        telegramData?.description ||
+                        'Failed to send MatchPlay payment Telegram message.',
                     details: telegramData,
                 },
                 { status: 500 }
@@ -67,10 +57,10 @@ export async function POST(request: Request) {
 
         return NextResponse.json({
             success: true,
-            result: telegramData,
+            result: telegramData.result,
         });
     } catch (error: any) {
-        console.error('Telegram matchplay payment topic route error:', error);
+        console.error('MatchPlay payment Telegram route error:', error);
 
         return NextResponse.json(
             {

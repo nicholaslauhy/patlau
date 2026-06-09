@@ -3,17 +3,20 @@ import { NextResponse } from 'next/server';
 export async function POST(request: Request) {
     try {
         const body = await request.json();
-        const text = String(body?.text || '').trim();
+        const message = String(body?.message || body?.text || '').trim();
 
-        if (!text) {
-            return NextResponse.json({ error: 'Text is required.' }, { status: 400 });
+        if (!message) {
+            return NextResponse.json(
+                { error: 'Message is required.' },
+                { status: 400 }
+            );
         }
 
-        const token = process.env.TELEGRAM_MAKEUP_PAYMENT_BOT_TOKEN;
+        const botToken = process.env.TELEGRAM_MAKEUP_PAYMENT_BOT_TOKEN;
         const chatId = process.env.TELEGRAM_MAKEUP_PAYMENT_CHAT_ID;
         const threadId = process.env.TELEGRAM_MAKEUP_PAYMENT_THREAD_ID;
 
-        if (!token || !chatId || !threadId) {
+        if (!botToken || !chatId || !threadId) {
             return NextResponse.json(
                 {
                     error:
@@ -23,32 +26,46 @@ export async function POST(request: Request) {
             );
         }
 
-        const response = await fetch(
-            `https://api.telegram.org/bot${token}/sendMessage`,
+        const telegramResponse = await fetch(
+            `https://api.telegram.org/bot${botToken}/sendMessage`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     chat_id: chatId,
                     message_thread_id: Number(threadId),
-                    text,
+                    text: message,
                 }),
             }
         );
 
-        const payload = await response.json();
+        const telegramData = await telegramResponse.json();
 
-        if (!response.ok) {
+        if (!telegramResponse.ok) {
+            console.error('Makeup payment Telegram error:', telegramData);
+
             return NextResponse.json(
-                { error: payload?.description || 'Telegram sendMessage failed.' },
+                {
+                    error:
+                        telegramData?.description ||
+                        'Failed to send Makeup payment Telegram message.',
+                    details: telegramData,
+                },
                 { status: 500 }
             );
         }
 
-        return NextResponse.json({ success: true });
+        return NextResponse.json({
+            success: true,
+            result: telegramData.result,
+        });
     } catch (error: any) {
+        console.error('Makeup payment Telegram route error:', error);
+
         return NextResponse.json(
-            { error: error?.message || 'Unexpected Telegram error.' },
+            {
+                error: error?.message || 'Unexpected Telegram route error.',
+            },
             { status: 500 }
         );
     }

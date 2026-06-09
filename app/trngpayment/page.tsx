@@ -125,6 +125,7 @@ export default function TrngPaymentPage() {
     const [lastUpdated, setLastUpdated] = useState<string | null>(null);
     const [isResetting, setIsResetting] = useState(false);
     const [isUndoing, setIsUndoing] = useState(false);
+    const [counterResetAt, setCounterResetAt] = useState<string | null>(null);
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -141,6 +142,18 @@ export default function TrngPaymentPage() {
 
         checkAuth();
     }, [router]);
+
+    const loadCounterState = async () => {
+        const { data, error } = await supabase
+            .from('payment_counter_state')
+            .select('reset_at')
+            .eq('programme', 'one_to_one')
+            .eq('period_key', selectedMonth)
+            .maybeSingle();
+
+        if (error) throw error;
+        setCounterResetAt(data?.reset_at || null);
+    };
 
     const loadData = async () => {
         try {
@@ -502,34 +515,41 @@ export default function TrngPaymentPage() {
     };
 
     const handleResetTotal = async () => {
-        if (sessions.length === 0) {
-            alert('No 1-on-1 sessions found for this month.');
-            return;
-        }
-
-        if (!confirm(`Send ${getReadableMonth(selectedMonth)} 1-on-1 payment summary and reset all paid statuses for this month?`)) {
+        if (!confirm(
+            `Send ${getReadableMonth(selectedMonth)} 1-on-1 payment summary and reset only the displayed counter?`
+        )) {
             return;
         }
 
         try {
             setIsResetting(true);
+
             await sendMonthlySummaryNotification();
 
-            const paidPayments = payments.filter(payment => payment.paid);
-            if (paidPayments.length > 0) {
-                const now = new Date().toISOString();
-                const { error } = await supabase
-                    .from('training_payments')
-                    .update({ paid: false, updated_at: now })
-                    .in('id', paidPayments.map(payment => payment.id));
+            const resetAt = new Date().toISOString();
+            const { data: { user } } = await supabase.auth.getUser();
 
-                if (error) throw error;
-            }
+            const { error } = await supabase
+                .from('payment_counter_state')
+                .upsert(
+                    {
+                        programme: 'one_to_one',
+                        period_key: selectedMonth,
+                        reset_at: resetAt,
+                        reset_by: user?.id || null,
+                        updated_at: resetAt,
+                    },
+                    { onConflict: 'programme,period_key' }
+                );
 
-            await loadData();
-            setLastUpdated('Monthly summary sent. Paid statuses for this month were reset.');
+            if (error) throw error;
+
+            setCounterResetAt(resetAt);
+            setLastUpdated(
+                'Monthly summary sent. Counter reset to S$0.00. Existing payment statuses were preserved.'
+            );
         } catch (err: any) {
-            alert(err?.message || 'Failed to reset total');
+            alert(err?.message || 'Failed to reset 1-on-1 payment counter.');
         } finally {
             setIsResetting(false);
         }
@@ -628,6 +648,19 @@ export default function TrngPaymentPage() {
         return sum + getSessionAmount(session, payment);
     }, 0);
 
+    const counterTotal = paidSessions
+        .filter((session) => {
+            if (!counterResetAt) return true;
+            const payment = getPayment(session.session_date, session.student_id);
+            if (!payment) return false;
+            return new Date(payment.updated_at || payment.created_at).getTime()
+                >= new Date(counterResetAt).getTime();
+        })
+        .reduce((sum, session) => {
+            const payment = getPayment(session.session_date, session.student_id);
+            return sum + getSessionAmount(session, payment);
+        }, 0);
+
     if (userRole !== 'superuser') {
         return (
             <div className="container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '3rem 1rem' }}>
@@ -725,7 +758,7 @@ export default function TrngPaymentPage() {
                 <div className="payment-summary">
                     <div className="summary-card">
                         <h3>1-on-1 Payments Collected</h3>
-                        <p className="amount">S${monthTotal.toFixed(2)}</p>
+                        <p className="amount">S${counterTotal.toFixed(2)}</p>
                         <p className="timestamp">Month: {getReadableMonth(selectedMonth)}</p>
                         <p className="timestamp">
                             Paid Sessions: {paidCount} · Unpaid Sessions: {unpaidCount} · Possible Total: S${possibleTotal.toFixed(2)}

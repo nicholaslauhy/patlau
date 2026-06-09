@@ -68,6 +68,7 @@ export default function MatchPlayPaymentPage() {
     const [lastUpdated, setLastUpdated] = useState<string | null>(null);
     const [isResetting, setIsResetting] = useState(false);
     const [isUndoing, setIsUndoing] = useState(false);
+    const [counterResetAt, setCounterResetAt] = useState<string | null>(null);
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -84,6 +85,18 @@ export default function MatchPlayPaymentPage() {
 
         checkAuth();
     }, [router]);
+
+    const loadCounterState = async () => {
+        const { data, error } = await supabase
+            .from('payment_counter_state')
+            .select('reset_at')
+            .eq('programme', 'matchplay')
+            .eq('period_key', selectedMonth)
+            .maybeSingle();
+
+        if (error) throw error;
+        setCounterResetAt(data?.reset_at || null);
+    };
 
     const loadData = async () => {
         try {
@@ -268,12 +281,9 @@ export default function MatchPlayPaymentPage() {
     };
 
     const handleResetTotal = async () => {
-        if (rows.length === 0) {
-            alert('No MatchPlay payment rows found for this month.');
-            return;
-        }
-
-        if (!confirm(`Send ${getReadableMonth(selectedMonth)} MatchPlay payment summary and reset all paid statuses for this month?`)) {
+        if (!confirm(
+            `Send ${getReadableMonth(selectedMonth)} MatchPlay payment summary and reset only the displayed counter?`
+        )) {
             return;
         }
 
@@ -282,26 +292,30 @@ export default function MatchPlayPaymentPage() {
 
             await sendTelegramNotification(buildMonthlySummaryMessage());
 
-            const paidPaymentIds = payments
-                .filter((payment) => payment.payment_month === selectedMonth && payment.paid)
-                .map((payment) => payment.id);
+            const resetAt = new Date().toISOString();
+            const { data: { user } } = await supabase.auth.getUser();
 
-            if (paidPaymentIds.length > 0) {
-                const { error } = await supabase
-                    .from('matchplay_payments')
-                    .update({
-                        paid: false,
-                        updated_at: new Date().toISOString(),
-                    })
-                    .in('id', paidPaymentIds);
+            const { error } = await supabase
+                .from('payment_counter_state')
+                .upsert(
+                    {
+                        programme: 'matchplay',
+                        period_key: selectedMonth,
+                        reset_at: resetAt,
+                        reset_by: user?.id || null,
+                        updated_at: resetAt,
+                    },
+                    { onConflict: 'programme,period_key' }
+                );
 
-                if (error) throw error;
-            }
+            if (error) throw error;
 
-            await loadData();
-            setLastUpdated('Monthly summary sent. Paid statuses for this month were reset.');
+            setCounterResetAt(resetAt);
+            setLastUpdated(
+                'Monthly summary sent. Counter reset to S$0.00. Existing payment statuses were preserved.'
+            );
         } catch (err: any) {
-            alert(err?.message || 'Failed to reset MatchPlay payment total.');
+            alert(err?.message || 'Failed to reset MatchPlay payment counter.');
         } finally {
             setIsResetting(false);
         }
@@ -374,6 +388,15 @@ export default function MatchPlayPaymentPage() {
         router.push('/');
     };
 
+
+    const counterTotal = payments
+        .filter((payment) => {
+            if (payment.payment_month !== selectedMonth || !payment.paid) return false;
+            if (!counterResetAt) return true;
+            return new Date(payment.updated_at || payment.created_at).getTime()
+                >= new Date(counterResetAt).getTime();
+        })
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
 
     if (userRole !== 'superuser') {
         return (
@@ -459,7 +482,7 @@ export default function MatchPlayPaymentPage() {
                 <div className="payment-summary">
                     <div className="summary-card">
                         <h3>MatchPlay Payments Collected</h3>
-                        <p className="amount">S${totalCollected.toFixed(2)}</p>
+                        <p className="amount">S${counterTotal.toFixed(2)}</p>
                         <p className="timestamp">Month: {getReadableMonth(selectedMonth)}</p>
                         <p className="timestamp">
                             Paid: {paidRows.length} · Unpaid: {unpaidRows.length} · Possible Total: S${possibleTotal.toFixed(2)}

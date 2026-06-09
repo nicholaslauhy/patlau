@@ -51,9 +51,11 @@ export default function PaymentPage() {
   const [trackingPeriod, setTrackingPeriod] = useState(() => {
     const today = new Date();
     const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const end = new Date(start); end.setMonth(end.getMonth() + 3);
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + 3);
     return { start, end };
   });
+  const [periodLoaded, setPeriodLoaded] = useState(false);
 
   const [selectedDay, setSelectedDay] = useState('all');
   const [selectedTimeslot, setSelectedTimeslot] = useState('all');
@@ -63,101 +65,207 @@ export default function PaymentPage() {
   const timeslots = ['all', '8-10am', '10-12pm', '1-3pm', '2-4pm', '3-5pm', '4-6pm'];
   const levels = ['all', 'Beginner', 'Intermediate', 'Advanced'];
 
-  const sendPaymentStatusTelegram = async (studentName: string, amount: number, recordedAt: string, isPaid: boolean) => {
+  const sendWeekendTelegram = async (message: string) => {
+    const response = await fetch('/api/telegram-weekend-payment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({ message }),
+    });
+
+    let payload: any = null;
+
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok || !payload?.success) {
+      const details = payload?.details?.description
+          || payload?.details?.message
+          || payload?.error
+          || `Weekend Telegram route returned HTTP ${response.status}`;
+
+      throw new Error(details);
+    }
+
+    return payload;
+  };
+
+  const sendPaymentStatusTelegram = async (
+      studentName: string,
+      amount: number,
+      recordedAt: string,
+      isPaid: boolean
+  ) => {
     const message =
-        `${isPaid ? '✅ Payment Received!' : '↩️ Payment Reversed!'}\n\n` +
+        `${isPaid ? '✅ Weekend Payment Received' : '↩️ Weekend Payment Reversed'}\n\n` +
         `Student: ${studentName}\n` +
         `Amount: ${isPaid ? '+' : '-'}S$${Math.abs(amount).toFixed(2)}\n` +
         `Recorded At: ${new Date(recordedAt).toLocaleString()}\n` +
         `Status: ${isPaid ? 'Paid' : 'Unpaid'}`;
 
-    await fetch('/api/telegram-weekend-payment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
-    });
+    await sendWeekendTelegram(message);
   };
 
-  const sendPeriodSummary = async (totalAmount: number, startDate: Date, endDate: Date) => {
-    try {
-      const { data: payments } = await supabase
-          .from('payment_history')
-          .select('student_id, amount, recorded_at')
-          .gte('recorded_at', startDate.toISOString())
-          .lte('recorded_at', endDate.toISOString())
-          .order('recorded_at', { ascending: true });
+  const sendPeriodSummary = async (
+      totalAmount: number,
+      startDate: Date,
+      endDate: Date
+  ) => {
+    const { data: payments, error: paymentError } = await supabase
+        .from('payment_history')
+        .select('student_id, amount, recorded_at')
+        .gte('recorded_at', startDate.toISOString())
+        .lt('recorded_at', endDate.toISOString())
+        .order('recorded_at', { ascending: true });
 
-      const paymentDetails = await Promise.all(
-          (payments || []).map(async (payment) => {
-            const { data: student } = await supabase
-                .from('students')
-                .select('student_name')
-                .eq('student_id', payment.student_id)
-                .single();
-            return {
-              ...payment,
-              student_name: student?.student_name || 'Unknown'
-            };
-          })
-      );
+    if (paymentError) throw paymentError;
 
-      const paymentLines = paymentDetails.map(p => {
-        const sign = p.amount >= 0 ? '+' : '-';
-        return `- ${p.student_name}: ${sign}S$${Math.abs(p.amount).toFixed(2)} (${new Date(p.recorded_at).toLocaleDateString()})`;
-      }).join('\n');
+    const paymentDetails = await Promise.all(
+        (payments || []).map(async (payment) => {
+          const { data: student } = await supabase
+              .from('students')
+              .select('student_name')
+              .eq('student_id', payment.student_id)
+              .maybeSingle();
 
-      const message = `📊 Payment Period Summary 📊\n\n` +
-          `Period: ${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}\n` +
-          `Total Collected: S$${totalAmount.toFixed(2)}\n\n` +
-          `Payment Details:\n${paymentLines}\n\n` +
-          `Starting new tracking period from today.`;
+          return {
+            ...payment,
+            student_name: student?.student_name || 'Unknown',
+          };
+        })
+    );
 
-      const response = await fetch('/api/telegram-weekend-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
+    const paymentLines = paymentDetails.length
+        ? paymentDetails
+            .map((payment) => {
+              const sign = Number(payment.amount || 0) >= 0 ? '+' : '-';
+
+              return (
+                  `- ${payment.student_name}: ` +
+                  `${sign}S$${Math.abs(Number(payment.amount || 0)).toFixed(2)} ` +
+                  `(${new Date(payment.recorded_at).toLocaleDateString()})`
+              );
+            })
+            .join('\n')
+        : '- No Weekend payment transactions recorded in this period.';
+
+    const message =
+        `📊 Weekend Payment Period Summary\n\n` +
+        `Period: ${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}\n` +
+        `Total Collected: S$${totalAmount.toFixed(2)}\n\n` +
+        `Payment Details:\n${paymentLines}\n\n` +
+        `Payment records were preserved.`;
+
+    await sendWeekendTelegram(message);
+  };
+
+  const loadWeekendTrackingPeriod = async () => {
+    const { data, error } = await supabase
+        .from('weekend_payment_period_state')
+        .select('*')
+        .eq('id', 1)
+        .maybeSingle();
+
+    if (error) throw error;
+
+    if (data) {
+      setTrackingPeriod({
+        start: new Date(data.start_at),
+        end: new Date(data.end_at),
       });
-
-      if (!response.ok) throw new Error('Failed to send Telegram notification');
-
-      const { error: updateError } = await supabase
-          .from('students')
-          .update({ paid: false })
-          .neq('paid', false);
-
-      if (updateError) throw updateError;
-    } catch (error) {
-      console.error('Error sending period summary:', error);
+      setPeriodLoaded(true);
+      return;
     }
+
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + 3);
+
+    const { error: insertError } = await supabase
+        .from('weekend_payment_period_state')
+        .insert({
+          id: 1,
+          start_at: start.toISOString(),
+          end_at: end.toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+    if (insertError) throw insertError;
+
+    setTrackingPeriod({ start, end });
+    setPeriodLoaded(true);
   };
 
   const fetchPaidCount = async () => {
+    if (!periodLoaded) return;
+
     try {
+      const now = new Date();
+
+      if (now >= trackingPeriod.end) {
+        const { data: completedRows, error: completedError } = await supabase
+            .from('payment_history')
+            .select('amount')
+            .gte('recorded_at', trackingPeriod.start.toISOString())
+            .lt('recorded_at', trackingPeriod.end.toISOString());
+
+        if (completedError) throw completedError;
+
+        const completedTotal =
+            completedRows?.reduce((sum, row) => sum + Number(row.amount || 0), 0) || 0;
+
+        await sendPeriodSummary(
+            completedTotal,
+            trackingPeriod.start,
+            trackingPeriod.end
+        );
+
+        let nextStart = new Date(trackingPeriod.end);
+        let nextEnd = new Date(nextStart);
+        nextEnd.setMonth(nextEnd.getMonth() + 3);
+
+        while (now >= nextEnd) {
+          nextStart = new Date(nextEnd);
+          nextEnd = new Date(nextStart);
+          nextEnd.setMonth(nextEnd.getMonth() + 3);
+        }
+
+        const { error: periodError } = await supabase
+            .from('weekend_payment_period_state')
+            .update({
+              start_at: nextStart.toISOString(),
+              end_at: nextEnd.toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', 1);
+
+        if (periodError) throw periodError;
+
+        setTrackingPeriod({ start: nextStart, end: nextEnd });
+        return;
+      }
+
       const { data, error } = await supabase
           .from('payment_history')
           .select('amount, recorded_at')
           .gte('recorded_at', trackingPeriod.start.toISOString())
-          .lte('recorded_at', trackingPeriod.end.toISOString());
+          .lt('recorded_at', trackingPeriod.end.toISOString());
 
       if (error) throw error;
 
-      const totalAmount = data?.reduce((sum, record) => sum + record.amount, 0) || 0;
+      const totalAmount =
+          data?.reduce((sum, record) => sum + Number(record.amount || 0), 0) || 0;
+
       setPaidCount(totalAmount);
-      setLastUpdated(`Total collected: S$${totalAmount.toFixed(2)} (as of ${new Date().toLocaleDateString()})`);
-
-      if (new Date() > trackingPeriod.end) {
-        await sendPeriodSummary(totalAmount, trackingPeriod.start, trackingPeriod.end);
-
-        const today = new Date();
-        const newStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-        const newEnd = new Date(newStart);
-        newEnd.setMonth(newEnd.getMonth() + 3);
-
-        setTrackingPeriod({ start: newStart, end: newEnd });
-        await fetchPaidCount();
-      }
+      setLastUpdated(
+          `Total collected: S$${totalAmount.toFixed(2)} (as of ${new Date().toLocaleDateString()})`
+      );
     } catch (error) {
-      console.error('Error fetching paid count:', error);
+      console.error('Error fetching Weekend payment counter:', error);
     }
   };
 
@@ -192,7 +300,15 @@ export default function PaymentPage() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    loadWeekendTrackingPeriod().catch((error) => {
+      console.error('Failed to load Weekend tracking period:', error);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (periodLoaded) fetchData();
+  }, [periodLoaded, trackingPeriod.start.getTime(), trackingPeriod.end.getTime()]);
 
   useEffect(() => {
     const subscription = supabase
@@ -271,7 +387,15 @@ export default function PaymentPage() {
       setTimeout(fetchPaidCount, 500);
     } catch (error) {
       console.error('Payment status update failed:', error);
-      alert(`Failed to update payment status: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      alert(
+          `Payment status was updated, but the Weekend Telegram notification failed:
+
+${
+              error instanceof Error ? error.message : 'Unknown error'
+          }
+
+Check the Weekend bot token, group membership, chat ID and topic ID.`
+      );
     }
   };
 
@@ -376,34 +500,66 @@ export default function PaymentPage() {
               <p className="timestamp">Tracking Period: {trackingPeriod.start.toLocaleDateString()} - {trackingPeriod.end.toLocaleDateString()}</p>
 
               <div className="payment-actions">
-                <button className="payment-action-btn danger" onClick={async () => {
-                  if (!confirm('Are you sure you want to reset the total? This will send a summary and start a new tracking period.')) return;
-                  try {
-                    const { data } = await supabase
-                        .from('payment_history')
-                        .select('amount')
-                        .gte('recorded_at', trackingPeriod.start.toISOString())
-                        .lte('recorded_at', trackingPeriod.end.toISOString());
-                    const totalAmount = data?.reduce((sum, record) => sum + record.amount, 0) || 0;
-                    await sendPeriodSummary(totalAmount, trackingPeriod.start, trackingPeriod.end);
-                    const { error: updateError } = await supabase.from('students').update({ paid: false }).neq('paid', false);
-                    if (updateError) throw updateError;
-                    const { error: deleteError } = await supabase.from('payment_history').delete().neq('id', 0);
-                    if (deleteError) throw deleteError;
-                    const today = new Date();
-                    const newStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-                    const newEnd = new Date(newStart);
-                    newEnd.setMonth(newEnd.getMonth() + 3);
-                    setTrackingPeriod({ start: newStart, end: newEnd });
-                    setPaidCount(0);
-                    await fetchData();
-                    setLastUpdated('Summary sent. All payments reset. New tracking period started');
-                  } catch (error) {
-                    console.error('Reset failed:', error);
-                    alert('Reset failed. See console for details.');
-                    fetchData();
-                  }
-                }}>Reset Total</button>
+                <button
+                    className="payment-action-btn danger"
+                    onClick={async () => {
+                      if (!confirm(
+                          'Send the current rolling 3-month summary and start a new 3-month counter from today? Existing payment statuses and history will be preserved.'
+                      )) return;
+
+                      try {
+                        const { data, error } = await supabase
+                            .from('payment_history')
+                            .select('amount')
+                            .gte('recorded_at', trackingPeriod.start.toISOString())
+                            .lt('recorded_at', trackingPeriod.end.toISOString());
+
+                        if (error) throw error;
+
+                        const totalAmount =
+                            data?.reduce((sum, row) => sum + Number(row.amount || 0), 0) || 0;
+
+                        await sendPeriodSummary(
+                            totalAmount,
+                            trackingPeriod.start,
+                            trackingPeriod.end
+                        );
+
+                        const newStart = new Date();
+                        newStart.setHours(0, 0, 0, 0);
+                        const newEnd = new Date(newStart);
+                        newEnd.setMonth(newEnd.getMonth() + 3);
+
+                        const { error: periodError } = await supabase
+                            .from('weekend_payment_period_state')
+                            .upsert({
+                              id: 1,
+                              start_at: newStart.toISOString(),
+                              end_at: newEnd.toISOString(),
+                              updated_at: new Date().toISOString(),
+                            });
+
+                        if (periodError) throw periodError;
+
+                        setTrackingPeriod({ start: newStart, end: newEnd });
+                        setPaidCount(0);
+                        setLastUpdated(
+                            'Summary sent. New rolling 3-month counter started. Payment statuses and history were preserved.'
+                        );
+                      } catch (error) {
+                        console.error('Reset failed:', error);
+                        alert(
+                            `Weekend reset summary failed:
+
+${
+                                error instanceof Error ? error.message : 'Unknown error'
+                            }`
+                        );
+                      }
+                    }}
+                >
+                  Reset Total
+                </button>
 
                 <button className="payment-action-btn warning" onClick={async () => {
                   try {
@@ -428,7 +584,7 @@ export default function PaymentPage() {
                     if (deleteError) throw deleteError;
 
                     const message = `↩️ Payment Undone ↩️\n\nStudent: ${student?.student_name || 'Unknown'}\nAmount: S$${Math.abs(lastPayment.amount).toFixed(2)}\nRecorded at: ${new Date(lastPayment.recorded_at).toLocaleString()}\nStatus: Marked as unpaid`;
-                    await fetch('/api/telegram-weekend-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message }) });
+                    await sendWeekendTelegram(message);
 
                     await fetchData();
                     setLastUpdated('Undid last payment. Notification sent.');
