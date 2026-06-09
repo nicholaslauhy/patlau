@@ -52,6 +52,9 @@ const DEFAULT_VALUES: Record<TrainingType, number> = {
   matchplay: 80,
 };
 
+const WEEKDAY_HOURLY_RATE = 80;
+const WEEKDAY_HOUR_OPTIONS = [1, 2, 3] as const;
+
 const todayKey = () => new Date().toISOString().slice(0, 10);
 const money = (value: number) => `S$${Number(value || 0).toFixed(2)}`;
 
@@ -69,6 +72,7 @@ export default function CrossProgrammeMakeupModal({
   const [targetDate, setTargetDate] = useState(defaultDate || todayKey());
   const [targetLabel, setTargetLabel] = useState('Weekend makeup lesson');
   const [targetValue, setTargetValue] = useState(DEFAULT_VALUES.weekend);
+  const [weekdayHours, setWeekdayHours] = useState<number>(1);
   const [loading, setLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState('');
@@ -80,6 +84,7 @@ export default function CrossProgrammeMakeupModal({
     setTargetDate(defaultDate || todayKey());
     setTargetLabel('Weekend makeup lesson');
     setTargetValue(DEFAULT_VALUES.weekend);
+    setWeekdayHours(1);
     setError('');
 
     const loadCredit = async () => {
@@ -117,9 +122,15 @@ export default function CrossProgrammeMakeupModal({
   }, [open, sourceTrainingType, sourceStudentId, defaultDate]);
 
   useEffect(() => {
+    if (targetType === 'weekday') {
+      setTargetValue(weekdayHours * WEEKDAY_HOURLY_RATE);
+      setTargetLabel(`Weekday ${weekdayHours}h makeup lesson`);
+      return;
+    }
+
     setTargetValue(DEFAULT_VALUES[targetType]);
     setTargetLabel(`${LABELS[targetType]} makeup lesson`);
-  }, [targetType]);
+  }, [targetType, weekdayHours]);
 
   const topUp = useMemo(() => {
     return Math.max(0, Number(targetValue || 0) - Number(credit?.credit_value || 0));
@@ -296,6 +307,32 @@ export default function CrossProgrammeMakeupModal({
                     />
                   </div>
 
+                  {targetType === 'weekday' && (
+                      <div className="form-group">
+                        <label>Weekday lesson duration</label>
+                        <select
+                            className="form-input"
+                            value={weekdayHours}
+                            onChange={(event) =>
+                                setWeekdayHours(Number(event.target.value))
+                            }
+                        >
+                          {WEEKDAY_HOUR_OPTIONS.map((hours) => (
+                              <option key={hours} value={hours}>
+                                {hours} hour{hours === 1 ? '' : 's'} — {money(hours * WEEKDAY_HOURLY_RATE)}
+                              </option>
+                          ))}
+                        </select>
+
+                        <div
+                            className="muted"
+                            style={{ marginTop: 7, fontSize: '0.85rem' }}
+                        >
+                          Weekday rate: {money(WEEKDAY_HOURLY_RATE)} per hour
+                        </div>
+                      </div>
+                  )}
+
                   <div className="form-group">
                     <label>Target lesson label</label>
                     <input
@@ -314,7 +351,23 @@ export default function CrossProgrammeMakeupModal({
                         step="0.01"
                         value={targetValue}
                         onChange={(event) => setTargetValue(Number(event.target.value))}
+                        readOnly={targetType === 'weekday'}
+                        style={{
+                          background:
+                              targetType === 'weekday' ? '#f1f5f9' : undefined,
+                          cursor:
+                              targetType === 'weekday' ? 'not-allowed' : undefined,
+                        }}
                     />
+
+                    {targetType === 'weekday' && (
+                        <div
+                            className="muted"
+                            style={{ marginTop: 7, fontSize: '0.85rem' }}
+                        >
+                          Calculated automatically: {weekdayHours}h × {money(WEEKDAY_HOURLY_RATE)}/h
+                        </div>
+                    )}
                   </div>
 
                   <div
@@ -341,7 +394,7 @@ export default function CrossProgrammeMakeupModal({
                   </div>
 
                   <p className="muted" style={{ margin: 0, fontSize: '0.84rem' }}>
-                    A lower-value makeup gives no refund or remaining discount. A higher-value makeup requires the difference as top-up.
+                    If the target lesson costs more than the available credit, the difference is charged as a top-up. If it costs less, there is no refund or remaining credit.
                   </p>
 
                   <div
