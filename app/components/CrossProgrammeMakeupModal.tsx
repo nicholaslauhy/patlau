@@ -175,8 +175,9 @@ export default function CrossProgrammeMakeupModal({
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 5000,
-            background: 'rgba(15, 23, 42, 0.55)',
+            zIndex: 50000,
+            background: 'rgba(15, 23, 42, 0.68)',
+            backdropFilter: 'blur(2px)',
             display: 'grid',
             placeItems: 'center',
             padding: 18,
@@ -187,16 +188,30 @@ export default function CrossProgrammeMakeupModal({
       >
         <div
             style={{
+              position: 'relative',
+              zIndex: 50001,
               width: 'min(620px, 100%)',
-              maxHeight: '90vh',
-              overflowY: 'auto',
+              maxHeight: 'calc(100dvh - 36px)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
               borderRadius: 20,
               background: '#ffffff',
               boxShadow: '0 28px 70px rgba(15, 23, 42, 0.28)',
               border: '1px solid #dbe4f0',
+              boxSizing: 'border-box',
             }}
         >
-          <div style={{ padding: '22px 24px', borderBottom: '1px solid #e5e7eb' }}>
+          <div
+              style={{
+                flex: '0 0 auto',
+                padding: '22px 24px',
+                borderBottom: '1px solid #e5e7eb',
+                background: '#ffffff',
+                position: 'relative',
+                zIndex: 2,
+              }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}>
               <div>
                 <h2 style={{ margin: 0 }}>Choose Makeup Programme</h2>
@@ -224,7 +239,20 @@ export default function CrossProgrammeMakeupModal({
             </div>
           </div>
 
-          <div style={{ padding: 24, display: 'grid', gap: 18 }}>
+          <div
+              style={{
+                flex: '1 1 auto',
+                minHeight: 0,
+                overflowY: 'auto',
+                overscrollBehavior: 'contain',
+                scrollbarGutter: 'stable',
+                padding: 24,
+                display: 'grid',
+                gap: 18,
+                background: '#ffffff',
+                boxSizing: 'border-box',
+              }}
+          >
             {error && <div className="error-message">{error}</div>}
 
             {loading ? (
@@ -330,14 +358,19 @@ export default function CrossProgrammeMakeupModal({
                         disabled={confirming}
                         style={{
                           width: '100%',
-                          minHeight: 44,
+                          minHeight: 46,
                           border: '1px solid #cbd5e1',
                           borderRadius: 10,
                           padding: '10px 16px',
                           background: '#ffffff',
                           color: '#334155',
+                          fontFamily: 'inherit',
+                          fontSize: '0.95rem',
                           fontWeight: 800,
+                          lineHeight: 1.2,
                           cursor: confirming ? 'not-allowed' : 'pointer',
+                          opacity: confirming ? 0.65 : 1,
+                          boxSizing: 'border-box',
                         }}
                     >
                       Cancel
@@ -349,7 +382,7 @@ export default function CrossProgrammeMakeupModal({
                         disabled={confirming || Number(targetValue) <= 0}
                         style={{
                           width: '100%',
-                          minHeight: 44,
+                          minHeight: 46,
                           border: '1px solid #2563eb',
                           borderRadius: 10,
                           padding: '10px 16px',
@@ -358,11 +391,19 @@ export default function CrossProgrammeMakeupModal({
                                   ? '#93c5fd'
                                   : '#2563eb',
                           color: '#ffffff',
+                          fontFamily: 'inherit',
+                          fontSize: '0.95rem',
                           fontWeight: 800,
+                          lineHeight: 1.2,
                           cursor:
                               confirming || Number(targetValue) <= 0
                                   ? 'not-allowed'
                                   : 'pointer',
+                          opacity:
+                              confirming || Number(targetValue) <= 0
+                                  ? 0.8
+                                  : 1,
+                          boxSizing: 'border-box',
                         }}
                     >
                       {confirming ? 'Confirming...' : 'Confirm Makeup'}

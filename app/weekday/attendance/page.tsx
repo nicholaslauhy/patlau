@@ -40,6 +40,10 @@ interface WeekdayAttendance {
     duration_hours: number;
     created_at: string;
     updated_at?: string;
+    makeup_target_type?: 'weekend' | 'one_to_one' | 'weekday' | 'matchplay' | null;
+    makeup_usage_id?: string | null;
+    original_missed_date?: string | null;
+    original_missed_hours?: number | null;
 }
 
 const supabase = createBrowserClient(
@@ -73,6 +77,24 @@ const readableDate = (dateKey: string) => {
 const statusLabel = (status: AttendanceStatus) => {
     if (status === 'attended') return 'marked';
     return status;
+};
+
+const formatTrainingType = (value?: string | null) => {
+    if (!value) return '';
+    if (value === 'one_to_one') return '1-1';
+    if (value === 'matchplay') return 'MatchPlay';
+    return value.charAt(0).toUpperCase() + value.slice(1);
+};
+
+const formatAttendanceStatus = (record: WeekdayAttendance) => {
+    if (record.status === 'attended') return '';
+
+    if (record.status === 'makeup') {
+        const programme = formatTrainingType(record.makeup_target_type);
+        return programme ? ` (makeup, ${programme})` : ' (makeup)';
+    }
+
+    return ` (${record.status})`;
 };
 
 const scheduleHours = (schedule: WeekdaySchedule) => {
@@ -186,7 +208,10 @@ export default function WeekdayAttendancePage() {
                 row.student.student_name,
                 row.schedule.day,
                 `${scheduleHours(row.schedule)}h`,
-                ...row.records.map((record) => `${readableDate(record.attendance_date)} ${record.duration_hours}h ${record.status}`),
+                ...row.records.map(
+                    (record) =>
+                        `${readableDate(record.attendance_date)} ${record.duration_hours}h ${record.status} ${record.makeup_target_type || ''}`
+                ),
             ].join(' ').toLowerCase();
 
             return searchable.includes(normalizedSearch);
@@ -232,8 +257,8 @@ export default function WeekdayAttendancePage() {
             return;
         }
 
-        if ((status === 'attended' || status === 'missed') && todayDayName !== day) {
-            alert(`You can only ${status === 'attended' ? 'mark attendance' : 'mark missed'} on ${day}.`);
+        if (status === 'attended' && todayDayName !== day) {
+            alert(`You can only mark attendance on ${day}.`);
             return;
         }
 
@@ -263,31 +288,39 @@ export default function WeekdayAttendancePage() {
         }
     };
 
-    const completeWeekdayMakeup = async (selection: MakeupSelectionResult) => {
+    const completeWeekdayMakeup = async (
+        selection: MakeupSelectionResult
+    ) => {
         if (!makeupContext) return;
 
         try {
-            const { data, error } = await supabase
-                .from('weekday_attendance')
-                .insert({
-                    weekday_student_id: makeupContext.student.id,
-                    attendance_date: selection.targetDate,
-                    day_name: makeupContext.day,
-                    status: 'makeup',
-                    duration_hours: makeupContext.hours,
-                    makeup_target_type: selection.targetTrainingType,
-                    makeup_usage_id: selection.usageId,
-                    updated_at: new Date().toISOString(),
-                })
-                .select('*')
-                .single();
+            const { data, error } = await supabase.rpc(
+                'apply_weekday_makeup_usage',
+                {
+                    input_student_id: makeupContext.student.id,
+                    input_day_name: makeupContext.day,
+                    input_usage_id: selection.usageId,
+                }
+            );
 
             if (error) throw error;
 
-            setAttendance((prev) => [
-                { ...(data as WeekdayAttendance), attendance_date: (data as WeekdayAttendance).attendance_date.slice(0, 10) },
-                ...prev,
-            ]);
+            const updatedRow = Array.isArray(data) ? data[0] : data;
+
+            if (!updatedRow) {
+                throw new Error('The missed Weekday session could not be converted to makeup.');
+            }
+
+            const normalizedRow = {
+                ...(updatedRow as WeekdayAttendance),
+                attendance_date: (updatedRow as WeekdayAttendance).attendance_date.slice(0, 10),
+            };
+
+            setAttendance((previous) =>
+                previous.map((record) =>
+                    record.id === normalizedRow.id ? normalizedRow : record
+                )
+            );
         } catch (err) {
             await supabase.rpc('undo_cross_programme_makeup', {
                 input_usage_id: selection.usageId,
@@ -298,17 +331,62 @@ export default function WeekdayAttendancePage() {
 
     const undoLatest = async (studentId: string, day: WeekdayName) => {
         const latestRecord = attendance
-            .filter((record) => record.weekday_student_id === studentId && record.day_name === day)
-            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+            .filter(
+                (record) =>
+                    record.weekday_student_id === studentId &&
+                    record.day_name === day
+            )
+            .sort(
+                (a, b) =>
+                    new Date(b.updated_at || b.created_at).getTime() -
+                    new Date(a.updated_at || a.created_at).getTime()
+            )[0];
 
         if (!latestRecord) {
             alert('Nothing to undo for this student/session.');
             return;
         }
 
-        if (!confirm(`Undo latest ${statusLabel(latestRecord.status)} record for ${day}?`)) return;
+        const actionText =
+            latestRecord.status === 'makeup'
+                ? 'return this makeup session to Missed'
+                : 'remove this attendance action';
+
+        if (!confirm(`Are you sure you want to ${actionText} for ${day}?`)) {
+            return;
+        }
 
         try {
+            if (latestRecord.status === 'makeup') {
+                const { data, error } = await supabase.rpc(
+                    'undo_weekday_makeup_status',
+                    {
+                        input_attendance_id: latestRecord.id,
+                    }
+                );
+
+                if (error) throw error;
+
+                const restoredRow = Array.isArray(data) ? data[0] : data;
+
+                if (!restoredRow) {
+                    throw new Error('The Weekday makeup could not be restored to Missed.');
+                }
+
+                const normalizedRow = {
+                    ...(restoredRow as WeekdayAttendance),
+                    attendance_date: (restoredRow as WeekdayAttendance).attendance_date.slice(0, 10),
+                };
+
+                setAttendance((previous) =>
+                    previous.map((record) =>
+                        record.id === latestRecord.id ? normalizedRow : record
+                    )
+                );
+
+                return;
+            }
+
             const { error } = await supabase
                 .from('weekday_attendance')
                 .delete()
@@ -316,7 +394,9 @@ export default function WeekdayAttendancePage() {
 
             if (error) throw error;
 
-            setAttendance((prev) => prev.filter((record) => record.id !== latestRecord.id));
+            setAttendance((previous) =>
+                previous.filter((record) => record.id !== latestRecord.id)
+            );
         } catch (err: any) {
             alert(err?.message || 'Failed to undo latest weekday attendance action.');
             await loadData();
@@ -472,8 +552,7 @@ export default function WeekdayAttendancePage() {
                                                             <button
                                                                 type="button"
                                                                 className="missed-btn"
-                                                                disabled={!canMarkScheduled}
-                                                                title={canMarkScheduled ? 'Mark missed' : `Can only mark missed on ${schedule.day}`}
+                                                                title={`Mark ${schedule.day} session as missed`}
                                                                 onClick={() => insertAttendance(student.id, schedule.day, 'missed', hours)}
                                                             >
                                                                 Missed
@@ -505,7 +584,7 @@ export default function WeekdayAttendancePage() {
                                                                 {records.slice(0, 8).map((record) => (
                                                                     <li key={record.id}>
                                                                         {readableDate(record.attendance_date)}, {Number(record.duration_hours).toFixed(2).replace(/\.00$/, '')}h
-                                                                        {record.status !== 'attended' ? ` (${record.status})` : ''}
+                                                                        {formatAttendanceStatus(record)}
                                                                     </li>
                                                                 ))}
                                                             </ul>

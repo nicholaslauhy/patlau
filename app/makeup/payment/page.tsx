@@ -257,6 +257,20 @@ export default function MakeupPaymentPage() {
             const { data: { user } } = await supabase.auth.getUser();
             const resetAt = new Date().toISOString();
 
+            const resetSummary =
+                `🔄 Makeup Payment Counter Reset\n\n` +
+                `Month: ${getReadableMonth(selectedMonth)}\n` +
+                `Counter Before Reset: ${money(counterTotal)}\n` +
+                `Total Paid: ${money(totalPaid)}\n` +
+                `Outstanding: ${money(totalUnpaid)}\n` +
+                `Possible Total: ${money(possibleTotal)}\n` +
+                `Paid Transactions: ${paidRows.length}\n` +
+                `Unpaid Transactions: ${unpaidRows.length}\n\n` +
+                `Note: Paid/Unpaid records were not changed. Only the displayed counter was reset to S$0.00.`;
+
+            // Send first. If Telegram fails, do not silently reset the counter.
+            await sendTelegram(resetSummary);
+
             const { error } = await supabase
                 .from('makeup_payment_counter_state')
                 .upsert(
@@ -271,10 +285,19 @@ export default function MakeupPaymentPage() {
 
             if (error) throw error;
 
-            setCounterState({ payment_month: selectedMonth, reset_at: resetAt });
-            setLastUpdated('Counter reset to S$0.00. Payment statuses were preserved.');
+            setCounterState({
+                payment_month: selectedMonth,
+                reset_at: resetAt,
+            });
+
+            setLastUpdated(
+                'Counter reset to S$0.00 and Telegram summary sent. Payment statuses were preserved.'
+            );
         } catch (err: any) {
-            alert(err?.message || 'Failed to reset total.');
+            alert(
+                err?.message ||
+                'Failed to send the Telegram reset summary or reset the counter.'
+            );
         }
     };
 
