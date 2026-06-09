@@ -53,14 +53,17 @@ const oneToOneItems: NavItem[] = [
     { label: '1-1 Payment', href: '/trngpayment', allowedRoles: ['superuser'] },
 ];
 
+const makeupItems: NavItem[] = [
+    { label: 'Makeup Credits', href: '/makeup', allowedRoles: ['superuser'] },
+    { label: 'Makeup Payment', href: '/makeup/payment', allowedRoles: ['superuser'] },
+];
+
 const weekendItems: NavItem[] = [
     { label: 'Dashboard', href: '/dashboard', allowedRoles: ['superuser', 'admin', 'member'] },
     { label: 'Add Student', href: '/add', allowedRoles: ['superuser', 'admin'] },
     { label: 'Attendance', href: '/attendance', allowedRoles: ['superuser'] },
     { label: 'Payment', href: '/payment', allowedRoles: ['superuser'] },
     { label: 'Coach Attendance', href: '/coachattendance', allowedRoles: ['superuser', 'admin'] },
-    { label: 'Makeup Credits', href: '/makeup', allowedRoles: ['superuser', 'admin'] },
-    { label: 'Makeup Payment', href: '/makeup/payment', allowedRoles: ['superuser'] },
 ];
 
 const menuBoxStyle: React.CSSProperties = {
@@ -123,7 +126,7 @@ const navButtonStyle: React.CSSProperties = {
     justifyContent: 'center',
     flexShrink: 0,
     whiteSpace: 'nowrap',
-    padding: '8px 12px',
+    padding: '8px 10px',
     borderRadius: '10px',
     lineHeight: 1,
     minHeight: '36px',
@@ -310,9 +313,14 @@ export default function AppHeader({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                gap: '12px',
+                gap: '14px',
                 flexWrap: 'nowrap',
                 overflow: 'visible',
+                width: 'calc(100vw - 32px)',
+                maxWidth: '1180px',
+                marginLeft: '50%',
+                transform: 'translateX(-50%)',
+                boxSizing: 'border-box',
             }}
         >
             <div
@@ -321,8 +329,8 @@ export default function AppHeader({
                     display: 'flex',
                     alignItems: 'center',
                     gap: '12px',
-                    minWidth: 0,
-                    flex: '1 1 auto',
+                    minWidth: '170px',
+                    flex: '1 1 300px',
                 }}
             >
                 <div ref={accountRef} className="brand" style={{ position: 'relative', flexShrink: 0 }}>
@@ -382,7 +390,8 @@ export default function AppHeader({
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
-                        minWidth: 0,
+                        minWidth: '140px',
+                        maxWidth: '320px',
                     }}
                 >
                     {title}
@@ -405,10 +414,25 @@ export default function AppHeader({
             >
                 {mode === 'dashboard' ? (
                     <>
-                        <NavDropdown label="Weekday" items={weekdayItems} userRole={userRole} />
-                        <NavDropdown label="MatchPlay" items={matchPlayItems} userRole={userRole} />
-                        <NavDropdown label="1-1" items={oneToOneItems} userRole={userRole} />
-                        <NavDropdown label="Weekend" items={weekendItems} userRole={userRole} />
+                        {userRole === 'superuser' && (
+                            <>
+                                <NavDropdown label="Makeup" items={makeupItems} userRole={userRole} />
+                                <NavDropdown label="Weekday" items={weekdayItems} userRole={userRole} />
+                                <NavDropdown label="MatchPlay" items={matchPlayItems} userRole={userRole} />
+                            </>
+                        )}
+
+                        {(userRole === 'superuser' || userRole === 'admin') && (
+                            <NavDropdown label="1-1" items={oneToOneItems} userRole={userRole} />
+                        )}
+
+                        {userRole === 'member' ? (
+                            <Link href="/dashboard" className="btn share-btn" style={navButtonStyle}>
+                                Dashboard
+                            </Link>
+                        ) : (
+                            <NavDropdown label="Weekend" items={weekendItems} userRole={userRole} />
+                        )}
                     </>
                 ) : (
                     <Link href="/dashboard" className="btn share-btn" style={navButtonStyle}>
