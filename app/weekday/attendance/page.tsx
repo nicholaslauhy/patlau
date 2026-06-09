@@ -350,32 +350,36 @@ export default function WeekdayAttendancePage() {
         const actionText =
             latestRecord.status === 'makeup'
                 ? 'return this makeup session to Missed'
-                : 'remove this attendance action';
+                : latestRecord.status === 'missed'
+                    ? 'remove this missed record'
+                    : 'remove this attendance record';
 
         if (!confirm(`Are you sure you want to ${actionText} for ${day}?`)) {
             return;
         }
 
         try {
-            if (latestRecord.status === 'makeup') {
-                const { data, error } = await supabase.rpc(
-                    'undo_weekday_makeup_status',
-                    {
-                        input_attendance_id: latestRecord.id,
-                    }
-                );
-
-                if (error) throw error;
-
-                const restoredRow = Array.isArray(data) ? data[0] : data;
-
-                if (!restoredRow) {
-                    throw new Error('The Weekday makeup could not be restored to Missed.');
+            const { data, error } = await supabase.rpc(
+                'undo_weekday_attendance_action',
+                {
+                    input_attendance_id: latestRecord.id,
                 }
+            );
+
+            if (error) throw error;
+
+            const result = Array.isArray(data) ? data[0] : data;
+
+            if (!result?.action) {
+                throw new Error('The Weekday attendance action could not be undone.');
+            }
+
+            if (result.action === 'restored_to_missed') {
+                const restoredRow = result.attendance as WeekdayAttendance;
 
                 const normalizedRow = {
-                    ...(restoredRow as WeekdayAttendance),
-                    attendance_date: (restoredRow as WeekdayAttendance).attendance_date.slice(0, 10),
+                    ...restoredRow,
+                    attendance_date: restoredRow.attendance_date.slice(0, 10),
                 };
 
                 setAttendance((previous) =>
@@ -383,22 +387,16 @@ export default function WeekdayAttendancePage() {
                         record.id === latestRecord.id ? normalizedRow : record
                     )
                 );
-
-                return;
+            } else {
+                setAttendance((previous) =>
+                    previous.filter((record) => record.id !== latestRecord.id)
+                );
             }
 
-            const { error } = await supabase
-                .from('weekday_attendance')
-                .delete()
-                .eq('id', latestRecord.id);
-
-            if (error) throw error;
-
-            setAttendance((previous) =>
-                previous.filter((record) => record.id !== latestRecord.id)
-            );
+            // Reload from the database so the page cannot keep stale local state.
+            await loadData();
         } catch (err: any) {
-            alert(err?.message || 'Failed to undo latest weekday attendance action.');
+            alert(err?.message || 'Failed to undo latest Weekday attendance action.');
             await loadData();
         }
     };
