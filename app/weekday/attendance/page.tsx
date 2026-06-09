@@ -211,6 +211,20 @@ export default function WeekdayAttendancePage() {
         status: AttendanceStatus,
         hours: number
     ) => {
+        if (status === 'makeup') {
+            const student = students.find((item) => item.id === studentId);
+
+            if (!student) {
+                alert('Student not found.');
+                return;
+            }
+
+            router.push(
+                `/makeup?source=weekday&studentId=${encodeURIComponent(studentId)}&day=${encodeURIComponent(day)}`
+            );
+            return;
+        }
+
         if (hours <= 0) {
             alert('Number of hours must be more than 0.');
             return;

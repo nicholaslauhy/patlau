@@ -376,7 +376,7 @@ export default function MakeupCreditsPage() {
                         <div>
                             <h1 style={{ margin: 0 }}>Global Makeup Credits</h1>
                             <p className="muted" style={{ marginTop: 8, maxWidth: 820 }}>
-                                Flexible makeup across Weekend, 1-1, Weekday, and MatchPlay. Higher-value makeup needs top-up; lower-value makeup has no refund or discount.
+                                Flexible makeup across Weekend, 1-1, Weekday, and MatchPlay. Missed lessons from Weekend, Weekday, and MatchPlay now create credits automatically. Higher-value makeup needs top-up; lower-value makeup has no refund or discount.
                             </p>
                         </div>
                         <Link href="/makeup/payment" className="btn share-btn">Makeup Payment</Link>
@@ -391,7 +391,9 @@ export default function MakeupCreditsPage() {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 20, marginTop: 22 }}>
                         <section style={{ border: '1px solid #e5e7eb', borderRadius: 16, padding: 18, background: '#f8fafc' }}>
                             <h2 style={{ marginTop: 0 }}>1. Create makeup credit</h2>
-                            <p className="muted">Create this when a student misses a lesson.</p>
+                            <p className="muted">
+                                Weekend, Weekday, and MatchPlay missed actions create credits automatically. Use this form for 1-1 missed lessons or manual corrections.
+                            </p>
 
                             <div className="form-group">
                                 <label>Existing student</label>

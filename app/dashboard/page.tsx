@@ -500,79 +500,21 @@ export default function DashboardPage() {
   };
 
   const handleMakeupAttendance = async (studentId: string) => {
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    const student = searchResults.find((item) => item.student_id === studentId);
 
-      if (!user) throw new Error("Not authenticated");
-
-      const { data: studentData, error: fetchError } = await supabase
-          .from("students")
-          .select("*")
-          .eq("student_id", studentId)
-          .single();
-
-      if (fetchError || !studentData) {
-        throw fetchError || new Error("Student not found");
-      }
-
-      const attended = studentData.attended ?? 0;
-      const missed = studentData.missed ?? 0;
-      const totalWeeks = studentData.total_weeks ?? 0;
-
-      if (missed <= 0) {
-        alert("No missed lessons available to convert to makeup.");
-        return;
-      }
-
-      if (attended + missed > totalWeeks) {
-        alert("Cannot makeup because subscription total would be exceeded.");
-        return;
-      }
-
-      const nowIso = new Date().toISOString();
-      const newAttended = attended + 1;
-      const newMissed = Math.max(0, missed - 1);
-      const newRecords = Array.isArray(studentData.attendance_records)
-          ? [...studentData.attendance_records]
-          : [];
-
-      const missedRecordIndex = findLastRecordIndexByStatus(newRecords, ["missed"]);
-
-      if (missedRecordIndex !== -1) {
-        const missedRecord = parseAttendanceRecord(newRecords[missedRecordIndex]);
-        newRecords[missedRecordIndex] = makeAttendanceRecord(
-            nowIso,
-            "makeup",
-            missedRecord.dateIso,
-        );
-      } else {
-        newRecords.push(makeAttendanceRecord(nowIso, "makeup"));
-      }
-
-      const { data: updatedStudent, error } = await supabase
-          .from("students")
-          .update({
-            attended: newAttended,
-            missed: newMissed,
-            attendance_records: newRecords,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("student_id", studentId)
-          .select()
-          .single();
-
-      if (error || !updatedStudent) throw error || new Error("Update failed");
-
-      setSearchResults((prev) =>
-          prev.map((s) => (s.student_id === studentId ? updatedStudent : s)),
-      );
-
-      await logAuditAction(studentId, "makeup");
-    } catch (err: any) {
-      alert(`Failed to record makeup attendance: ${err?.message ?? "Unknown error"}`);
+    if (!student) {
+      alert("Student not found.");
+      return;
     }
+
+    if ((student.missed ?? 0) <= 0) {
+      alert("This student has no available missed lesson to use as makeup.");
+      return;
+    }
+
+    router.push(
+        `/makeup?source=weekend&studentId=${encodeURIComponent(studentId)}`,
+    );
   };
 
   const handleMissed = async (studentId: string) => {
@@ -837,7 +779,15 @@ export default function DashboardPage() {
                         <th>Level</th>
                         <th>Attended</th>
                         <th>Missed</th>
-                        <th className="actions-header">Actions</th>
+                        <th
+                            style={{
+                              width: "1%",
+                              minWidth: "max-content",
+                              whiteSpace: "nowrap",
+                            }}
+                        >
+                          Actions
+                        </th>
                         <th>Attendance History</th>
                       </tr>
                       </thead>
@@ -1008,63 +958,86 @@ export default function DashboardPage() {
                                 {missed}
                               </td>
 
-                              <td className="actions-cell">
-                                <div className={isSuperuser ? "actions-stack" : "actions-stack actions-stack-single"}>
-                                  <div className="actions-row actions-primary-row">
-                                    <button
-                                        type="button"
-                                        className="attendance-btn"
-                                        onClick={() => handleAttendanceClick(student.student_id)}
-                                        disabled={finished}
-                                        title={finished ? "Subscription lessons completed" : "Mark attended"}
-                                    >
-                                      Mark
-                                    </button>
+                              <td
+                                  className="actions-cell"
+                                  style={{
+                                    width: "1%",
+                                    minWidth: "max-content",
+                                    whiteSpace: "nowrap",
+                                    paddingLeft: 8,
+                                    paddingRight: 8,
+                                  }}
+                              >
+                                <div
+                                    className="actions-row"
+                                    style={{
+                                      display: "inline-flex",
+                                      flexDirection: "row",
+                                      flexWrap: "nowrap",
+                                      gap: 6,
+                                      alignItems: "center",
+                                      justifyContent: "flex-start",
+                                      width: "max-content",
+                                    }}
+                                >
+                                  <button
+                                      type="button"
+                                      className="attendance-btn"
+                                      style={{ flex: "0 0 auto", width: "fit-content", minWidth: "fit-content", padding: "6px 10px" }}
+                                      onClick={() => handleAttendanceClick(student.student_id)}
+                                      disabled={finished}
+                                      title={finished ? "Subscription lessons completed" : "Mark attended"}
+                                  >
+                                    Mark
+                                  </button>
 
-                                    <button
-                                        type="button"
-                                        className="missed-btn"
-                                        onClick={() => handleMissed(student.student_id)}
-                                        disabled={finished}
-                                        title={finished ? "Subscription lessons completed" : "Mark missed"}
-                                    >
-                                      Missed
-                                    </button>
+                                  <button
+                                      type="button"
+                                      className="missed-btn"
+                                      style={{ flex: "0 0 auto", width: "fit-content", minWidth: "fit-content", padding: "6px 10px" }}
+                                      onClick={() => handleMissed(student.student_id)}
+                                      disabled={finished}
+                                      title={finished ? "Subscription lessons completed" : "Mark missed"}
+                                  >
+                                    Missed
+                                  </button>
 
-                                    <button
-                                        type="button"
-                                        className="makeup-btn"
-                                        onClick={() => handleMakeupAttendance(student.student_id)}
-                                        disabled={finished || (student.missed ?? 0) <= 0}
-                                        title={
-                                          (student.missed ?? 0) <= 0
-                                              ? "No missed lessons to makeup"
-                                              : "Makeup (convert one missed to attended)"
-                                        }
-                                    >
-                                      Makeup
-                                    </button>
+                                  <button
+                                      type="button"
+                                      className="makeup-btn"
+                                      style={{ flex: "0 0 auto", width: "fit-content", minWidth: "fit-content", padding: "6px 10px" }}
+                                      onClick={() => handleMakeupAttendance(student.student_id)}
+                                      disabled={finished || (student.missed ?? 0) <= 0}
+                                      title={
+                                        (student.missed ?? 0) <= 0
+                                            ? "No missed lessons to makeup"
+                                            : "Makeup (convert one missed to attended)"
+                                      }
+                                  >
+                                    Makeup
+                                  </button>
 
-                                    <button
-                                        type="button"
-                                        className="undo-btn"
-                                        onClick={() => handleDeleteLastAttendance(student.student_id)}
-                                        disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
-                                        title={
-                                          (student.attended ?? 0) + (student.missed ?? 0) === 0
-                                              ? "No actions to undo"
-                                              : "Undo last action"
-                                        }
-                                    >
-                                      Undo
-                                    </button>
-                                  </div>
+                                  <button
+                                      type="button"
+                                      className="undo-btn"
+                                      style={{ flex: "0 0 auto", width: "fit-content", minWidth: "fit-content", padding: "6px 10px" }}
+                                      onClick={() => handleDeleteLastAttendance(student.student_id)}
+                                      disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
+                                      title={
+                                        (student.attended ?? 0) + (student.missed ?? 0) === 0
+                                            ? "No actions to undo"
+                                            : "Undo last action"
+                                      }
+                                  >
+                                    Undo
+                                  </button>
 
                                   {isSuperuser && (
-                                      <div className="actions-row actions-admin-row">
+                                      <>
                                         <button
                                             type="button"
                                             className="reset-btn"
+                                            style={{ flex: "0 0 auto", width: "fit-content", minWidth: "fit-content", padding: "6px 10px" }}
                                             onClick={() => handleResetCourse(student.student_id)}
                                         >
                                           Reset
@@ -1072,13 +1045,14 @@ export default function DashboardPage() {
                                         <button
                                             type="button"
                                             className="delete-btn"
+                                            style={{ flex: "0 0 auto", width: "fit-content", minWidth: "fit-content", padding: "6px 10px" }}
                                             onClick={() =>
                                                 deleteStudent(student.student_id, student.student_name)
                                             }
                                         >
                                           Delete
                                         </button>
-                                      </div>
+                                      </>
                                   )}
                                 </div>
                               </td>
