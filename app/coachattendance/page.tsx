@@ -11,7 +11,7 @@ import './../dashboard/dashboard.css';
 type UserRole = 'superuser' | 'admin' | 'member';
 
 type PollSlot = {
-    key: string;
+    id: string;
     label: string;
 };
 
@@ -19,51 +19,218 @@ type PollPreset = {
     id: 'saturday' | 'sunday';
     title: string;
     description: string;
+    date: string;
     introText: string;
     venueText: string;
     slots: PollSlot[];
 };
 
-const DEFAULT_PRESETS: PollPreset[] = [
-    {
-        id: 'saturday',
-        title: 'Saturday Coaching',
-        description: 'For Saturday weekend training coach attendance.',
-        introText: 'Hi coaches! Please let me know your available dates for 6th June:',
-        venueText:
-            'The venue will be at NYGH. Please come earlier, about 1.30 to set up the courts, prep the hall.\nStart warm up at 2pm. Thanks so much!',
-        slots: [
-            { key: '2026-06-06', label: '6/6/2026' },
-        ],
-    },
-    {
-        id: 'sunday',
-        title: 'Sunday Coaching',
-        description: 'For Sunday weekend training coach attendance.',
-        introText: 'Hi coaches! Please let me know your availability for 14th June:',
-        venueText:
-            'The venue will be at NYGH. Please come earlier to set up the courts and prep the hall.\nThanks so much!',
-        slots: [
-            { key: '2026-06-14-8-12', label: '8-12pm' },
-            { key: '2026-06-14-10-12', label: '10-12pm' },
-            { key: '2026-06-14-1-5', label: '1-5pm' },
-        ],
-    },
-];
+type SlotToSend = {
+    key: string;
+    label: string;
+};
 
 const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+const formatDateInputLocal = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const getNextSaturday = () => {
+    const date = new Date();
+    const diff = (6 - date.getDay() + 7) % 7 || 7;
+    date.setDate(date.getDate() + diff);
+    return formatDateInputLocal(date);
+};
+
+const getNextSunday = () => {
+    const date = new Date();
+    const diff = (0 - date.getDay() + 7) % 7 || 7;
+    date.setDate(date.getDate() + diff);
+    return formatDateInputLocal(date);
+};
+
+const parseISODateLocal = (dateKey: string) => {
+    const [year, month, day] = dateKey.split('-').map(Number);
+    return new Date(year, month - 1, day);
+};
+
+const formatShortDate = (dateKey: string) => {
+    if (!dateKey) return '';
+    const date = parseISODateLocal(dateKey);
+    return date.toLocaleDateString('en-SG', {
+        day: 'numeric',
+        month: 'numeric',
+        year: 'numeric',
+    });
+};
+
+const formatLongDate = (dateKey: string) => {
+    if (!dateKey) return '';
+    const date = parseISODateLocal(dateKey);
+    return date.toLocaleDateString('en-SG', {
+        day: 'numeric',
+        month: 'long',
+    });
+};
+
+const getOrdinal = (day: number) => {
+    if (day > 3 && day < 21) return `${day}th`;
+
+    switch (day % 10) {
+        case 1:
+            return `${day}st`;
+        case 2:
+            return `${day}nd`;
+        case 3:
+            return `${day}rd`;
+        default:
+            return `${day}th`;
+    }
+};
+
+const formatDateForMessage = (dateKey: string) => {
+    if (!dateKey) return '';
+    const date = parseISODateLocal(dateKey);
+    const month = date.toLocaleDateString('en-SG', { month: 'long' });
+    return `${getOrdinal(date.getDate())} ${month}`;
+};
+
+const getDefaultIntroText = (presetId: 'saturday' | 'sunday', dateKey: string) => {
+    const dateText = formatDateForMessage(dateKey);
+
+    if (presetId === 'saturday') {
+        return `Hi coaches! Please let me know your available dates for ${dateText}:`;
+    }
+
+    return `Hi coaches! Please let me know your availability for ${dateText}:`;
+};
+
+const replacePollDateInText = (
+    text: string,
+    oldDateKey: string,
+    newDateKey: string,
+    presetId: 'saturday' | 'sunday'
+) => {
+    const currentText = text || '';
+
+    if (!currentText.trim()) {
+        return getDefaultIntroText(presetId, newDateKey);
+    }
+
+    const oldDateOptions = [
+        formatDateForMessage(oldDateKey),
+        formatLongDate(oldDateKey),
+        formatShortDate(oldDateKey),
+    ].filter(Boolean);
+
+    const newDateOptions = [
+        formatDateForMessage(newDateKey),
+        formatLongDate(newDateKey),
+        formatShortDate(newDateKey),
+    ];
+
+    for (let i = 0; i < oldDateOptions.length; i += 1) {
+        const oldDateText = oldDateOptions[i];
+        const newDateText = newDateOptions[i] || formatDateForMessage(newDateKey);
+
+        if (oldDateText && currentText.includes(oldDateText)) {
+            return currentText.replaceAll(oldDateText, newDateText);
+        }
+    }
+
+    // If the user edited the intro and removed the old date completely,
+    // keep their custom text instead of overwriting it.
+    return currentText;
+};
+
 const getUserRole = (user: any): UserRole => {
     return (user?.app_metadata?.role || user?.user_metadata?.role || 'member') as UserRole;
 };
 
-const emptyListPreview = (slots: PollSlot[]) => {
+const defaultSaturdayDate = getNextSaturday();
+const defaultSundayDate = getNextSunday();
+
+const DEFAULT_PRESETS: PollPreset[] = [
+    {
+        id: 'saturday',
+        title: 'Saturday Coaching',
+        description: 'For Saturday weekend training coach attendance.',
+        date: defaultSaturdayDate,
+        introText: getDefaultIntroText('saturday', defaultSaturdayDate),
+        venueText:
+            'The venue will be at NYGH. Please come earlier, about 1.30 to set up the courts, prep the hall.\nStart warm up at 2pm. Thanks so much!',
+        slots: [
+            { id: 'saturday-date', label: 'Date option' },
+        ],
+    },
+    {
+        id: 'sunday',
+        title: 'Sunday Coaching',
+        description: 'For Sunday weekend training coach attendance.',
+        date: defaultSundayDate,
+        introText: getDefaultIntroText('sunday', defaultSundayDate),
+        venueText:
+            'The venue will be at NYGH. Please come earlier to set up the courts and prep the hall.\nThanks so much!',
+        slots: [
+            { id: '8-12', label: '8-12pm' },
+            { id: '10-12', label: '10-12pm' },
+            { id: '1-5', label: '1-5pm' },
+        ],
+    },
+];
+
+const emptyListPreview = (slots: SlotToSend[]) => {
     return slots
         .map((slot) => `${slot.label}:\nNo one yet`)
         .join('\n\n');
+};
+
+const getSlotKey = (preset: PollPreset, slot: PollSlot) => {
+    if (!preset.date) {
+        throw new Error('Please choose an actual poll date.');
+    }
+
+    if (preset.id === 'saturday') {
+        return preset.date;
+    }
+
+    const match = slot.label.trim().match(/^(\d{1,2})\s*-\s*(\d{1,2})/);
+
+    if (!match) {
+        throw new Error(`Invalid timing label "${slot.label}". Use format like 8-12pm.`);
+    }
+
+    const startHour = Number(match[1]);
+    const endHour = Number(match[2]);
+
+    if (!Number.isFinite(startHour) || !Number.isFinite(endHour)) {
+        throw new Error(`Invalid timing label "${slot.label}". Use format like 8-12pm.`);
+    }
+
+    return `${preset.date}-${startHour}-${endHour}`;
+};
+
+const buildSlotsToSend = (preset: PollPreset): SlotToSend[] => {
+    if (preset.id === 'saturday') {
+        return [
+            {
+                key: preset.date,
+                label: formatShortDate(preset.date),
+            },
+        ];
+    }
+
+    return preset.slots.map((slot) => ({
+        key: getSlotKey(preset, slot),
+        label: slot.label.trim(),
+    }));
 };
 
 export default function CoachAttendancePage() {
@@ -93,16 +260,37 @@ export default function CoachAttendancePage() {
     }, [router]);
 
     const activePreset = presets.find((preset) => preset.id === activePresetId) || presets[0];
+    const slotsToSend = useMemo(() => buildSlotsToSend(activePreset), [activePreset]);
+    const introText = activePreset.introText;
 
     const previewText = useMemo(() => {
-        return `${activePreset.introText.trim()}\n\n${emptyListPreview(activePreset.slots)}\n\n${activePreset.venueText.trim()}`;
-    }, [activePreset]);
+        return `${introText.trim()}\n\n${emptyListPreview(slotsToSend)}\n\n${activePreset.venueText.trim()}`;
+    }, [activePreset.venueText, introText, slotsToSend]);
 
     const updatePreset = (patch: Partial<PollPreset>) => {
         setPresets((prev) =>
             prev.map((preset) =>
                 preset.id === activePresetId
                     ? { ...preset, ...patch }
+                    : preset
+            )
+        );
+    };
+
+    const updatePresetDate = (nextDate: string) => {
+        setPresets((prev) =>
+            prev.map((preset) =>
+                preset.id === activePresetId
+                    ? {
+                        ...preset,
+                        date: nextDate,
+                        introText: replacePollDateInText(
+                            preset.introText,
+                            preset.date,
+                            nextDate,
+                            preset.id
+                        ),
+                    }
                     : preset
             )
         );
@@ -129,13 +317,14 @@ export default function CoachAttendancePage() {
                 if (preset.id !== activePresetId) return preset;
 
                 const nextIndex = preset.slots.length + 1;
+
                 return {
                     ...preset,
                     slots: [
                         ...preset.slots,
                         {
-                            key: `${preset.id}-slot-${Date.now()}`,
-                            label: preset.id === 'saturday' ? `Date ${nextIndex}` : `Timing ${nextIndex}`,
+                            id: `slot-${Date.now()}`,
+                            label: preset.id === 'saturday' ? `Date option ${nextIndex}` : `Timing ${nextIndex}`,
                         },
                     ],
                 };
@@ -147,7 +336,6 @@ export default function CoachAttendancePage() {
         setPresets((prev) =>
             prev.map((preset) => {
                 if (preset.id !== activePresetId) return preset;
-
                 if (preset.slots.length === 1) return preset;
 
                 return {
@@ -161,8 +349,8 @@ export default function CoachAttendancePage() {
     const sendPoll = async () => {
         setMessage('');
 
-        if (!activePreset.introText.trim()) {
-            setMessage('Intro message is required.');
+        if (!activePreset.date) {
+            setMessage('Actual poll date is required.');
             return;
         }
 
@@ -171,8 +359,17 @@ export default function CoachAttendancePage() {
             return;
         }
 
-        if (activePreset.slots.length === 0) {
+        if (activePreset.id === 'sunday' && activePreset.slots.length === 0) {
             setMessage('Please add at least one voting option.');
+            return;
+        }
+
+        let cleanSlots: SlotToSend[] = [];
+
+        try {
+            cleanSlots = buildSlotsToSend(activePreset);
+        } catch (err: any) {
+            setMessage(err?.message || 'Invalid poll option.');
             return;
         }
 
@@ -184,9 +381,10 @@ export default function CoachAttendancePage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     topic: activePreset.id,
-                    introText: activePreset.introText,
+                    pollDate: activePreset.date,
+                    introText: introText.trim(),
                     venueText: activePreset.venueText,
-                    slots: activePreset.slots,
+                    slots: cleanSlots,
                 }),
             });
 
@@ -322,7 +520,7 @@ export default function CoachAttendancePage() {
                                         lineHeight: 1.6,
                                     }}
                                 >
-                                    Choose Saturday or Sunday, customise the message, then send it to the correct Telegram topic.
+                                    Pick the actual date once. The Telegram message and database key will both use that same date.
                                 </p>
                             </div>
 
@@ -425,11 +623,41 @@ export default function CoachAttendancePage() {
                                         fontWeight: 700,
                                     }}
                                 >
-                                    {activePreset.slots.length} voting option{activePreset.slots.length === 1 ? '' : 's'}
+                                    {slotsToSend.length} voting option{slotsToSend.length === 1 ? '' : 's'}
                                 </div>
                             </div>
 
                             <div style={{ display: 'grid', gap: 22 }}>
+                                <div>
+                                    <label
+                                        style={{
+                                            display: 'block',
+                                            marginBottom: 8,
+                                            fontWeight: 800,
+                                            color: '#1e293b',
+                                        }}
+                                    >
+                                        Actual poll date
+                                    </label>
+
+                                    <input
+                                        type="date"
+                                        className="filter-input"
+                                        value={activePreset.date}
+                                        onChange={(event) => updatePresetDate(event.target.value)}
+                                        style={{
+                                            width: '100%',
+                                            boxSizing: 'border-box',
+                                            borderRadius: 10,
+                                            background: '#ffffff',
+                                        }}
+                                    />
+
+                                    <p className="timestamp" style={{ margin: '8px 0 0', textAlign: 'left' }}>
+                                        Message date: {formatDateForMessage(activePreset.date)} · Database key date: {activePreset.date}
+                                    </p>
+                                </div>
+
                                 <div>
                                     <label
                                         style={{
@@ -451,113 +679,129 @@ export default function CoachAttendancePage() {
                                             width: '100%',
                                             boxSizing: 'border-box',
                                             resize: 'vertical',
-                                            minHeight: 118,
+                                            minHeight: 104,
                                             borderRadius: 12,
                                             padding: 14,
                                             lineHeight: 1.55,
                                             background: '#fbfdff',
                                         }}
                                     />
+
+                                    <p className="timestamp" style={{ margin: '8px 0 0', textAlign: 'left' }}>
+                                        You can edit this freely. When you change the actual poll date above, the old date inside this box will be replaced automatically if it is still present.
+                                    </p>
                                 </div>
 
-                                <div>
-                                    <div
-                                        style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            gap: 12,
-                                            alignItems: 'center',
-                                            flexWrap: 'wrap',
-                                            marginBottom: 12,
-                                        }}
-                                    >
-                                        <div>
-                                            <h3 style={{ margin: 0, fontSize: '1rem', color: '#1e293b' }}>
-                                                {activePreset.id === 'saturday' ? 'Date option' : 'Timing options'}
-                                            </h3>
-                                            <p style={{ margin: '5px 0 0', color: '#64748b', fontSize: '0.84rem' }}>
-                                                These labels appear in the Telegram poll.
-                                            </p>
-                                        </div>
-
-                                        <button
-                                            type="button"
-                                            onClick={addSlot}
+                                {activePreset.id === 'sunday' && (
+                                    <div>
+                                        <div
                                             style={{
-                                                border: '1px solid #bfdbfe',
-                                                borderRadius: 10,
-                                                padding: '9px 13px',
-                                                background: '#eff6ff',
-                                                color: '#1d4ed8',
-                                                fontWeight: 800,
-                                                cursor: 'pointer',
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                gap: 12,
+                                                alignItems: 'center',
+                                                flexWrap: 'wrap',
+                                                marginBottom: 12,
                                             }}
                                         >
-                                            + Add option
-                                        </button>
-                                    </div>
+                                            <div>
+                                                <h3 style={{ margin: 0, fontSize: '1rem', color: '#1e293b' }}>
+                                                    Timing options
+                                                </h3>
+                                                <p style={{ margin: '5px 0 0', color: '#64748b', fontSize: '0.84rem' }}>
+                                                    These timings appear in Telegram. The actual poll date above is automatically added into the hidden database key.
+                                                </p>
+                                            </div>
 
-                                    <div style={{ display: 'grid', gap: 10 }}>
-                                        {activePreset.slots.map((slot, index) => (
-                                            <div
-                                                key={`${slot.key}-${index}`}
+                                            <button
+                                                type="button"
+                                                onClick={addSlot}
                                                 style={{
-                                                    display: 'grid',
-                                                    gridTemplateColumns: 'minmax(0, 1fr) auto',
-                                                    gap: 12,
-                                                    alignItems: 'center',
-                                                    padding: 14,
-                                                    borderRadius: 14,
-                                                    border: '1px solid #e2e8f0',
-                                                    background: '#f8fafc',
+                                                    border: '1px solid #bfdbfe',
+                                                    borderRadius: 10,
+                                                    padding: '9px 13px',
+                                                    background: '#eff6ff',
+                                                    color: '#1d4ed8',
+                                                    fontWeight: 800,
+                                                    cursor: 'pointer',
                                                 }}
                                             >
-                                                <div style={{ minWidth: 0 }}>
-                                                    <label
-                                                        style={{
-                                                            display: 'block',
-                                                            fontSize: '0.8rem',
-                                                            fontWeight: 800,
-                                                            color: '#475569',
-                                                            marginBottom: 7,
-                                                        }}
-                                                    >
-                                                        {activePreset.id === 'saturday' ? 'Date label' : 'Timing label'}
-                                                    </label>
+                                                + Add option
+                                            </button>
+                                        </div>
 
-                                                    <input
-                                                        className="filter-input"
-                                                        value={slot.label}
-                                                        onChange={(event) => updateSlot(index, { label: event.target.value })}
-                                                        style={{
-                                                            width: '100%',
-                                                            boxSizing: 'border-box',
-                                                            borderRadius: 10,
-                                                            background: '#ffffff',
-                                                        }}
-                                                    />
-                                                </div>
-
-                                                <button
-                                                    type="button"
-                                                    onClick={() => removeSlot(index)}
-                                                    disabled={activePreset.slots.length === 1}
+                                        <div style={{ display: 'grid', gap: 10 }}>
+                                            {activePreset.slots.map((slot, index) => (
+                                                <div
+                                                    key={`${slot.id}-${index}`}
                                                     style={{
-                                                        border: '1px solid #fecaca',
-                                                        borderRadius: 10,
-                                                        padding: '9px 12px',
-                                                        background: activePreset.slots.length === 1 ? '#f8fafc' : '#fff1f2',
-                                                        color: activePreset.slots.length === 1 ? '#94a3b8' : '#dc2626',
-                                                        fontWeight: 800,
-                                                        cursor: activePreset.slots.length === 1 ? 'not-allowed' : 'pointer',
+                                                        display: 'grid',
+                                                        gridTemplateColumns: 'minmax(0, 1fr) auto',
+                                                        gap: 12,
+                                                        alignItems: 'center',
+                                                        padding: 14,
+                                                        borderRadius: 14,
+                                                        border: '1px solid #e2e8f0',
+                                                        background: '#f8fafc',
                                                     }}
                                                 >
-                                                    Remove
-                                                </button>
-                                            </div>
-                                        ))}
+                                                    <div style={{ minWidth: 0 }}>
+                                                        <label
+                                                            style={{
+                                                                display: 'block',
+                                                                fontSize: '0.8rem',
+                                                                fontWeight: 800,
+                                                                color: '#475569',
+                                                                marginBottom: 7,
+                                                            }}
+                                                        >
+                                                            Timing label
+                                                        </label>
+
+                                                        <input
+                                                            className="filter-input"
+                                                            value={slot.label}
+                                                            onChange={(event) => updateSlot(index, { label: event.target.value })}
+                                                            style={{
+                                                                width: '100%',
+                                                                boxSizing: 'border-box',
+                                                                borderRadius: 10,
+                                                                background: '#ffffff',
+                                                            }}
+                                                        />
+
+                                                        <p className="timestamp" style={{ margin: '7px 0 0', textAlign: 'left' }}>
+                                                            Database key: {(() => {
+                                                            try {
+                                                                return getSlotKey(activePreset, slot);
+                                                            } catch {
+                                                                return 'Invalid timing label';
+                                                            }
+                                                        })()}
+                                                        </p>
+                                                    </div>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeSlot(index)}
+                                                        disabled={activePreset.slots.length === 1}
+                                                        style={{
+                                                            border: '1px solid #fecaca',
+                                                            borderRadius: 10,
+                                                            padding: '9px 12px',
+                                                            background: activePreset.slots.length === 1 ? '#f8fafc' : '#fff1f2',
+                                                            color: activePreset.slots.length === 1 ? '#94a3b8' : '#dc2626',
+                                                            fontWeight: 800,
+                                                            cursor: activePreset.slots.length === 1 ? 'not-allowed' : 'pointer',
+                                                        }}
+                                                    >
+                                                        Remove
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
-                                </div>
+                                )}
 
                                 <div>
                                     <label
@@ -644,7 +888,7 @@ export default function CoachAttendancePage() {
                                         Telegram preview
                                     </h2>
                                     <p style={{ margin: '5px 0 0', color: '#64748b', fontSize: '0.86rem' }}>
-                                        This is how the message will appear before coaches respond.
+                                        This is exactly what will appear before coaches respond.
                                     </p>
                                 </div>
 
@@ -677,22 +921,22 @@ export default function CoachAttendancePage() {
                                     overflowX: 'hidden',
                                 }}
                             >
-                <pre
-                    style={{
-                        margin: 0,
-                        width: '100%',
-                        whiteSpace: 'pre-wrap',
-                        overflowWrap: 'break-word',
-                        wordBreak: 'normal',
-                        lineHeight: 1.65,
-                        fontFamily: 'inherit',
-                        fontSize: '0.96rem',
-                        color: '#0f172a',
-                        textAlign: 'left',
-                    }}
-                >
-                  {previewText}
-                </pre>
+                                <pre
+                                    style={{
+                                        margin: 0,
+                                        width: '100%',
+                                        whiteSpace: 'pre-wrap',
+                                        overflowWrap: 'break-word',
+                                        wordBreak: 'normal',
+                                        lineHeight: 1.65,
+                                        fontFamily: 'inherit',
+                                        fontSize: '0.96rem',
+                                        color: '#0f172a',
+                                        textAlign: 'left',
+                                    }}
+                                >
+                                    {previewText}
+                                </pre>
                             </div>
                         </section>
                     </div>

@@ -11,6 +11,8 @@ type CoachSlotInput = {
     label: string;
 };
 
+const ISO_DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}(?:-\d{1,2}-\d{1,2})?$/;
+
 const makeCallbackData = (pollId: string, slotKey: string, response: 'yes' | 'remove') => {
     return `ca|${pollId}|${slotKey}|${response}`;
 };
@@ -58,6 +60,7 @@ export async function POST(request: Request) {
 
         const introText = String(bodyJson.introText || '').trim();
         const venueText = String(bodyJson.venueText || '').trim();
+        const pollDate = String(bodyJson.pollDate || '').trim();
         const slots = bodyJson.slots as CoachSlotInput[] | undefined;
         const topic = String(bodyJson.topic || '').trim().toLowerCase();
 
@@ -69,17 +72,33 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'venueText is required.' }, { status: 400 });
         }
 
+        if (!pollDate || !/^\d{4}-\d{2}-\d{2}$/.test(pollDate)) {
+            return NextResponse.json({ error: 'pollDate must be YYYY-MM-DD.' }, { status: 400 });
+        }
+
         if (!Array.isArray(slots) || slots.length === 0) {
             return NextResponse.json({ error: 'At least one slot is required.' }, { status: 400 });
         }
 
-        const cleanSlots = slots.map((slot) => ({
-            key: String(slot.key).trim(),
-            label: String(slot.label).trim(),
-        })).filter((slot) => slot.key && slot.label);
+        const cleanSlots = slots
+            .map((slot) => ({
+                key: String(slot.key || '').trim(),
+                label: String(slot.label || '').trim(),
+            }))
+            .filter((slot) => slot.key && slot.label);
 
         if (cleanSlots.length === 0) {
             return NextResponse.json({ error: 'At least one valid slot is required.' }, { status: 400 });
+        }
+
+        const invalidSlot = cleanSlots.find((slot) => !ISO_DATE_KEY_PATTERN.test(slot.key));
+        if (invalidSlot) {
+            return NextResponse.json(
+                {
+                    error: `Invalid database date key: ${invalidSlot.key}. Expected YYYY-MM-DD or YYYY-MM-DD-start-end.`,
+                },
+                { status: 400 }
+            );
         }
 
         const botToken = process.env.TELEGRAM_COACH_ATTENDANCE_BOT_TOKEN;
@@ -120,6 +139,8 @@ export async function POST(request: Request) {
                 intro_text: introText,
                 venue_text: venueText,
                 dates: cleanSlots,
+                poll_date: pollDate,
+                topic,
                 chat_id: String(chatId),
                 thread_id: threadId ? Number(threadId) : null,
                 active: true,

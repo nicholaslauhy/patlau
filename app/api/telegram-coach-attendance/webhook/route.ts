@@ -136,7 +136,6 @@ const editPollMessage = async (poll: any) => {
 export async function POST(request: Request) {
     try {
         const update = await request.json();
-
         const callbackQuery = update.callback_query;
 
         if (!callbackQuery) {
@@ -166,6 +165,14 @@ export async function POST(request: Request) {
 
         if (pollError || !poll) {
             await answerCallbackQuery(callbackQuery.id, 'This poll is no longer active.');
+            return NextResponse.json({ ok: true, ignored: true });
+        }
+
+        const slots = Array.isArray(poll.dates) ? poll.dates as CoachSlot[] : [];
+        const slotExists = slots.some((slot) => slot.key === slotKey);
+
+        if (!slotExists) {
+            await answerCallbackQuery(callbackQuery.id, 'This option no longer exists. Please use the latest poll.');
             return NextResponse.json({ ok: true, ignored: true });
         }
 

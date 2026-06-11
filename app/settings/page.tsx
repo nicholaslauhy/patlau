@@ -1,19 +1,19 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { createBrowserClient } from '@supabase/ssr';
-import './../styles.css';
-import './../dashboard/dashboard.css';
-import './settings.css';
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { createBrowserClient } from "@supabase/ssr";
+import "./../styles.css";
+import "./../dashboard/dashboard.css";
+import "./settings.css";
 
 const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
 
-type UserRole = 'superuser' | 'admin' | 'member';
+type UserRole = "superuser" | "admin" | "member";
 
 interface User {
     id: string;
@@ -22,51 +22,72 @@ interface User {
         name?: string;
         role?: UserRole;
     };
+    app_metadata?: {
+        role?: UserRole;
+    };
 }
+
+interface CoachProfile {
+    auth_user_id: string;
+    telegram_handle: string | null;
+}
+
+const normalizeHandle = (value: string) => {
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed) return "";
+    return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+};
 
 export default function SettingsPage() {
     const router = useRouter();
-    const [userName, setUserName] = useState('');
-    const [userRole, setUserRole] = useState<UserRole>('member');
+    const [userName, setUserName] = useState("");
+    const [userRole, setUserRole] = useState<UserRole>("member");
     const [users, setUsers] = useState<User[]>([]);
     const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [success, setSuccess] = useState('');
-    const [currentUserId, setCurrentUserId] = useState('');
+    const [error, setError] = useState("");
+    const [success, setSuccess] = useState("");
+    const [currentUserId, setCurrentUserId] = useState("");
+    const [profileHandles, setProfileHandles] = useState<Record<string, string>>(
+        {},
+    );
 
     // Form state
-    const [newUserEmail, setNewUserEmail] = useState('');
-    const [newUserName, setNewUserName] = useState('');
-    const [newUserPassword, setNewUserPassword] = useState('');
-    const [newUserRole, setNewUserRole] = useState<UserRole>('member');
+    const [newUserEmail, setNewUserEmail] = useState("");
+    const [newUserName, setNewUserName] = useState("");
+    const [newUserPassword, setNewUserPassword] = useState("");
+    const [newUserRole, setNewUserRole] = useState<UserRole>("member");
+    const [newUserTelegramHandle, setNewUserTelegramHandle] = useState("");
 
     useEffect(() => {
         loadUserInfo();
         loadUsers();
+        loadCoachProfiles();
     }, []);
 
     const loadUserInfo = async () => {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
+            const {
+                data: { user },
+            } = await supabase.auth.getUser();
             if (user) {
                 setCurrentUserId(user.id);
-                setUserName(user.user_metadata?.name || user.email || 'User');
-                setUserRole((user.user_metadata?.role as UserRole) || 'member');
+                setUserName(user.user_metadata?.name || user.email || "User");
+                setUserRole((user.user_metadata?.role as UserRole) || "member");
             } else {
-                router.push('/');
+                router.push("/");
             }
         } catch (err) {
-            console.error('Failed to load user info:', err);
-            router.push('/');
+            console.error("Failed to load user info:", err);
+            router.push("/");
         }
     };
 
     const loadUsers = async () => {
         try {
             setIsLoading(true);
-            const response = await fetch('/api/users/list', {
-                method: 'GET',
-                headers: { 'Content-Type': 'application/json' }
+            const response = await fetch("/api/users/list", {
+                method: "GET",
+                headers: { "Content-Type": "application/json" },
             });
 
             if (response.ok) {
@@ -74,7 +95,67 @@ export default function SettingsPage() {
                 setUsers(data.users || []);
             }
         } catch (err) {
-            console.error('Failed to load users:', err);
+            console.error("Failed to load users:", err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const loadCoachProfiles = async () => {
+        try {
+            const { data, error } = await supabase
+                .from("coach_profiles")
+                .select("auth_user_id, telegram_handle");
+
+            if (error) throw error;
+
+            const nextHandles: Record<string, string> = {};
+            ((data || []) as CoachProfile[]).forEach((profile) => {
+                nextHandles[profile.auth_user_id] = normalizeHandle(
+                    profile.telegram_handle || "",
+                );
+            });
+
+            setProfileHandles(nextHandles);
+        } catch (err) {
+            console.error("Failed to load Telegram handles:", err);
+        }
+    };
+
+    const saveTelegramHandle = async (
+        targetUserId: string,
+        targetName: string,
+    ) => {
+        setError("");
+        setSuccess("");
+
+        const normalized = normalizeHandle(profileHandles[targetUserId] || "");
+
+        if (!normalized) {
+            setError("Telegram handle cannot be empty. Use @username format.");
+            return;
+        }
+
+        try {
+            setIsLoading(true);
+
+            const { error } = await supabase.from("coach_profiles").upsert(
+                {
+                    auth_user_id: targetUserId,
+                    telegram_handle: normalized,
+                    updated_at: new Date().toISOString(),
+                },
+                { onConflict: "auth_user_id" },
+            );
+
+            if (error) throw error;
+
+            setProfileHandles((prev) => ({ ...prev, [targetUserId]: normalized }));
+            setSuccess(`Telegram handle linked for ${targetName}.`);
+        } catch (err) {
+            setError(
+                err instanceof Error ? err.message : "Failed to save Telegram handle",
+            );
         } finally {
             setIsLoading(false);
         }
@@ -82,30 +163,36 @@ export default function SettingsPage() {
 
     const handleAddUser = async (e: React.FormEvent) => {
         e.preventDefault();
-        setError('');
-        setSuccess('');
+        setError("");
+        setSuccess("");
 
         if (!newUserEmail || !newUserName) {
-            setError('Email and name are required');
+            setError("Email and name are required");
             return;
         }
 
         // Client-side validation
         const normalizedEmail = newUserEmail.toLowerCase().trim();
         const normalizedName = newUserName.trim();
+        const normalizedTelegramHandle = normalizeHandle(newUserTelegramHandle);
 
         // Check if email or username already exists in the current user list
-        const emailExists = users.some(u => u.email?.toLowerCase() === normalizedEmail);
+        const emailExists = users.some(
+            (u) => u.email?.toLowerCase() === normalizedEmail,
+        );
         if (emailExists) {
             setError(`Email "${normalizedEmail}" is already in use`);
             return;
         }
 
         const usernameExists = users.some(
-            u => u.user_metadata?.name?.toLowerCase() === normalizedName.toLowerCase()
+            (u) =>
+                u.user_metadata?.name?.toLowerCase() === normalizedName.toLowerCase(),
         );
         if (usernameExists) {
-            setError(`Username "${normalizedName}" is already taken. Please try another username!`);
+            setError(
+                `Username "${normalizedName}" is already taken. Please try another username!`,
+            );
             return;
         }
 
@@ -113,108 +200,153 @@ export default function SettingsPage() {
             setIsLoading(true);
 
             // If current user is admin, force role to 'member' to prevent creating privileged accounts
-            const roleToSend = userRole === 'admin' ? 'member' : newUserRole;
+            const roleToSend = userRole === "admin" ? "member" : newUserRole;
 
-            const response = await fetch('/api/users/create', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+            const response = await fetch("/api/users/create", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     email: normalizedEmail,
                     name: normalizedName,
                     role: roleToSend,
-                    password: newUserPassword || undefined
-                })
+                    password: newUserPassword || undefined,
+                    telegramHandle: normalizedTelegramHandle || undefined,
+                    telegram_handle: normalizedTelegramHandle || undefined,
+                }),
             });
 
-            const errorData = await response.json();
+            const responseData = await response.json();
 
             if (!response.ok) {
                 // Check for conflict errors (409 = duplicate email/username)
                 if (response.status === 409) {
-                    setError(errorData.error || 'User already exists');
+                    setError(responseData.error || "User already exists");
                 } else {
-                    setError(errorData.error || 'Failed to create user');
+                    setError(responseData.error || "Failed to create user");
                 }
                 return;
             }
 
-            setSuccess(`User ${normalizedName} created successfully`);
-            setNewUserEmail('');
-            setNewUserName('');
-            setNewUserPassword('');
-            setNewUserRole('member');
+            const createdUserId =
+                responseData?.user?.id || responseData?.id || responseData?.userId;
+
+            if (createdUserId && normalizedTelegramHandle) {
+                const { error: profileError } = await supabase
+                    .from("coach_profiles")
+                    .upsert(
+                        {
+                            auth_user_id: createdUserId,
+                            telegram_handle: normalizedTelegramHandle,
+                            updated_at: new Date().toISOString(),
+                        },
+                        { onConflict: "auth_user_id" },
+                    );
+
+                if (profileError) {
+                    throw new Error(
+                        `User created, but Telegram handle was not linked: ${profileError.message}`,
+                    );
+                }
+            }
+
+            setSuccess(
+                `User ${normalizedName} created successfully${normalizedTelegramHandle ? ` and linked to ${normalizedTelegramHandle}` : ""}`,
+            );
+            setNewUserEmail("");
+            setNewUserName("");
+            setNewUserPassword("");
+            setNewUserRole("member");
+            setNewUserTelegramHandle("");
 
             // Reload users list
             await loadUsers();
+            await loadCoachProfiles();
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to create user');
+            setError(err instanceof Error ? err.message : "Failed to create user");
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleDeleteUser = async (userId: string, email: string, targetRole?: UserRole) => {
+    const handleDeleteUser = async (
+        userId: string,
+        email: string,
+        targetRole?: UserRole,
+    ) => {
         if (!confirm(`Delete user ${email}? This cannot be undone.`)) return;
 
         // Frontend protection: admins are allowed to delete only 'member' accounts.
-        if (userRole === 'admin' && targetRole && targetRole !== 'member') {
-            setError('Admins can only delete member accounts.');
+        if (userRole === "admin" && targetRole && targetRole !== "member") {
+            setError("Admins can only delete member accounts.");
             return;
         }
 
         try {
             const response = await fetch(`/api/users/delete`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId })
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId }),
             });
 
             if (!response.ok) {
-                throw new Error('Failed to delete user');
+                throw new Error("Failed to delete user");
             }
 
-            setSuccess('User deleted successfully');
+            setSuccess("User deleted successfully");
             await loadUsers();
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to delete user');
+            setError(err instanceof Error ? err.message : "Failed to delete user");
         }
     };
 
     // call server to update a user's role (superuser only)
     const updateUserRole = async (userId: string, newRole: UserRole) => {
-        setError('');
-        setSuccess('');
+        setError("");
+        setSuccess("");
         setIsLoading(true);
         try {
-            const { data: { session } } = await supabase.auth.getSession();
+            const {
+                data: { session },
+            } = await supabase.auth.getSession();
             const token = session?.access_token;
 
             if (!token) {
-                setError('No session found. Please log in again.');
+                setError("No session found. Please log in again.");
                 setIsLoading(false);
                 return;
             }
 
-            const response = await fetch('/api/users/update', {
-                method: 'POST',
+            const response = await fetch("/api/users/update", {
+                method: "POST",
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ userId, role: newRole })
+                body: JSON.stringify({ userId, role: newRole }),
             });
 
             if (!response.ok) {
                 const err = await response.json().catch(() => null);
-                throw new Error(err?.error || 'Failed to update user role');
+                throw new Error(err?.error || "Failed to update user role");
             }
 
-            setSuccess('User role updated');
-            setError(''); // explicitly clear error on success
-            setUsers(prev => prev.map(u => u.id === userId ? { ...u, user_metadata: { ...(u.user_metadata || {}), role: newRole } } : u));
+            setSuccess("User role updated");
+            setError(""); // explicitly clear error on success
+            setUsers((prev) =>
+                prev.map((u) =>
+                    u.id === userId
+                        ? {
+                            ...u,
+                            user_metadata: { ...(u.user_metadata || {}), role: newRole },
+                        }
+                        : u,
+                ),
+            );
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to update user role');
-            setSuccess('');
+            setError(
+                err instanceof Error ? err.message : "Failed to update user role",
+            );
+            setSuccess("");
         } finally {
             setIsLoading(false);
         }
@@ -222,37 +354,39 @@ export default function SettingsPage() {
 
     const handleResendResetCode = async (
         targetEmail: string,
-        targetRole?: UserRole
+        targetRole?: UserRole,
     ) => {
-        setError('');
-        setSuccess('');
+        setError("");
+        setSuccess("");
 
         // Admins can only send reset codes to members
-        if (userRole === 'admin' && targetRole !== 'member') {
-            setError('Admins can only resend reset codes to member accounts.');
+        if (userRole === "admin" && targetRole !== "member") {
+            setError("Admins can only resend reset codes to member accounts.");
             return;
         }
 
         try {
             setIsLoading(true);
 
-            const { data: { session } } = await supabase.auth.getSession();
+            const {
+                data: { session },
+            } = await supabase.auth.getSession();
             const token = session?.access_token;
 
             if (!token) {
-                setError('No session found. Please log in again.');
+                setError("No session found. Please log in again.");
                 return;
             }
 
-            const response = await fetch('/api/users/resend-reset-code', {
-                method: 'POST',
+            const response = await fetch("/api/users/resend-reset-code", {
+                method: "POST",
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({
-                    email: targetEmail
-                })
+                    email: targetEmail,
+                }),
             });
 
             const text = await response.text();
@@ -261,17 +395,21 @@ export default function SettingsPage() {
             try {
                 data = text ? JSON.parse(text) : {};
             } catch {
-                console.error('Non-JSON response from resend-reset-code:', text);
-                throw new Error('Server returned HTML instead of JSON. Check that /api/users/resend-reset-code/route.ts exists.');
+                console.error("Non-JSON response from resend-reset-code:", text);
+                throw new Error(
+                    "Server returned HTML instead of JSON. Check that /api/users/resend-reset-code/route.ts exists.",
+                );
             }
 
             if (!response.ok) {
-                throw new Error(data.error || 'Failed to resend reset code');
+                throw new Error(data.error || "Failed to resend reset code");
             }
 
             setSuccess(`Reset code sent to ${targetEmail}`);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to resend reset code');
+            setError(
+                err instanceof Error ? err.message : "Failed to resend reset code",
+            );
         } finally {
             setIsLoading(false);
         }
@@ -281,11 +419,12 @@ export default function SettingsPage() {
     // - superusers see everyone
     // - admins see only members
     // - members see only themselves
-    const visibleUsers = userRole === 'superuser'
-        ? users
-        : userRole === 'admin'
-            ? users.filter(u => (u.user_metadata?.role || 'member') === 'member')
-            : users.filter(u => u.id === currentUserId);
+    const visibleUsers =
+        userRole === "superuser"
+            ? users
+            : userRole === "admin"
+                ? users.filter((u) => (u.user_metadata?.role || "member") === "member")
+                : users.filter((u) => u.id === currentUserId);
 
     return (
         <div className="container">
@@ -307,14 +446,21 @@ export default function SettingsPage() {
                     <section className="settings-card">
                         <h2>Your Account</h2>
                         <div className="user-info">
-                            <p><strong>Name:</strong> {userName}</p>
-                            <p><strong>Role:</strong> <span className={`role-badge ${userRole}`}>{userRole.toUpperCase()}</span></p>
+                            <p>
+                                <strong>Name:</strong> {userName}
+                            </p>
+                            <p>
+                                <strong>Role:</strong>{" "}
+                                <span className={`role-badge ${userRole}`}>
+                  {userRole.toUpperCase()}
+                </span>
+                            </p>
                         </div>
                     </section>
 
                     {/* Add New User */}
                     {/* Admins and superusers can add new users. Admins can only create 'member' accounts. */}
-                    {(userRole === 'superuser' || userRole === 'admin') && (
+                    {(userRole === "superuser" || userRole === "admin") && (
                         <section className="settings-card">
                             <h2>Add New User</h2>
 
@@ -359,18 +505,32 @@ export default function SettingsPage() {
                                 </div>
 
                                 <div className="form-group">
+                                    <label htmlFor="telegramHandle">Telegram handle</label>
+                                    <input
+                                        type="text"
+                                        id="telegramHandle"
+                                        value={newUserTelegramHandle}
+                                        onChange={(e) => setNewUserTelegramHandle(e.target.value)}
+                                        placeholder="@telegramusername"
+                                        disabled={isLoading}
+                                    />
+                                </div>
+
+                                <div className="form-group">
                                     <label htmlFor="role">Role *</label>
 
                                     {/* If current user is admin, only show member and disable changing */}
-                                    {userRole === 'admin' ? (
-                                        <select id="role" value={'member'} disabled>
+                                    {userRole === "admin" ? (
+                                        <select id="role" value={"member"} disabled>
                                             <option value="member">Member</option>
                                         </select>
                                     ) : (
                                         <select
                                             id="role"
                                             value={newUserRole}
-                                            onChange={(e) => setNewUserRole(e.target.value as UserRole)}
+                                            onChange={(e) =>
+                                                setNewUserRole(e.target.value as UserRole)
+                                            }
                                             disabled={isLoading}
                                         >
                                             <option value="member">Member</option>
@@ -380,15 +540,19 @@ export default function SettingsPage() {
                                     )}
                                 </div>
 
-                                <button type="submit" className="submit-btn" disabled={isLoading}>
-                                    {isLoading ? 'Creating User...' : 'Add User'}
+                                <button
+                                    type="submit"
+                                    className="submit-btn"
+                                    disabled={isLoading}
+                                >
+                                    {isLoading ? "Creating User..." : "Add User"}
                                 </button>
                             </form>
                         </section>
                     )}
 
                     {/* Users List (manage) */}
-                    {(userRole === 'superuser' || userRole === 'admin') && (
+                    {(userRole === "superuser" || userRole === "admin") && (
                         <section className="settings-card">
                             <h2>Manage Users</h2>
 
@@ -403,6 +567,7 @@ export default function SettingsPage() {
                                         <tr>
                                             <th>Name</th>
                                             <th>Email</th>
+                                            <th>Telegram</th>
                                             <th>Role</th>
                                             <th>Actions</th>
                                         </tr>
@@ -413,56 +578,118 @@ export default function SettingsPage() {
 
                                             return (
                                                 <tr key={managedUser.id}>
-                                                    <td>{managedUser.user_metadata?.name || 'N/A'}</td>
+                                                    <td>{managedUser.user_metadata?.name || "N/A"}</td>
                                                     <td>{managedUser.email}</td>
                                                     <td>
-                                                        {userRole === 'superuser' ? (
+                                                        <div
+                                                            style={{
+                                                                display: "flex",
+                                                                gap: "8px",
+                                                                alignItems: "center",
+                                                            }}
+                                                        >
+                                                            <input
+                                                                className="role-select"
+                                                                value={profileHandles[managedUser.id] || ""}
+                                                                onChange={(e) => {
+                                                                    const normalizedValue = e.target.value;
+                                                                    setProfileHandles((prev) => ({
+                                                                        ...prev,
+                                                                        [managedUser.id]: normalizedValue,
+                                                                    }));
+                                                                }}
+                                                                placeholder="@username"
+                                                                disabled={isLoading}
+                                                                style={{ minWidth: 150 }}
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                className="resend-btn-small"
+                                                                onClick={() =>
+                                                                    saveTelegramHandle(
+                                                                        managedUser.id,
+                                                                        managedUser.user_metadata?.name ||
+                                                                        managedUser.email,
+                                                                    )
+                                                                }
+                                                                disabled={
+                                                                    isLoading || !profileHandles[managedUser.id]
+                                                                }
+                                                            >
+                                                                Save
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        {userRole === "superuser" ? (
                                                             <select
                                                                 className="role-select"
-                                                                value={(managedUser.user_metadata?.role as UserRole) || 'member'}
+                                                                value={
+                                                                    (managedUser.user_metadata
+                                                                        ?.role as UserRole) || "member"
+                                                                }
                                                                 onChange={async (e) => {
                                                                     const selected = e.target.value as UserRole;
-                                                                    setError('');
-                                                                    setSuccess('');
+                                                                    setError("");
+                                                                    setSuccess("");
 
                                                                     if (isSelf) {
-                                                                        setError('You cannot change your own role.');
-                                                                        setUsers(prev => [...prev]);
+                                                                        setError(
+                                                                            "You cannot change your own role.",
+                                                                        );
+                                                                        setUsers((prev) => [...prev]);
                                                                         return;
                                                                     }
 
                                                                     if (
-                                                                        managedUser.user_metadata?.role !== selected &&
-                                                                        !confirm(`Change role from ${(managedUser.user_metadata?.role || 'member').toUpperCase()} to ${selected.toUpperCase()}?`)
+                                                                        managedUser.user_metadata?.role !==
+                                                                        selected &&
+                                                                        !confirm(
+                                                                            `Change role from ${(managedUser.user_metadata?.role || "member").toUpperCase()} to ${selected.toUpperCase()}?`,
+                                                                        )
                                                                     ) {
-                                                                        setUsers(prev => [...prev]);
+                                                                        setUsers((prev) => [...prev]);
                                                                         return;
                                                                     }
 
-                                                                    await updateUserRole(managedUser.id, selected);
+                                                                    await updateUserRole(
+                                                                        managedUser.id,
+                                                                        selected,
+                                                                    );
                                                                 }}
                                                                 disabled={isLoading || isSelf}
-                                                                title={isSelf ? 'You cannot change your own role' : undefined}
+                                                                title={
+                                                                    isSelf
+                                                                        ? "You cannot change your own role"
+                                                                        : undefined
+                                                                }
                                                             >
                                                                 <option value="member">Member</option>
                                                                 <option value="admin">Admin</option>
                                                                 <option value="superuser">Superuser</option>
                                                             </select>
                                                         ) : (
-                                                            <span className={`role-badge ${managedUser.user_metadata?.role || 'member'}`}>
-                        {(managedUser.user_metadata?.role || 'member').toUpperCase()}
-                    </span>
+                                                            <span
+                                                                className={`role-badge ${managedUser.user_metadata?.role || "member"}`}
+                                                            >
+                                  {(
+                                      managedUser.user_metadata?.role || "member"
+                                  ).toUpperCase()}
+                                </span>
                                                         )}
                                                     </td>
 
                                                     <td>
-                                                        {userRole === 'superuser' ? (
-                                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                        {userRole === "superuser" ? (
+                                                            <div style={{ display: "flex", gap: "8px" }}>
                                                                 <button
-                                                                    onClick={() => handleResendResetCode(
-                                                                        managedUser.email,
-                                                                        managedUser.user_metadata?.role as UserRole
-                                                                    )}
+                                                                    onClick={() =>
+                                                                        handleResendResetCode(
+                                                                            managedUser.email,
+                                                                            managedUser.user_metadata
+                                                                                ?.role as UserRole,
+                                                                        )
+                                                                    }
                                                                     className="resend-btn-small"
                                                                     disabled={isLoading}
                                                                 >
@@ -470,37 +697,49 @@ export default function SettingsPage() {
                                                                 </button>
 
                                                                 <button
-                                                                    onClick={() => handleDeleteUser(
-                                                                        managedUser.id,
-                                                                        managedUser.email,
-                                                                        managedUser.user_metadata?.role as UserRole
-                                                                    )}
+                                                                    onClick={() =>
+                                                                        handleDeleteUser(
+                                                                            managedUser.id,
+                                                                            managedUser.email,
+                                                                            managedUser.user_metadata
+                                                                                ?.role as UserRole,
+                                                                        )
+                                                                    }
                                                                     className="delete-btn-small"
                                                                     disabled={isLoading || isSelf}
-                                                                    title={isSelf ? 'You cannot delete your own account' : undefined}
+                                                                    title={
+                                                                        isSelf
+                                                                            ? "You cannot delete your own account"
+                                                                            : undefined
+                                                                    }
                                                                 >
                                                                     Delete
                                                                 </button>
                                                             </div>
                                                         ) : (
-                                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                            <div style={{ display: "flex", gap: "8px" }}>
                                                                 <button
-                                                                    onClick={() => handleResendResetCode(
-                                                                        managedUser.email,
-                                                                        managedUser.user_metadata?.role as UserRole
-                                                                    )}
+                                                                    onClick={() =>
+                                                                        handleResendResetCode(
+                                                                            managedUser.email,
+                                                                            managedUser.user_metadata
+                                                                                ?.role as UserRole,
+                                                                        )
+                                                                    }
                                                                     className="resend-btn-small"
                                                                     disabled={
                                                                         isLoading ||
-                                                                        managedUser.user_metadata?.role !== 'member' ||
+                                                                        managedUser.user_metadata?.role !==
+                                                                        "member" ||
                                                                         isSelf
                                                                     }
-                                                                    style={{ background: '#2563eb' }}
+                                                                    style={{ background: "#2563eb" }}
                                                                     title={
                                                                         isSelf
-                                                                            ? 'You cannot resend reset code to yourself'
-                                                                            : managedUser.user_metadata?.role !== 'member'
-                                                                                ? 'Admins can only resend reset codes to member accounts'
+                                                                            ? "You cannot resend reset code to yourself"
+                                                                            : managedUser.user_metadata?.role !==
+                                                                            "member"
+                                                                                ? "Admins can only resend reset codes to member accounts"
                                                                                 : undefined
                                                                     }
                                                                 >
@@ -508,22 +747,27 @@ export default function SettingsPage() {
                                                                 </button>
 
                                                                 <button
-                                                                    onClick={() => handleDeleteUser(
-                                                                        managedUser.id,
-                                                                        managedUser.email,
-                                                                        managedUser.user_metadata?.role as UserRole
-                                                                    )}
+                                                                    onClick={() =>
+                                                                        handleDeleteUser(
+                                                                            managedUser.id,
+                                                                            managedUser.email,
+                                                                            managedUser.user_metadata
+                                                                                ?.role as UserRole,
+                                                                        )
+                                                                    }
                                                                     className="delete-btn-small"
                                                                     disabled={
                                                                         isLoading ||
-                                                                        managedUser.user_metadata?.role !== 'member' ||
+                                                                        managedUser.user_metadata?.role !==
+                                                                        "member" ||
                                                                         isSelf
                                                                     }
                                                                     title={
                                                                         isSelf
-                                                                            ? 'You cannot delete your own account'
-                                                                            : managedUser.user_metadata?.role !== 'member'
-                                                                                ? 'Admins can only delete member accounts'
+                                                                            ? "You cannot delete your own account"
+                                                                            : managedUser.user_metadata?.role !==
+                                                                            "member"
+                                                                                ? "Admins can only delete member accounts"
                                                                                 : undefined
                                                                     }
                                                                 >
