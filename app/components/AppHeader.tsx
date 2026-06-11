@@ -389,6 +389,17 @@ export default function AppHeader({
                                 <span>Attendance</span>
                             </MenuLink>
 
+                            {userRole === 'superuser' && (
+                                <MenuLink
+                                    href="/allattendance"
+                                    active={pathname === '/allattendance'}
+                                    onClick={() => setShowAccountMenu(false)}
+                                >
+                                    <span>🗂️</span>
+                                    <span>All Attendance</span>
+                                </MenuLink>
+                            )}
+
                             <MenuButton onClick={signOut}>
                                 <span>🚪</span>
                                 <span>Logout</span>
