@@ -10,6 +10,7 @@ import "./../dashboard/dashboard.css";
 
 type UserRole = "superuser" | "admin" | "member";
 type AttendanceSource = "telegram" | "one_to_one";
+type AttendanceViewMode = "day" | "all";
 
 interface AppUser {
     id: string;
@@ -83,23 +84,26 @@ const normalizeHandle = (value: string | null | undefined) => {
 
 const normalizeDateKey = (dateValue: string) => dateValue.slice(0, 10);
 
+const formatDateLocal = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+};
+
+const getNextDateKey = (dateKey: string) => {
+    const [year, month, day] = dateKey.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    date.setDate(date.getDate() + 1);
+    return formatDateLocal(date);
+};
+
 const getDisplayName = (user: AppUser) => {
     return user.user_metadata?.name || user.email || "User";
 };
 
 const getUserRole = (user: any): UserRole => {
     return (user?.app_metadata?.role || user?.user_metadata?.role || "member") as UserRole;
-};
-
-const getNextMonthDateKey = (monthValue: string) => {
-    const [yearStr, monthStr] = monthValue.split("-");
-    const year = Number(yearStr);
-    const month = Number(monthStr);
-
-    const nextMonth = month === 12 ? 1 : month + 1;
-    const nextYear = month === 12 ? year + 1 : year;
-
-    return `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
 };
 
 const parseDateKey = (dateKey: string) => {
@@ -132,6 +136,22 @@ const parseDateKey = (dateKey: string) => {
     return null;
 };
 
+const getDateOnlyKey = (dateKey: string) => {
+    const parsed = parseDateKey(dateKey);
+    if (!parsed) return dateKey;
+    return `${parsed.year}-${parsed.month}-${parsed.day}`;
+};
+
+const getDateSortValue = (dateKey: string) => {
+    const parsed = parseDateKey(dateKey);
+    if (!parsed) return Number.MAX_SAFE_INTEGER;
+    return new Date(
+        Number(parsed.year),
+        Number(parsed.month) - 1,
+        Number(parsed.day),
+    ).getTime();
+};
+
 const getShiftDetails = (
     dateKey: string,
     source: AttendanceSource = "telegram",
@@ -143,16 +163,17 @@ const getShiftDetails = (
             dateLabel: dateKey,
             timeLabel: "Timing unavailable",
             payment: 0,
-            monthKey: "",
+            dateOnlyKey: dateKey,
         };
     }
 
     const { year, month, day, startHourRaw, endHourRaw } = parsed;
     const date = new Date(Number(year), Number(month) - 1, Number(day));
     const dayOfWeek = date.getDay();
-    const monthKey = `${year}-${month}`;
+    const dateOnlyKey = `${year}-${month}-${day}`;
 
     const dateLabel = date.toLocaleDateString("en-SG", {
+        weekday: "long",
         day: "numeric",
         month: "long",
         year: "numeric",
@@ -163,7 +184,7 @@ const getShiftDetails = (
             dateLabel,
             timeLabel: "1-1 session",
             payment: 40,
-            monthKey,
+            dateOnlyKey,
         };
     }
 
@@ -173,7 +194,7 @@ const getShiftDetails = (
                 dateLabel,
                 timeLabel: "2-6pm",
                 payment: 70,
-                monthKey,
+                dateOnlyKey,
             };
         }
 
@@ -181,7 +202,7 @@ const getShiftDetails = (
             dateLabel,
             timeLabel: "Timing unavailable",
             payment: 0,
-            monthKey,
+            dateOnlyKey,
         };
     }
 
@@ -203,29 +224,14 @@ const getShiftDetails = (
         dateLabel,
         timeLabel: rule?.label || `${startHour}-${endHour}`,
         payment: rule?.payment || 0,
-        monthKey,
+        dateOnlyKey,
     };
-};
-
-const getDateOnlyKey = (dateKey: string) => {
-    const parsed = parseDateKey(dateKey);
-    if (!parsed) return dateKey;
-    return `${parsed.year}-${parsed.month}-${parsed.day}`;
-};
-
-const getDateSortValue = (dateKey: string) => {
-    const parsed = parseDateKey(dateKey);
-    if (!parsed) return Number.MAX_SAFE_INTEGER;
-    return new Date(
-        Number(parsed.year),
-        Number(parsed.month) - 1,
-        Number(parsed.day),
-    ).getTime();
 };
 
 const getTimeSortValue = (item: Pick<AttendanceItem, "dateKey" | "source">) => {
     const parsed = parseDateKey(item.dateKey);
 
+    // 1-1 coaching should appear between morning and afternoon shifts.
     if (item.source === "one_to_one") return 200;
 
     if (!parsed?.startHourRaw || !parsed?.endHourRaw) {
@@ -238,6 +244,7 @@ const getTimeSortValue = (item: Pick<AttendanceItem, "dateKey" | "source">) => {
     const endHour = Number(parsed.endHourRaw);
     const shiftKey = `${startHour}-${endHour}`;
 
+    // Fixed weekend display order, regardless of poll order.
     const fixedWeekendOrder: Record<string, number> = {
         "8-12": 100,
         "10-12": 150,
@@ -257,10 +264,8 @@ export default function AllAttendancePage() {
     const [userName, setUserName] = useState("");
     const [peopleById, setPeopleById] = useState<Record<string, AttendancePerson>>({});
     const [attendanceItems, setAttendanceItems] = useState<AttendanceItem[]>([]);
-    const [selectedMonth, setSelectedMonth] = useState(() => {
-        const date = new Date();
-        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-    });
+    const [selectedDate, setSelectedDate] = useState(() => formatDateLocal(new Date()));
+    const [viewMode, setViewMode] = useState<AttendanceViewMode>("day");
     const [searchTerm, setSearchTerm] = useState("");
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState("");
@@ -270,8 +275,8 @@ export default function AllAttendancePage() {
             setLoading(true);
             setMessage("");
 
-            const startDateKey = `${selectedMonth}-01`;
-            const endDateKey = getNextMonthDateKey(selectedMonth);
+            const nextDateKey = getNextDateKey(selectedDate);
+            const isAllRecordsView = viewMode === "all";
 
             const usersPromise = fetch("/api/users/list", {
                 method: "GET",
@@ -292,16 +297,22 @@ export default function AllAttendancePage() {
                 .eq("response", "yes")
                 .order("updated_at", { ascending: true });
 
-            const oneToOnePromise = supabase
+            let oneToOneQuery = supabase
                 .from("one_to_one_sessions")
                 .select(
                     "id, session_date, student_id, coach_id, removed_from_training, removed_at, payment_exempt, payment_exempt_at, attendance_status, updated_at",
                 )
                 .or("removed_from_training.is.null,removed_from_training.eq.false")
-                .gte("session_date", startDateKey)
-                .lt("session_date", endDateKey)
                 .order("session_date", { ascending: true })
                 .order("id", { ascending: true });
+
+            if (!isAllRecordsView) {
+                oneToOneQuery = oneToOneQuery
+                    .gte("session_date", selectedDate)
+                    .lt("session_date", nextDateKey);
+            }
+
+            const oneToOnePromise = oneToOneQuery;
 
             const [users, profilesResult, votesResult, oneToOneResult] = await Promise.all([
                 usersPromise,
@@ -355,7 +366,7 @@ export default function AllAttendancePage() {
             });
 
             const telegramItems = ((votesResult.data || []) as AttendanceVote[])
-                .filter((vote) => getShiftDetails(vote.date_key, "telegram").monthKey === selectedMonth)
+                .filter((vote) => isAllRecordsView || getDateOnlyKey(vote.date_key) === selectedDate)
                 .map((vote) => {
                     const normalizedHandle = normalizeHandle(vote.telegram_handle || vote.display_name || "");
                     const matchedUserId = normalizedHandle ? handleToUserId.get(normalizedHandle) : undefined;
@@ -408,7 +419,7 @@ export default function AllAttendancePage() {
         } finally {
             setLoading(false);
         }
-    }, [selectedMonth]);
+    }, [selectedDate, viewMode]);
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -444,56 +455,68 @@ export default function AllAttendancePage() {
 
     const sortedItems = useMemo(() => {
         return [...attendanceItems].sort((a, b) => {
-            const personCompare = (peopleById[a.personId]?.name || "").localeCompare(
-                peopleById[b.personId]?.name || "",
-            );
-            if (personCompare !== 0) return personCompare;
-
             const dateCompare = getDateSortValue(a.dateKey) - getDateSortValue(b.dateKey);
             if (dateCompare !== 0) return dateCompare;
 
-            return getTimeSortValue(a) - getTimeSortValue(b);
+            const timeCompare = getTimeSortValue(a) - getTimeSortValue(b);
+            if (timeCompare !== 0) return timeCompare;
+
+            return (peopleById[a.personId]?.name || "").localeCompare(
+                peopleById[b.personId]?.name || "",
+            );
         });
     }, [attendanceItems, peopleById]);
 
-    const filteredPersonGroups = useMemo(() => {
+    const filteredItems = useMemo(() => {
         const search = searchTerm.trim().toLowerCase();
-        const groups = sortedItems.reduce<
-            Record<string, { person: AttendancePerson; items: AttendanceItem[] }>
+
+        if (!search) return sortedItems;
+
+        return sortedItems.filter((item) => {
+            const person = peopleById[item.personId];
+
+            return (
+                String(person?.name || "").toLowerCase().includes(search) ||
+                String(person?.email || "").toLowerCase().includes(search) ||
+                String(person?.telegramHandle || "").toLowerCase().includes(search)
+            );
+        });
+    }, [sortedItems, peopleById, searchTerm]);
+
+    const dayGroups = useMemo(() => {
+        const groups = filteredItems.reduce<
+            Record<string, { dateKey: string; items: AttendanceItem[] }>
         >((acc, item) => {
-            const person = peopleById[item.personId] || {
-                id: item.personId,
-                name: "Unknown coach",
-                linked: false,
-            };
-
-            if (!acc[item.personId]) {
-                acc[item.personId] = { person, items: [] };
+            const dateOnlyKey = getDateOnlyKey(item.dateKey);
+            if (!acc[dateOnlyKey]) {
+                acc[dateOnlyKey] = { dateKey: dateOnlyKey, items: [] };
             }
-
-            acc[item.personId].items.push(item);
+            acc[dateOnlyKey].items.push(item);
             return acc;
         }, {});
 
-        return Object.values(groups)
-            .filter((group) => {
-                if (!search) return true;
-                return (
-                    group.person.name.toLowerCase().includes(search) ||
-                    String(group.person.email || "").toLowerCase().includes(search) ||
-                    String(group.person.telegramHandle || "").toLowerCase().includes(search)
-                );
-            })
-            .sort((a, b) => a.person.name.localeCompare(b.person.name));
-    }, [sortedItems, peopleById, searchTerm]);
+        return Object.values(groups).sort(
+            (a, b) => getDateSortValue(a.dateKey) - getDateSortValue(b.dateKey),
+        );
+    }, [filteredItems]);
 
     const overallTotal = useMemo(() => {
-        return sortedItems.reduce((sum, item) => {
+        return filteredItems.reduce((sum, item) => {
             return sum + getShiftDetails(item.dateKey, item.source).payment;
         }, 0);
-    }, [sortedItems]);
+    }, [filteredItems]);
 
-    const totalCoachesWithAttendance = filteredPersonGroups.length;
+    const selectedDateLabel = useMemo(() => {
+        const [year, month, day] = selectedDate.split("-").map(Number);
+        return new Date(year, month - 1, day).toLocaleDateString("en-SG", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+        });
+    }, [selectedDate]);
+
+    const viewLabel = viewMode === "all" ? "All records" : selectedDateLabel;
 
     if (userRole === null) {
         return <div className="container" style={{ padding: 40 }}>Loading...</div>;
@@ -533,8 +556,8 @@ export default function AllAttendancePage() {
                     <div style={{ textAlign: "center" }}>
                         <h1 style={{ margin: 0 }}>All Coaching Attendance</h1>
                         <p className="muted" style={{ margin: "8px auto 0", maxWidth: 760 }}>
-                            Superuser view of all linked Telegram attendance and 1-1 coaching sessions.
-                            Same-day sessions are grouped together and sorted as 8-12, 1-1 / 12-1, then 1-5.
+                            Superuser view of all coaching attendance and 1-1 coaching sessions.
+                            View one calendar day or all records. Search still works by name, email, or Telegram handle, but only coach names are shown.
                         </p>
                     </div>
 
@@ -555,27 +578,62 @@ export default function AllAttendancePage() {
                             }}
                         >
                             <label style={{ display: "grid", gap: 8, fontWeight: 800, color: "#0f172a" }}>
-                                Month
-                                <input
-                                    type="month"
+                                View
+                                <select
                                     className="form-input"
-                                    value={selectedMonth}
-                                    onChange={(event) => setSelectedMonth(event.target.value)}
+                                    value={viewMode}
+                                    onChange={(event) => setViewMode(event.target.value as AttendanceViewMode)}
                                     style={{ minHeight: 48, boxSizing: "border-box", background: "#ffffff" }}
-                                />
+                                >
+                                    <option value="day">One calendar day</option>
+                                    <option value="all">All records</option>
+                                </select>
                             </label>
 
                             <label style={{ display: "grid", gap: 8, fontWeight: 800, color: "#0f172a" }}>
-                                Search coach
+                                Calendar Day
                                 <input
+                                    type="date"
                                     className="form-input"
-                                    value={searchTerm}
-                                    onChange={(event) => setSearchTerm(event.target.value)}
-                                    placeholder="Name, email, or Telegram"
-                                    style={{ minHeight: 48, boxSizing: "border-box", background: "#ffffff" }}
+                                    value={selectedDate}
+                                    onChange={(event) => setSelectedDate(event.target.value)}
+                                    disabled={viewMode === "all"}
+                                    style={{
+                                        minHeight: 48,
+                                        boxSizing: "border-box",
+                                        background: viewMode === "all" ? "#f8fafc" : "#ffffff",
+                                        color: viewMode === "all" ? "#94a3b8" : "#0f172a",
+                                    }}
                                 />
                             </label>
                         </div>
+
+                        <label
+                            style={{
+                                display: "grid",
+                                gap: 8,
+                                fontWeight: 800,
+                                color: "#0f172a",
+                                width: "100%",
+                                maxWidth: 460,
+                                margin: "0 auto",
+                                textAlign: "center",
+                            }}
+                        >
+                            Search
+                            <input
+                                className="form-input"
+                                value={searchTerm}
+                                onChange={(event) => setSearchTerm(event.target.value)}
+                                placeholder="Search by name"
+                                style={{
+                                    minHeight: 48,
+                                    boxSizing: "border-box",
+                                    background: "#ffffff",
+                                    textAlign: "center",
+                                }}
+                            />
+                        </label>
 
                         <button
                             type="button"
@@ -611,6 +669,9 @@ export default function AllAttendancePage() {
                                 <div style={{ marginTop: 8, fontSize: "2rem", lineHeight: 1.1, fontWeight: 900, color: "#1d4ed8" }}>
                                     {money(overallTotal)}
                                 </div>
+                                <div style={{ marginTop: 7, color: "#64748b", fontSize: "0.9rem", fontWeight: 700 }}>
+                                    {viewLabel}
+                                </div>
                             </div>
 
                             <div
@@ -623,47 +684,57 @@ export default function AllAttendancePage() {
                                 }}
                             >
                                 <div style={{ color: "#475569", fontWeight: 800, fontSize: "0.95rem" }}>
-                                    Coaches With Attendance
+                                    Total Shifts
                                 </div>
                                 <div style={{ marginTop: 8, fontSize: "2rem", lineHeight: 1.1, fontWeight: 900, color: "#047857" }}>
-                                    {totalCoachesWithAttendance}
+                                    {filteredItems.length}
                                 </div>
                                 <div style={{ marginTop: 7, color: "#64748b", fontSize: "0.9rem", fontWeight: 700 }}>
-                                    {sortedItems.length} shift{sortedItems.length === 1 ? "" : "s"}
+                                    After search filter
                                 </div>
                             </div>
                         </div>
                     </section>
 
                     <div style={{ display: "grid", gap: 18 }}>
-                        {filteredPersonGroups.length === 0 ? (
+                        {dayGroups.length === 0 ? (
                             <div style={{ textAlign: "center", padding: 36, color: "#64748b" }}>
-                                No coaching attendance found for this month.
+                                No coaching attendance found for {viewLabel}.
                             </div>
                         ) : (
-                            filteredPersonGroups.map((group) => {
-                                const personTotal = group.items.reduce((sum, item) => {
+                            dayGroups.map((dayGroup) => {
+                                const dateDetails = getShiftDetails(dayGroup.dateKey, "telegram");
+                                const sortedDayItems = [...dayGroup.items].sort((a, b) => {
+                                    const timeCompare = getTimeSortValue(a) - getTimeSortValue(b);
+                                    if (timeCompare !== 0) return timeCompare;
+                                    return (peopleById[a.personId]?.name || "").localeCompare(
+                                        peopleById[b.personId]?.name || "",
+                                    );
+                                });
+                                const dayTotal = sortedDayItems.reduce((sum, item) => {
                                     return sum + getShiftDetails(item.dateKey, item.source).payment;
                                 }, 0);
 
-                                const dayGroups = group.items.reduce<
-                                    Record<string, { dateKey: string; items: AttendanceItem[] }>
+                                const timeGroups = sortedDayItems.reduce<
+                                    Record<string, { order: number; label: string; items: AttendanceItem[] }>
                                 >((acc, item) => {
-                                    const dateOnlyKey = getDateOnlyKey(item.dateKey);
-                                    if (!acc[dateOnlyKey]) {
-                                        acc[dateOnlyKey] = { dateKey: dateOnlyKey, items: [] };
+                                    const details = getShiftDetails(item.dateKey, item.source);
+                                    const order = getTimeSortValue(item);
+                                    const key = `${order}-${details.timeLabel}`;
+
+                                    if (!acc[key]) {
+                                        acc[key] = { order, label: details.timeLabel, items: [] };
                                     }
-                                    acc[dateOnlyKey].items.push(item);
+
+                                    acc[key].items.push(item);
                                     return acc;
                                 }, {});
 
-                                const sortedDayGroups = Object.values(dayGroups).sort(
-                                    (a, b) => getDateSortValue(a.dateKey) - getDateSortValue(b.dateKey),
-                                );
+                                const sortedTimeGroups = Object.values(timeGroups).sort((a, b) => a.order - b.order);
 
                                 return (
                                     <article
-                                        key={group.person.id}
+                                        key={dayGroup.dateKey}
                                         style={{
                                             border: "1px solid #dbe4f0",
                                             borderRadius: 16,
@@ -684,35 +755,29 @@ export default function AllAttendancePage() {
                                             }}
                                         >
                                             <div>
-                                                <h2 style={{ margin: 0, color: "#0f172a" }}>{group.person.name}</h2>
+                                                <h2 style={{ margin: 0, color: "#0f172a" }}>{dateDetails.dateLabel}</h2>
                                                 <p className="muted" style={{ margin: "5px 0 0" }}>
-                                                    {group.person.telegramHandle || "No Telegram handle linked"}
-                                                    {group.person.email ? ` · ${group.person.email}` : ""}
-                                                    {!group.person.linked ? " · Unlinked vote" : ""}
+                                                    Attendance grouped by session timing.
                                                 </p>
                                             </div>
 
                                             <div style={{ textAlign: "right", fontWeight: 900, color: "#7c3aed" }}>
-                                                <div>{money(personTotal)}</div>
+                                                <div>Day total: {money(dayTotal)}</div>
                                                 <div style={{ marginTop: 4, color: "#64748b", fontSize: "0.85rem" }}>
-                                                    {group.items.length} shift{group.items.length === 1 ? "" : "s"}
+                                                    {sortedDayItems.length} shift{sortedDayItems.length === 1 ? "" : "s"}
                                                 </div>
                                             </div>
                                         </div>
 
                                         <div style={{ display: "grid", gap: 14 }}>
-                                            {sortedDayGroups.map((dayGroup) => {
-                                                const dateDetails = getShiftDetails(dayGroup.dateKey, "telegram");
-                                                const sortedDayItems = [...dayGroup.items].sort(
-                                                    (a, b) => getTimeSortValue(a) - getTimeSortValue(b),
-                                                );
-                                                const dayTotal = sortedDayItems.reduce((sum, item) => {
+                                            {sortedTimeGroups.map((timeGroup) => {
+                                                const timeTotal = timeGroup.items.reduce((sum, item) => {
                                                     return sum + getShiftDetails(item.dateKey, item.source).payment;
                                                 }, 0);
 
                                                 return (
                                                     <section
-                                                        key={`${group.person.id}-${dayGroup.dateKey}`}
+                                                        key={`${dayGroup.dateKey}-${timeGroup.order}-${timeGroup.label}`}
                                                         style={{
                                                             border: "1px solid #e2e8f0",
                                                             borderRadius: 14,
@@ -730,14 +795,19 @@ export default function AllAttendancePage() {
                                                                 marginBottom: 10,
                                                             }}
                                                         >
-                                                            <h3 style={{ margin: 0, color: "#111827" }}>
-                                                                {dateDetails.dateLabel}
-                                                            </h3>
-                                                            <strong style={{ color: "#7c3aed" }}>Day total: {money(dayTotal)}</strong>
+                                                            <h3 style={{ margin: 0, color: "#2563eb" }}>{timeGroup.label}</h3>
+                                                            <strong style={{ color: "#7c3aed" }}>
+                                                                {timeGroup.items.length} coach{timeGroup.items.length === 1 ? "" : "es"} · {money(timeTotal)}
+                                                            </strong>
                                                         </div>
 
                                                         <div style={{ display: "grid", gap: 8 }}>
-                                                            {sortedDayItems.map((item) => {
+                                                            {timeGroup.items.map((item) => {
+                                                                const person = peopleById[item.personId] || {
+                                                                    id: item.personId,
+                                                                    name: "Unknown coach",
+                                                                    linked: false,
+                                                                };
                                                                 const details = getShiftDetails(item.dateKey, item.source);
 
                                                                 return (
@@ -745,7 +815,7 @@ export default function AllAttendancePage() {
                                                                         key={item.id}
                                                                         style={{
                                                                             display: "grid",
-                                                                            gridTemplateColumns: "1fr auto",
+                                                                            gridTemplateColumns: "minmax(0, 1fr) auto",
                                                                             gap: 12,
                                                                             alignItems: "center",
                                                                             border: "1px solid #eef2f7",
@@ -754,9 +824,9 @@ export default function AllAttendancePage() {
                                                                             padding: "10px 12px",
                                                                         }}
                                                                     >
-                                                                        <div>
-                                                                            <p style={{ margin: 0, color: "#2563eb", fontWeight: 900 }}>
-                                                                                {details.timeLabel}
+                                                                        <div style={{ minWidth: 0 }}>
+                                                                            <p style={{ margin: 0, color: "#111827", fontWeight: 900 }}>
+                                                                                {person.name}
                                                                             </p>
                                                                             <p style={{ margin: "4px 0 0", color: "#047857", fontWeight: 800 }}>
                                                                                 {item.statusLabel}
