@@ -21,6 +21,33 @@ interface NavItem {
     allowedRoles: UserRole[];
 }
 
+
+// ── Section colour map (matches Figma reference) ───────────
+const SECTION_COLORS: Record<string, string> = {
+    '/dashboard':           '#f59e0b',  // Weekend → amber
+    '/attendance':          '#f59e0b',  // Weekend → amber
+    '/payment':             '#f59e0b',  // Weekend → amber
+    '/add':                 '#f59e0b',  // Weekend → amber
+    '/coachattendance':     '#f59e0b',  // Weekend → amber
+    '/allattendance':       '#f59e0b',  // Weekend → amber
+    '/weekday':             '#0ea5e9',  // Weekday → sky blue
+    '/matchplay':           '#8b5cf6',  // MatchPlay → purple
+    '/training':            '#10b981',  // 1-1 → emerald
+    '/trngpayment':         '#10b981',  // 1-1 → emerald
+    '/makeup':              '#f97316',  // Makeup → orange
+    '/settings':            '#64748b',  // Settings → slate
+    '/myattendance':        '#64748b',  // My Attendance → slate
+};
+
+function getSectionColor(pathname: string): string {
+    for (const [prefix, color] of Object.entries(SECTION_COLORS)) {
+        if (pathname === prefix || pathname.startsWith(prefix + '/')) {
+            return color;
+        }
+    }
+    return '#0ea5e9'; // default sky blue
+}
+
 const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -277,6 +304,7 @@ export default function AppHeader({
                                   }: AppHeaderProps) {
     const router = useRouter();
     const pathname = usePathname();
+    const sectionColor = getSectionColor(pathname);
     const accountRef = useRef<HTMLDivElement | null>(null);
     const [showAccountMenu, setShowAccountMenu] = useState(false);
 
@@ -325,6 +353,7 @@ export default function AppHeader({
                 position: 'relative',
                 zIndex: 10000,
                 isolation: 'isolate',
+                borderBottom: `3px solid ${sectionColor}`,
             }}
         >
             <div
@@ -343,6 +372,7 @@ export default function AppHeader({
                         onClick={() => setShowAccountMenu((prev) => !prev)}
                         title="View account"
                         type="button"
+                        style={{ backgroundColor: sectionColor }}
                     >
                         👤
                     </button>

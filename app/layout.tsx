@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import './styles.css'
+import AttendanceHistoryEnhancer from './components/AttendanceHistoryEnhancer'
 
 export const metadata: Metadata = {
     title: 'PatLau',
@@ -13,7 +14,7 @@ export default function RootLayout({
 }) {
     return (
         <html lang="en">
-        <body>{children}</body>
+        <body>{children}<AttendanceHistoryEnhancer /></body>
         </html>
     )
 }

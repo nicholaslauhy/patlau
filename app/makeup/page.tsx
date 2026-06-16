@@ -273,8 +273,8 @@ export default function MakeupCreditsPage() {
         <div className="container">
             <AppHeader title="Makeup Credits" userName={userName} userRole={userRole} mode="dashboard" />
 
-            <main style={{ padding: '24px 16px 48px' }}>
-                <section className="form-card" style={{ maxWidth: 1180, margin: '0 auto', padding: 24 }}>
+            <main className="makeup-page-main">
+                <section className="form-card makeup-system-card">
                     <div style={{ textAlign: 'center' }}>
                         <h1 style={{ margin: 0 }}>Global Makeup System</h1>
                         <p className="muted" style={{ margin: '8px auto 0', maxWidth: 780 }}>

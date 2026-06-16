@@ -77,7 +77,7 @@ a:hover { text-decoration: underline; }
 /* ── Login page layout ──────────────────────────────────────── */
 .container {
   width: 100%;
-  max-width: 860px;
+  max-width: 1280px;
   margin: 0 auto;
   min-height: 100vh;
   display: flex;
@@ -628,4 +628,366 @@ th.col-price,th.col-weeks { text-align: center; }
   .btn,.share-btn { padding: 0.3rem 0.55rem; font-size: 0.78rem; }
   main { padding: 0.5rem 0; align-items: flex-start; }
   table th,table td { padding: 0.4rem 0.5rem; font-size: 0.8rem; }
+}
+
+/* ============================================================
+   TABLE SCROLL FIX
+   Table container fills viewport width, scrolls horizontally.
+   Header/filters above stay fixed (they're outside the container).
+   ============================================================ */
+
+.table-container {
+  width: 100%;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border-solid);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow);
+  background: var(--card);
+}
+
+.table-scroll,
+.user-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-container table,
+.table-scroll > table,
+.user-scroll > table {
+  width: max-content !important;
+  min-width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+
+/* ============================================================
+   MAKEUP PAGE — Global makeup system box centred in viewport
+   ============================================================ */
+
+/* The makeup page uses .container which now goes to 1280px,
+   so the form-card inside it correctly centres via margin:auto */
+.makeup-section {
+  max-width: 1180px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ============================================================
+   TRAINING PAGE — filter-box card scrolls horizontally on narrow
+   ============================================================ */
+
+.filter-box {
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent filter-grid from collapsing below minimum on narrow screens */
+.filter-grid {
+  min-width: max-content;
+}
+
+/* ============================================================
+   ATTENDANCE HISTORY — collapsible toggle
+   ============================================================ */
+
+/* Hide the raw ul by default (JS enhancer overrides display when open) */
+td.attendance-history .ah-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--muted);
+  border: 1px solid var(--border-solid);
+  border-radius: 999px;
+  padding: 3px 10px 3px 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+td.attendance-history .ah-toggle:hover {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border-color: rgba(14,165,233,0.3);
+}
+
+td.attendance-history .ah-toggle[aria-expanded="true"] {
+  background: rgba(14,165,233,0.08);
+  color: var(--primary);
+  border-color: rgba(14,165,233,0.3);
+}
+
+td.attendance-history .ah-count {
+  font-weight: 600;
+}
+
+td.attendance-history .ah-chevron {
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+td.attendance-history .ah-toggle[aria-expanded="true"] .ah-chevron {
+  transform: rotate(180deg);
+}
+
+/* History ul shown as flex pills when expanded */
+td.attendance-history ul {
+  list-style: none !important;
+  padding: 0 !important;
+  margin: 6px 0 0 !important;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+td.attendance-history ul li {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+
+/* Colour coding based on text content */
+td.attendance-history ul li {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+/* We style via JS classes added by enhancer — fallback colouring via nth */
+td.attendance-history ul li.ah-attended { background: #dcfce7; color: #15803d; }
+td.attendance-history ul li.ah-missed   { background: #fee2e2; color: #dc2626; }
+td.attendance-history ul li.ah-makeup   { background: #dbeafe; color: #1d4ed8; }
+
+/* ============================================================
+   INTERNAL TABLE SCROLLING
+   Applied by AttendanceHistoryEnhancer on the requested routes.
+   The page stays fixed while the table itself scrolls horizontally.
+   ============================================================ */
+
+main {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.internal-scroll-table {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  border-collapse: separate;
+  border-spacing: 0;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.internal-scroll-table > thead,
+.internal-scroll-table > tbody,
+.internal-scroll-table > tfoot {
+  display: table;
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+
+.internal-scroll-table th,
+.internal-scroll-table td {
+  white-space: nowrap;
+}
+
+/* Keep long/action/history cells readable instead of crushing them. */
+.internal-scroll-table th.actions-header,
+.internal-scroll-table td.actions-cell {
+  min-width: 280px;
+  white-space: normal;
+}
+
+.internal-scroll-table td.attendance-history,
+.internal-scroll-table th:last-child {
+  min-width: 170px;
+  white-space: normal;
+}
+
+/* ============================================================
+   ATTENDANCE HISTORY DROPDOWN
+   ============================================================ */
+
+td.attendance-history {
+  min-width: 170px;
+  vertical-align: top;
+}
+
+td.attendance-history .ah-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+td.attendance-history .ah-toggle:hover,
+td.attendance-history .ah-toggle:focus-visible,
+td.attendance-history .ah-toggle[aria-expanded='true'] {
+  color: var(--primary);
+  background: transparent;
+  outline: none;
+}
+
+td.attendance-history .ah-history-icon {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+td.attendance-history .ah-chevron {
+  flex: 0 0 auto;
+  transition: transform 0.18s ease;
+}
+
+td.attendance-history .ah-toggle[aria-expanded='true'] .ah-chevron {
+  transform: rotate(180deg);
+}
+
+td.attendance-history ul[hidden] {
+  display: none !important;
+}
+
+td.attendance-history ul:not([hidden]) {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 7px 0 0 !important;
+  padding: 0 !important;
+  list-style: none !important;
+}
+
+td.attendance-history ul li {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+td.attendance-history ul li.ah-attended {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+td.attendance-history ul li.ah-missed {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+td.attendance-history ul li.ah-makeup {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+
+/* ============================================================
+   RESPONSIVE TABLE WIDTH — dashboard/attendance/payment routes
+
+   Wide screen:
+   - table fills its white card
+   - no unnecessary horizontal scrollbar
+
+   Narrow screen:
+   - table keeps readable column widths
+   - only the table card scrolls horizontally
+   ============================================================ */
+
+.route-table-scroll {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.route-table-scroll-generated {
+  margin-top: 1rem;
+  border: 1px solid var(--border-solid);
+  border-radius: var(--radius-2xl);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+/* Override the older max-content/display:block rules. */
+.route-table-scroll table.responsive-data-table,
+.table-container.route-table-scroll table.responsive-data-table,
+.table-scroll.route-table-scroll > table.responsive-data-table {
+  display: table !important;
+  width: 100% !important;
+  min-width: 1050px !important;
+  max-width: none !important;
+  overflow: visible !important;
+  border-collapse: collapse !important;
+  border-spacing: 0 !important;
+  table-layout: auto !important;
+}
+
+.route-table-scroll table.responsive-data-table > thead,
+.route-table-scroll table.responsive-data-table > tbody,
+.route-table-scroll table.responsive-data-table > tfoot {
+  display: table-row-group !important;
+  width: auto !important;
+  min-width: 0 !important;
+}
+
+.route-table-scroll table.responsive-data-table > thead {
+  display: table-header-group !important;
+}
+
+.route-table-scroll table.responsive-data-table > tfoot {
+  display: table-footer-group !important;
+}
+
+.route-table-scroll table.responsive-data-table tr {
+  display: table-row !important;
+}
+
+.route-table-scroll table.responsive-data-table th,
+.route-table-scroll table.responsive-data-table td {
+  white-space: nowrap;
+}
+
+.route-table-scroll table.responsive-data-table th.actions-header,
+.route-table-scroll table.responsive-data-table td.actions-cell,
+.route-table-scroll table.responsive-data-table td.attendance-history {
+  white-space: normal;
+}
+
+/* At roomy desktop widths the 1050px minimum is smaller than the card,
+   so width:100% stretches the table and no scrollbar appears. */
+@media (min-width: 1050px) {
+  .route-table-scroll table.responsive-data-table,
+  .table-container.route-table-scroll table.responsive-data-table,
+  .table-scroll.route-table-scroll > table.responsive-data-table {
+    min-width: 100% !important;
+  }
 }

@@ -110,13 +110,27 @@
 }
 
 /* ── Table action layout ────────────────────────────────────── */
-.table-container,
+/* The table-container scrolls horizontally; everything above (search, filters) stays put */
+.table-container {
+  width: 100%;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
 .table-scroll,
-.user-scroll { width: 100%; overflow-x: auto; }
+.user-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
 .table-container table,
-.table-scroll table,
-.user-scroll table { table-layout: auto !important; width: max-content !important; min-width: 100% !important; }
+.table-scroll > table,
+.user-scroll > table {
+  table-layout: auto !important;
+  width: max-content !important;
+  min-width: 100%;
+}
 
 th.actions-header,
 td.actions-cell {
