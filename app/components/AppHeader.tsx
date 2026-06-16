@@ -71,9 +71,9 @@ const menuBoxStyle: React.CSSProperties = {
     right: 0,
     top: 'calc(100% + 8px)',
     minWidth: '230px',
-    background: 'white',
-    border: '1px solid #e5e7eb',
-    borderRadius: '14px',
+    background: 'var(--card)',
+    border: '1px solid rgba(0,0,0,0.10)',
+    borderRadius: '12px',
     boxShadow: '0 14px 34px rgba(0,0,0,0.14)',
     padding: '8px',
     zIndex: 20000,
@@ -87,7 +87,7 @@ const menuItemStyle: React.CSSProperties = {
     width: '100%',
     padding: '10px 12px',
     borderRadius: '10px',
-    color: '#374151',
+    color: 'var(--foreground)',
     textDecoration: 'none',
     fontWeight: 700,
     whiteSpace: 'nowrap',
@@ -101,14 +101,14 @@ const menuItemStyle: React.CSSProperties = {
 };
 
 const hoverMenuItemStyle: React.CSSProperties = {
-    background: '#eff6ff',
-    color: '#1d4ed8',
+    background: 'var(--muted)',
+    color: 'var(--foreground)',
 };
 
 const activeMenuItemStyle: React.CSSProperties = {
-    background: '#2563eb',
-    color: 'white',
-    boxShadow: '0 6px 14px rgba(37,99,235,0.28)',
+    background: 'var(--primary)',
+    color: 'var(--primary-foreground)',
+    boxShadow: '0 4px 12px rgba(14,165,233,0.25)',
 };
 
 const activePillStyle: React.CSSProperties = {
@@ -242,10 +242,10 @@ function NavDropdown({
                 aria-expanded={open}
                 style={{
                     ...navButtonStyle,
-                    borderColor: active ? '#2563eb' : undefined,
-                    color: active ? '#1d4ed8' : '#111827',
-                    background: active ? '#eff6ff' : undefined,
-                    boxShadow: active ? '0 0 0 2px rgba(37, 99, 235, 0.08)' : undefined,
+                    borderColor: active ? 'var(--primary)' : undefined,
+                    color: active ? 'var(--primary)' : 'var(--foreground)',
+                    background: active ? 'rgba(14,165,233,0.08)' : undefined,
+                    boxShadow: active ? '0 0 0 2px rgba(14,165,233,0.15)' : undefined,
                 }}
             >
                 {label} ▾
@@ -355,8 +355,8 @@ export default function AppHeader({
                                 padding: '10px',
                                 borderRadius: '14px',
                                 boxShadow: '0 14px 34px rgba(0,0,0,0.14)',
-                                border: '1px solid #e5e7eb',
-                                background: 'white',
+                                border: '1px solid rgba(0,0,0,0.10)',
+                                background: 'var(--card)',
                                 zIndex: 3000,
                             }}
                         >
@@ -367,10 +367,10 @@ export default function AppHeader({
                                     marginBottom: '6px',
                                 }}
                             >
-                                <p className="account-name" style={{ margin: 0, fontWeight: 700, color: '#111827' }}>
+                                <p className="account-name" style={{ margin: 0, fontWeight: 600, color: 'var(--foreground)' }}>
                                     {userName || 'User'}
                                 </p>
-                                <p className="account-role" style={{ margin: '4px 0 0', fontSize: '0.78rem', color: '#6b7280' }}>
+                                <p className="account-role" style={{ margin: '3px 0 0', fontSize: '0.7rem', color: 'var(--muted-foreground)' }}>
                                     {userRole?.toUpperCase() || 'MEMBER'}
                                 </p>
                             </div>

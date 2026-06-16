@@ -1,682 +1,149 @@
-/* dashboard.css - cleaner, modern styles */
+/* ============================================================
+   Dashboard — component styles
+   Reference: Badminton Class Tracker design
+   ============================================================ */
 
+/* ── Page header ────────────────────────────────────────────── */
 .dashboard-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  flex-wrap: nowrap !important;
+  overflow: visible !important;
   padding: 0.6rem 0;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 1rem;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  margin-bottom: 1.25rem;
+  background: var(--card);
+  width: calc(100vw - 2.5rem);
+  max-width: 1180px;
+  margin-left: 50%;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  position: relative;
+  z-index: 10000;
+  isolation: isolate;
 }
 
 .header-left {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  min-width: 160px !important;
+  flex: 1 1 300px !important;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
+.brand { display: flex; align-items: center; gap: 0.4rem; position: relative; flex-shrink: 0; }
 
+/* The brand mark now uses sky-blue, matching reference */
 .brand-mark {
-  width: 40px;
-  height: 40px;
+  width: 34px; height: 34px;
   background: var(--primary);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  border-radius: 8px;
-  font-size: 1rem;
+  color: var(--primary-foreground);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700; border-radius: 8px; font-size: 0.85rem;
 }
 
-.brand-text {
-  font-weight: 600;
-  font-size: 1rem;
-  color: var(--text-primary);
-}
+.brand-text { font-weight: 600; font-size: 0.9rem; color: var(--foreground); }
 
 .page-title {
-  margin: 0;
-  font-size: 1.15rem;
-  color: var(--text-secondary);
-  font-weight: 600;
+  margin: 0; font-size: 1rem; color: var(--muted-foreground); font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 120px; max-width: 300px;
 }
 
 .user-controls {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-/* Generic button styles used in header and lists */
-.btn {
-  padding: 0.45rem 0.85rem;
-  border-radius: 8px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text-primary);
-  cursor: pointer;
-  font-weight: 600;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  transition: var(--transition);
-}
-
-.btn:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-sm);
-}
-
-.share-btn.logout {
-  background: #fff6f6;
-  border-color: rgba(220, 38, 38, 0.2);
-  color: var(--error);
-}
-
-.share-btn.logout:hover {
-  background: #ffeeee;
-}
-
-/* Search */
-.search-box {
-  margin: 0.5rem 0 1rem 0;
-}
-
-.search-box input {
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  font-size: 0.98rem;
-}
-
-/* Filters */
-.filter-box {
-  display: flex;
-  gap: 1rem;
-  align-items: flex-start;
-  padding: 12px;
-  background: var(--surface);
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  margin-bottom: 16px;
-}
-
-.filter-grid {
-  flex: 1;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-}
-
-.filter-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.filter-label {
-  font-weight: 600;
-  color: var(--text-primary);
-  font-size: 0.9rem;
-}
-
-.filter-input {
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--background);
-}
-
-/* Filter buttons column */
-.filter-buttons {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 110px;
-}
-
-.filter-button {
-  padding: 9px 12px;
-  border-radius: 8px;
-  background: var(--primary);
-  color: #fff;
-  border: none;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.filter-button.secondary {
-  background: #6c757d;
-}
-.filter-button.secondary:hover {
-  background-color: #dc2626 !important;
-}
-
-/* Table */
-.table-container {
-  overflow-x: auto;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 800px;
-}
-
-table th, table td {
-  padding: 12px 14px;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.95rem;
-}
-
-table th {
-  background: transparent;
-  font-weight: 700;
-  color: var(--text-secondary);
-}
-
-tbody tr:hover {
-  background: rgba(0,0,0,0.02);
-}
-
-/* Action buttons in table */
-.actions-cell .btn-group {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.attendance-btn {
-  background: #0ea5a4;
-  color: white;
-  border: none;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-/* attendance history with bullet points - inward shifted */
-.attendance-history ul {
-  margin: 8px 0 0 8px;
-  padding-left: 20px;
-}
-
-.attendance-history li {
-  margin-bottom: 4px;
-}
-
-.makeup-btn {
-  background: #f59e0b;
-  color: white;
-  border: none;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.reset-btn {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-primary);
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.delete-btn {
-  background: #ef4444;
-  color: white;
-  border: none;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 700;
-}
-
-.delete-btn:hover { background: #dc2626; }
-.attendance-btn:hover { opacity: 0.95; }
-.makeup-btn:hover { opacity: 0.95; }
-.reset-btn:hover { background: #f1f5f9; }
-
-/* Muted text style */
-.muted {
-  color: var(--text-secondary);
-  font-size: 0.98rem;
-}
-
-/* Small screens */
-@media (max-width: 820px) {
-  .filter-box {
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  table {
-    min-width: 600px;
-  }
-
-  .actions-cell { min-width: 220px; }
-}
-
-/* lessons column styling */
-.lessons-header,
-.lessons-count,
-.missed-header,
-.missed-count {
-  text-align: center;
-  width: 72px;
-  font-weight: 400;
-  color: var(--text-primary);
-}
-
-.lessons-count,
-.missed-count {
-  background: transparent;
-  border-radius: 6px;
-  padding: 6px 8px;
-}
-
-/* compact price/weeks columns */
-.col-price,
-.col-weeks {
-  width: 90px;
-  text-align: center;
-  vertical-align: middle;
-  padding: 8px;
-}
-
-.price-input,
-.weeks-input {
-  width: 72px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  font-size: 0.95rem;
-  text-align: center;
-  background: var(--background);
-}
-
-/* make header labels centered for these columns */
-th.col-price,
-th.col-weeks {
-  text-align: center;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-/* Account avatar button */
-.account-avatar-btn {
-  width: 40px;
-  height: 40px;
-  background: var(--primary);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  font-size: 1.25rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: 0.2s;
-}
-
-.account-avatar-btn:hover {
-  opacity: 0.9;
-}
-
-/* Dropdown menu */
-.account-menu {
-  position: absolute;
-  top: 60px;
-  left: 0;
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 16px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  z-index: 100;
-  min-width: 150px;
-}
-
-.account-name {
-  margin: 0 0 4px 0;
-  font-weight: 700;
-  font-size: 0.95rem;
-  color: var(--text-primary);
-}
-
-.account-role {
-  margin: 0;
-  font-weight: 600;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-}
-
-.account-menu-link {
-  display: block;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  color: var(--primary);
-  text-decoration: none;
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-
-.account-menu-link:hover {
-  color: #226bc9;
-}
-
-.undo-btn {
-  background: #f59e0b;
-  color: white;
-  border: none;
-  padding: 6px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-  transition: all 0.2s ease;
-}
-
-.undo-btn:hover:not(:disabled) {
-  background: #d97706;
-  transform: translateY(-1px);
-}
-
-.undo-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Student field selects - styled like role selector (superuser only) */
-.student-field-select {
-  appearance: none;
-  -webkit-appearance: none;
-  padding: 8px 28px 8px 12px;
-  border-radius: 16px;
-  border: none;
-  font-weight: 600;
-  font-size: 0.8rem;
-  cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  min-width: 110px;
-  transition: var(--transition);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background-position: right 8px center;
-  background-repeat: no-repeat;
-  background-size: 16px 16px;
-  background-color: #dbeafe;
-  color: #2563eb;
-  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%232563eb'%3e%3cpath fill-rule='evenodd' d='M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z' clip-rule='evenodd'/%3e%3c/svg%3e");
-}
-
-.student-field-select:hover:not(:disabled) {
-  background-color: #bfdbfe;
-}
-
-.student-field-select:focus {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-.student-field-select:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.student-field-select option {
-  background-color: #fff;
-  color: #1f2937;
-  font-weight: 600;
-  padding: 10px 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-.missed-btn {
-  background: #ef4444;
-  color: white;
-  border: none;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.missed-btn:hover {
-  opacity: 0.95;
-  background: #dc2626;
-}
-
-.missed-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Add to dashboard.css (or global styles) */
-.actions-row {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap; /* allow wrap on small screens */
-}
-
-/* ensure individual buttons do not expand to full width unless you want them to */
-.actions-row .attendance-btn,
-.actions-row .missed-btn,
-.actions-row .makeup-btn,
-.actions-row .undo-btn,
-.actions-row .reset-btn,
-.actions-row .delete-btn {
-  padding: 6px 12px;
-  font-size: 0.85rem;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-/* example color styling (tweak to match previous look) */
-.attendance-btn { background-color: #10b981; color: white; }
-.missed-btn     { background-color: #ef4444; color: white; }
-.makeup-btn     { background-color: #3b82f6; color: white; }
-.undo-btn       { background-color: #f59e0b; color: white; }
-.reset-btn      { background-color: #ef4444; color: white; }
-.delete-btn     { background-color: #dc2626; color: white; }
-
-/* optional: style disabled state */
-.actions-row button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* =========================================================
-   Dashboard action column fix
-   Keeps Mark/Missed/Makeup/Undo/Reset/Delete inside ONE clean
-   table column without the awkward empty/overflow area.
-   Put at the END of dashboard.css so it overrides earlier rules.
-   ========================================================= */
-
-.table-container,
-.table-scroll,
-.user-scroll {
-  width: 100%;
-  overflow-x: auto;
-}
-
-.table-container table,
-.table-scroll table,
-.user-scroll table {
-  width: max-content;
-  min-width: 100%;
-  table-layout: auto;
-}
-
-/* The Actions header/cell should grow to exactly fit its buttons. */
-table th:last-child,
-table td.actions-cell {
-  width: max-content !important;
-  min-width: max-content !important;
-  white-space: nowrap !important;
-  text-align: left;
-}
-
-/* Keep the buttons in one clean horizontal row. */
-.actions-cell {
-  overflow: visible;
-}
-
-.actions-row {
-  display: inline-flex !important;
-  flex-direction: row !important;
-  flex-wrap: nowrap !important;
+  display: flex !important;
   align-items: center !important;
-  justify-content: flex-start !important;
-  gap: 8px !important;
-  width: max-content !important;
-  min-width: max-content !important;
-}
-
-.actions-row button,
-.actions-row .attendance-btn,
-.actions-row .missed-btn,
-.actions-row .makeup-btn,
-.actions-row .undo-btn,
-.actions-row .reset-btn,
-.actions-row .delete-btn {
-  flex: 0 0 auto !important;
+  justify-content: flex-end !important;
+  gap: 6px !important;
+  flex-wrap: nowrap !important;
   white-space: nowrap !important;
-  min-width: auto !important;
-  width: auto !important;
-  padding: 7px 12px !important;
-  border-radius: 8px !important;
-  font-size: 0.85rem !important;
-  line-height: 1.1 !important;
-  font-weight: 700 !important;
+  overflow: visible !important;
+  min-width: max-content !important;
+  flex: 0 0 auto !important;
 }
 
-/* Slightly cleaner button colors. */
-.attendance-btn { background-color: #10b981 !important; color: #fff !important; }
-.missed-btn { background-color: #ef4444 !important; color: #fff !important; }
-.makeup-btn { background-color: #3b82f6 !important; color: #fff !important; }
-.undo-btn { background-color: #f59e0b !important; color: #fff !important; }
-.reset-btn { background-color: #ef4444 !important; color: #fff !important; border: none !important; }
-.delete-btn { background-color: #dc2626 !important; color: #fff !important; }
+.user-controls .btn {
+  flex-shrink: 0 !important;
+  padding: 6px 10px !important;
+  min-height: 32px !important;
+  line-height: 1 !important;
+  font-size: 0.82rem !important;
+}
 
-.actions-row button:disabled {
-  opacity: 0.55 !important;
-  cursor: not-allowed !important;
+/* ── Account avatar ─────────────────────────────────────────── */
+.account-avatar-btn {
+  width: 34px; height: 34px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: none; border-radius: 8px;
+  font-size: 1rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: var(--transition);
+}
+.account-avatar-btn:hover { opacity: 0.88; }
+
+/* ── Account dropdown ───────────────────────────────────────── */
+.account-menu {
+  position: absolute; top: 48px; left: 0;
+  background: var(--card);
+  border: 1px solid rgba(0,0,0,0.10);
+  border-radius: var(--radius-xl);
+  padding: 8px;
+  box-shadow: 0 14px 30px rgba(0,0,0,0.12);
+  z-index: 3000; min-width: 190px;
+}
+
+.account-name { margin: 0 0 2px; font-weight: 600; font-size: 0.875rem; color: var(--foreground); }
+.account-role { margin: 0; font-weight: 500; font-size: 0.72rem; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.06em; }
+.account-menu-link { display: block; margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--border); color: var(--primary); text-decoration: none; font-weight: 500; font-size: 0.84rem; }
+.account-menu-link:hover { color: var(--primary-hover); }
+
+/* ── Nav dropdown button active style ───────────────────────── */
+.dashboard-header .user-controls .btn.share-btn:hover,
+.dashboard-header .user-controls .btn.share-btn:focus {
+  background: var(--muted) !important;
+  color: var(--foreground) !important;
+  border-color: rgba(0,0,0,0.12) !important;
   transform: none !important;
 }
 
-@media (max-width: 820px) {
-  table th:last-child,
-  table td.actions-cell {
-    min-width: max-content !important;
-  }
-
-  .actions-row {
-    flex-wrap: nowrap !important;
-  }
-}
-
-
-
-/* === Dashboard actions layout fix ===
-   Superuser: 2 rows (Mark/Missed/Makeup/Undo, then Reset/Delete)
-   Admin/member: 1 row (Mark/Missed/Makeup/Undo)
-   Also prevents Actions buttons from overflowing into Attendance History.
-*/
-.table-container {
-  width: 100%;
-  overflow-x: auto;
-}
-
+/* ── Table action layout ────────────────────────────────────── */
+.table-container,
 .table-scroll,
-.user-scroll {
-  width: 100%;
-  overflow-x: auto;
-}
+.user-scroll { width: 100%; overflow-x: auto; }
 
 .table-container table,
 .table-scroll table,
-.user-scroll table {
-  table-layout: auto !important;
-  width: max-content !important;
-  min-width: 100% !important;
-}
+.user-scroll table { table-layout: auto !important; width: max-content !important; min-width: 100% !important; }
 
 th.actions-header,
 td.actions-cell {
-  width: 330px !important;
-  min-width: 330px !important;
-  max-width: 330px !important;
-  white-space: normal !important;
-  vertical-align: middle !important;
+  width: 300px !important; min-width: 300px !important; max-width: 300px !important;
+  white-space: normal !important; vertical-align: middle !important;
 }
 
-td.actions-cell {
-  padding: 10px 12px !important;
-  overflow: hidden !important;
-}
+td.actions-cell { padding: 10px 12px !important; overflow: hidden !important; }
 
-/* Undo the older last-child rule, because Attendance History is now the last column. */
 table th:last-child,
 table td.attendance-history {
-  width: 180px !important;
-  min-width: 180px !important;
-  max-width: 220px !important;
+  width: 170px !important; min-width: 170px !important; max-width: 210px !important;
   white-space: normal !important;
 }
 
 .actions-stack {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: flex-start !important;
-  justify-content: center !important;
-  gap: 8px !important;
-  width: 100% !important;
-  min-width: 0 !important;
+  display: flex !important; flex-direction: column !important;
+  align-items: flex-start !important; gap: 5px !important; width: 100% !important;
 }
 
-.actions-stack-single {
-  flex-direction: row !important;
-  align-items: center !important;
-}
+.actions-stack-single { flex-direction: row !important; align-items: center !important; }
 
 .actions-cell .actions-row,
 .actions-row {
-  display: flex !important;
-  flex-direction: row !important;
-  flex-wrap: nowrap !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  gap: 8px !important;
-  width: auto !important;
-  min-width: 0 !important;
-}
-
-.actions-admin-row {
-  padding-top: 0 !important;
+  display: flex !important; flex-direction: row !important;
+  flex-wrap: nowrap !important; align-items: center !important;
+  gap: 4px !important; width: auto !important;
 }
 
 .actions-cell button,
@@ -686,126 +153,26 @@ table td.attendance-history {
 .actions-row .undo-btn,
 .actions-row .reset-btn,
 .actions-row .delete-btn {
-  flex: 0 0 auto !important;
-  width: auto !important;
-  min-width: auto !important;
-  white-space: nowrap !important;
-  padding: 7px 12px !important;
-  border-radius: 8px !important;
-  font-size: 0.85rem !important;
-  line-height: 1.1 !important;
-  font-weight: 700 !important;
+  flex: 0 0 auto !important; width: auto !important;
+  min-width: auto !important; white-space: nowrap !important;
+  padding: 4px 10px !important; border-radius: 6px !important;
+  font-size: 0.75rem !important; line-height: 1.2 !important; font-weight: 500 !important;
 }
 
-td.attendance-history {
-  position: relative !important;
-  z-index: 1 !important;
-  padding-left: 16px !important;
-}
+td.attendance-history { position: relative !important; z-index: 1 !important; padding-left: 14px !important; }
 
-.attendance-history ul {
-  margin: 0 !important;
-  padding-left: 18px !important;
-}
+.attendance-history ul { margin: 0 !important; padding-left: 0 !important; list-style: none !important; display: flex; flex-wrap: wrap; gap: 4px; }
+.attendance-history li { display: inline-flex; align-items: center; gap: 2px; font-size: 0.7rem; padding: 2px 7px; border-radius: 999px; }
+
+/* History pill colors (attendance-history list items) */
+.attendance-history li.status-attended { background: #dcfce7; color: #15803d; }
+.attendance-history li.status-missed   { background: #fee2e2; color: #dc2626; }
+.attendance-history li.status-makeup   { background: #dbeafe; color: #1d4ed8; }
+
+/* Fallback for bullet list style */
+.attendance-history ul li::marker { display: none; }
 
 @media (max-width: 820px) {
-  th.actions-header,
-  td.actions-cell {
-    width: 330px !important;
-    min-width: 330px !important;
-  }
-
-  table th:last-child,
-  table td.attendance-history {
-    min-width: 180px !important;
-  }
+  th.actions-header, td.actions-cell { width: 280px !important; min-width: 280px !important; }
+  table th:last-child, table td.attendance-history { min-width: 150px !important; }
 }
-
-
-/* AppHeader one-line dropdown fix */
-.dashboard-header {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  gap: 12px !important;
-  flex-wrap: nowrap !important;
-  overflow: visible !important;
-}
-
-.dashboard-header .header-left {
-  display: flex !important;
-  align-items: center !important;
-  gap: 12px !important;
-  min-width: 0 !important;
-  flex: 1 1 auto !important;
-}
-
-.dashboard-header .page-title {
-  min-width: 0 !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-}
-
-.dashboard-header .user-controls {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: flex-end !important;
-  gap: 8px !important;
-  flex-wrap: nowrap !important;
-  white-space: nowrap !important;
-  overflow: visible !important;
-  min-width: max-content !important;
-  flex: 0 0 auto !important;
-}
-
-.dashboard-header .user-controls .btn {
-  flex-shrink: 0 !important;
-  white-space: nowrap !important;
-  padding: 8px 12px !important;
-  min-height: 36px !important;
-  line-height: 1 !important;
-}
-
-/* Fix AppHeader dropdown hover contrast.
-   Paste this at the bottom of app/dashboard/dashboard.css or your global CSS. */
-
-.dashboard-header .user-controls .btn.share-btn:hover,
-.dashboard-header .user-controls .btn.share-btn:focus {
-  background: #eff6ff !important;
-  color: #1d4ed8 !important;
-  border-color: #93c5fd !important;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.14) !important;
-  transform: none !important;
-}
-
-.dashboard-header .user-controls .btn.share-btn:hover *,
-.dashboard-header .user-controls .btn.share-btn:focus * {
-  color: #1d4ed8 !important;
-}
-
-/* Dropdown menu items */
-.dashboard-header a[role="menuitem"]:hover,
-.dashboard-header a[role="menuitem"]:focus,
-.dashboard-header button[role="menuitem"]:hover,
-.dashboard-header button[role="menuitem"]:focus {
-  background: #eff6ff !important;
-  color: #1d4ed8 !important;
-}
-
-/* Keep active/current item readable */
-.dashboard-header a[role="menuitem"][aria-current="page"],
-.dashboard-header a[role="menuitem"].active {
-  background: #2563eb !important;
-  color: #ffffff !important;
-}
-
-/* Safer general header button text contrast */
-.dashboard-header .btn {
-  color: #111827;
-}
-
-.dashboard-header .btn:hover {
-  color: #1d4ed8;
-}
-
