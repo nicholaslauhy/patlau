@@ -599,9 +599,9 @@ export default function TrainingPage() {
         <div className="container">
             <AppHeader title="1-on-1 Training" userName={userName} userRole={userRole} mode="dashboard" />
 
-            <main>
-                <div className="filter-box" style={{ width: '100%' }}>
-                    <div className="filter-grid">
+            <main className="training-page-main">
+                <div className="filter-box training-toolbar">
+                    <div className="filter-grid training-toolbar-grid">
                         <div className="filter-group">
                             <label className="filter-label">Month</label>
                             <input
@@ -612,7 +612,7 @@ export default function TrainingPage() {
                             />
                         </div>
                     </div>
-                    <div className="filter-buttons">
+                    <div className="filter-buttons training-toolbar-actions">
                         <Link href="/training/add" className="filter-button" style={{ textAlign: 'center', textDecoration: 'none' }}>
                             Add 1-1 Student
                         </Link>
