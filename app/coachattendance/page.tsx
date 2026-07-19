@@ -524,16 +524,7 @@ export default function CoachAttendancePage() {
                                 </p>
                             </div>
 
-                            <div
-                                style={{
-                                    display: 'inline-flex',
-                                    gap: 6,
-                                    padding: 5,
-                                    borderRadius: 14,
-                                    background: '#f1f5f9',
-                                    border: '1px solid #e2e8f0',
-                                }}
-                            >
+                            <div className="coach-day-switch" role="tablist" aria-label="Coaching day">
                                 {presets.map((preset) => {
                                     const isActive = activePresetId === preset.id;
 
@@ -542,20 +533,18 @@ export default function CoachAttendancePage() {
                                             key={preset.id}
                                             type="button"
                                             onClick={() => setActivePresetId(preset.id)}
-                                            style={{
-                                                border: 'none',
-                                                borderRadius: 10,
-                                                padding: '10px 16px',
-                                                cursor: 'pointer',
-                                                fontWeight: 800,
-                                                fontSize: '0.9rem',
-                                                background: isActive ? '#2563eb' : 'transparent',
-                                                color: isActive ? '#ffffff' : '#334155',
-                                                boxShadow: isActive ? '0 6px 14px rgba(37, 99, 235, 0.24)' : 'none',
-                                                transition: 'all 0.18s ease',
-                                            }}
+                                            className={`coach-day-switch__option${isActive ? ' is-active' : ''}`}
+                                            role="tab"
+                                            aria-selected={isActive}
                                         >
-                                            {preset.title}
+                                            <svg className="coach-day-switch__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                <path d="M7 3v3M17 3v3M4 9h16M5.5 5h13A1.5 1.5 0 0 1 20 6.5v12a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-12A1.5 1.5 0 0 1 5.5 5Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                                            </svg>
+                                            <span className="coach-day-switch__copy">
+                                                <strong>{preset.id === 'saturday' ? 'Saturday' : 'Sunday'}</strong>
+                                                <small>{formatShortDate(preset.date)}</small>
+                                            </span>
+                                            <span className="coach-day-switch__marker" aria-hidden="true" />
                                         </button>
                                     );
                                 })}

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
-import { useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useEffect, useRef, useState } from 'react';
 
 type UserRole = 'superuser' | 'admin' | 'member';
 
@@ -98,6 +98,25 @@ function MenuItem({
     );
 }
 
+function ChevronIcon({ open }: { open: boolean }) {
+    return (
+        <svg
+            className={`app-header__chevron${open ? ' is-open' : ''}`}
+            viewBox="0 0 20 20"
+            fill="none"
+            aria-hidden="true"
+        >
+            <path
+                d="m5.5 7.5 4.5 4.5 4.5-4.5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        </svg>
+    );
+}
+
 function NavMenu({ label, items, userRole }: { label: string; items: NavItem[]; userRole: UserRole | null }) {
     const pathname = usePathname();
     const rootRef = useRef<HTMLDivElement>(null);
@@ -126,7 +145,8 @@ function NavMenu({ label, items, userRole }: { label: string; items: NavItem[]; 
                 aria-haspopup="menu"
                 aria-expanded={open}
             >
-                {label} <span aria-hidden="true">⌄</span>
+                <span>{label}</span>
+                <ChevronIcon open={open} />
             </button>
 
             {open && (
@@ -180,7 +200,10 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
     };
 
     return (
-        <header className="dashboard-header app-header" style={{ borderBottomColor: sectionColor }}>
+        <header
+            className="dashboard-header app-header"
+            style={{ '--header-accent': sectionColor } as CSSProperties}
+        >
             <div className="app-header__identity">
                 <div ref={accountRef} className="account-control">
                     <button

@@ -59,7 +59,10 @@ export default function AttendanceHistoryEnhancer() {
             toggle.type = 'button';
             toggle.setAttribute('aria-expanded', 'false');
             toggle.innerHTML = `
-                <span aria-hidden="true">↻</span>
+                <svg width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                    <path d="M16 7a6.5 6.5 0 1 0 .2 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                    <path d="m13.5 4.5 2.8 2.8 2.2-3.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
                 <span class="ah-count">${items.length} record${items.length === 1 ? '' : 's'}</span>
                 <svg class="ah-chevron" width="12" height="12" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                     <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
@@ -99,8 +102,9 @@ export default function AttendanceHistoryEnhancer() {
             const minimumWidth = Math.min(1900, Math.max(720, columnCount * 135));
             table.style.setProperty('--data-table-min-width', `${minimumWidth}px`);
 
-            let host = table.closest<HTMLElement>('.table-scroll, .user-scroll');
-            if (!host) host = table.closest<HTMLElement>('.table-container');
+            let host = table.closest<HTMLElement>(
+                '.route-table-scroll, .table-scroll, .user-scroll, .table-container'
+            );
 
             if (!host) {
                 const parent = table.parentElement;

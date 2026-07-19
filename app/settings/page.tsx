@@ -561,8 +561,9 @@ export default function SettingsPage() {
                             ) : visibleUsers.length === 0 ? (
                                 <p>No users found</p>
                             ) : (
-                                <div className="users-table">
-                                    <table>
+                                <div className="users-table table-container">
+                                    <div className="table-scroll">
+                                        <table>
                                         <thead>
                                         <tr>
                                             <th>Name</th>
@@ -780,7 +781,8 @@ export default function SettingsPage() {
                                             );
                                         })}
                                         </tbody>
-                                    </table>
+                                        </table>
+                                    </div>
                                 </div>
                             )}
                         </section>
