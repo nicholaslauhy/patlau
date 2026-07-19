@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { createBrowserClient } from "@supabase/ssr";
+import AppHeader from "./../components/AppHeader";
 import "./../styles.css";
 import "./../dashboard/dashboard.css";
 import "./settings.css";
@@ -428,33 +428,31 @@ export default function SettingsPage() {
 
     return (
         <div className="container">
-            <header className="dashboard-header">
-                <div className="header-left">
-                    <h1 className="page-title">Settings</h1>
-                </div>
-
-                <div className="user-controls">
-                    <Link href="/dashboard" className="btn share-btn">
-                        Return to Dashboard
-                    </Link>
-                </div>
-            </header>
+            <AppHeader
+                title="Settings"
+                userName={userName}
+                userRole={userRole}
+                mode="dashboard"
+            />
 
             <main>
                 <div className="settings-container">
                     {/* Current User Info */}
-                    <section className="settings-card">
-                        <h2>Your Account</h2>
-                        <div className="user-info">
-                            <p>
-                                <strong>Name:</strong> {userName}
-                            </p>
-                            <p>
-                                <strong>Role:</strong>{" "}
-                                <span className={`role-badge ${userRole}`}>
-                  {userRole.toUpperCase()}
-                </span>
-                            </p>
+                    <section className="settings-card settings-account-card">
+                        <div className="settings-account-summary">
+                            <div className="settings-account-avatar" aria-hidden="true">
+                                {(userName || "U").trim().charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                                <span className="settings-eyebrow">Signed in account</span>
+                                <h1>{userName || "User"}</h1>
+                                <div className="settings-account-meta">
+                                    <span className={`role-badge ${userRole}`}>
+                                        {userRole.toUpperCase()}
+                                    </span>
+                                    <span>Manage your account access and application users.</span>
+                                </div>
+                            </div>
                         </div>
                     </section>
 
@@ -462,12 +460,18 @@ export default function SettingsPage() {
                     {/* Admins and superusers can add new users. Admins can only create 'member' accounts. */}
                     {(userRole === "superuser" || userRole === "admin") && (
                         <section className="settings-card">
-                            <h2>Add New User</h2>
+                            <div className="settings-section-heading">
+                                <div>
+                                    <span className="settings-eyebrow">Account administration</span>
+                                    <h2>Add New User</h2>
+                                    <p>Create a new login and assign the appropriate access level.</p>
+                                </div>
+                            </div>
 
                             {error && <div className="error-message">{error}</div>}
                             {success && <div className="success-message">{success}</div>}
 
-                            <form onSubmit={handleAddUser} className="user-form">
+                            <form onSubmit={handleAddUser} className="user-form settings-user-form">
                                 <div className="form-group">
                                     <label htmlFor="name">Full Name *</label>
                                     <input
@@ -554,7 +558,14 @@ export default function SettingsPage() {
                     {/* Users List (manage) */}
                     {(userRole === "superuser" || userRole === "admin") && (
                         <section className="settings-card">
-                            <h2>Manage Users</h2>
+                            <div className="settings-section-heading">
+                                <div>
+                                    <span className="settings-eyebrow">User directory</span>
+                                    <h2>Manage Users</h2>
+                                    <p>Update Telegram handles, roles, passwords, and account access.</p>
+                                </div>
+                                <span className="settings-count">{visibleUsers.length} users</span>
+                            </div>
 
                             {isLoading ? (
                                 <p>Loading users...</p>

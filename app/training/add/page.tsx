@@ -221,10 +221,12 @@ export default function AddOneToOneStudentPage() {
 
             <main>
                 <div className="form-card" style={{ maxWidth: 860, margin: '0 auto' }}>
-                    <h2>Add 1-1 Student</h2>
-                    <p className="muted">
-                        These students are separate from weekend students and appear in the 1-1 Training dropdown.
-                    </p>
+                    <div className="form-card__intro">
+                        <h2>Add 1-1 Student</h2>
+                        <p className="muted">
+                            These students are separate from weekend students and appear in the 1-1 Training dropdown.
+                        </p>
+                    </div>
 
                     {error && <div className="error-message">{error}</div>}
                     {success && <div className="success-message">{success}</div>}
@@ -263,7 +265,7 @@ export default function AddOneToOneStudentPage() {
                     </form>
                 </div>
 
-                <div className="form-card" style={{ maxWidth: 960, margin: '24px auto 0' }}>
+                <div className="form-card form-card--separated" style={{ maxWidth: 960, margin: '24px auto 0' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                         <div>
                             <h2 style={{ marginTop: 0 }}>Existing 1-1 Students</h2>

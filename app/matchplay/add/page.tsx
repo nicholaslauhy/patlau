@@ -130,10 +130,12 @@ export default function AddMatchPlayStudentPage() {
                     className="form-card"
                     style={{ maxWidth: 760, margin: '24px auto', padding: 24 }}
                 >
-                    <h2 style={{ marginTop: 0 }}>MatchPlay Student Details</h2>
-                    <p className="muted" style={{ marginTop: -6 }}>
-                        Add a MatchPlay student with their number of weeks and price per session.
-                    </p>
+                    <div className="form-card__intro">
+                        <h2>MatchPlay Student Details</h2>
+                        <p className="muted">
+                            Add a MatchPlay student with their number of weeks and price per session.
+                        </p>
+                    </div>
 
                     {error && <div className="error-message" style={{ marginBottom: 16 }}>{error}</div>}
 

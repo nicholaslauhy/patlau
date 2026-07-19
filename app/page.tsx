@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
+import AuthHeader from './components/AuthHeader';
 import './styles.css';
 
 const supabase = createBrowserClient(
@@ -93,15 +94,16 @@ export default function Login() {
     };
 
     return (
-        <div className="container">
-            <header>
-                <h1 style={{ margin: 0 }}>PatLau</h1>
-            </header>
+        <div className="container auth-shell">
+            <AuthHeader />
 
-            <main>
-                <p className="welcome">Welcome back</p>
-
-                <div className="login-form" role="region" aria-label="Sign in">
+            <main className="auth-main">
+                <section className="login-form auth-card" aria-labelledby="sign-in-title">
+                    <div className="auth-card__intro">
+                        <span className="auth-eyebrow">Secure access</span>
+                        <h1 id="sign-in-title">Welcome back</h1>
+                        <p>Sign in to manage training, attendance, and payments.</p>
+                    </div>
                     <form onSubmit={handleLogin} noValidate>
                         {error && <div className="error-message">{error}</div>}
 
@@ -126,7 +128,7 @@ export default function Login() {
                                 type="password"
                                 id="password"
                                 className="form-input"
-                                placeholder="••••••••"
+                                placeholder="Enter your password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 autoComplete="current-password"
@@ -137,27 +139,11 @@ export default function Login() {
                             {isLoading ? 'Signing in...' : 'Sign in'}
                         </button>
 
-                        <div
-                            style={{
-                                marginTop: '1rem',
-                                textAlign: 'center',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '0.75rem',
-                            }}
-                        >
+                        <div className="auth-card__actions">
                             <button
                                 type="button"
                                 onClick={() => router.push('/reset')}
-                                style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    color: 'var(--primary)',
-                                    cursor: 'pointer',
-                                    fontSize: '0.95rem',
-                                    textDecoration: 'underline',
-                                    padding: 0,
-                                }}
+                                className="auth-link-button"
                             >
                                 Forgot password?
                             </button>
@@ -165,34 +151,19 @@ export default function Login() {
                             <button
                                 type="button"
                                 onClick={() => setShowAccountMessage(!showAccountMessage)}
-                                className="submit-btn"
-                                style={{
-                                    background: 'var(--muted)',
-                                    color: 'var(--muted-foreground)',
-                                    border: '1px solid rgba(0,0,0,0.08)',
-                                }}
+                                className="auth-secondary-button"
                             >
                                 Need an account?
                             </button>
 
                             {showAccountMessage && (
-                                <div
-                                    style={{
-                                        background: 'rgba(14,165,233,0.07)',
-                                        border: '1px solid rgba(14,165,233,0.2)',
-                                        borderRadius: '8px',
-                                        padding: '10px 12px',
-                                        color: 'var(--primary)',
-                                        fontSize: '0.9rem',
-                                        marginTop: '0.5rem',
-                                    }}
-                                >
+                                <div className="auth-account-message">
                                     If you need to create an account, please contact the admin at nicholaslauhongyi@gmail.com
                                 </div>
                             )}
                         </div>
                     </form>
-                </div>
+                </section>
             </main>
         </div>
     );
