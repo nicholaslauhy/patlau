@@ -1,483 +1,223 @@
-# Badminton Attendance and Expense Tracking Website
+# PatLau Badminton Management System
 
-A web-based management system for a badminton training group. The website helps administrators manage student records, attendance, payments, 1-on-1 training sessions, user roles, and Telegram notifications from one central dashboard. 
+PatLau is a role-based training operations system for managing badminton students, attendance, makeup credits, coaching schedules, and payments across several programmes. It is built with Next.js, React, TypeScript, Supabase, Telegram bots, and Brevo email delivery.
 
-The app is built with Next.js and Supabase. Supabase is used for authentication, user role management, database storage, and row-level security.Telegram bots are used to send payment and attendance-related notifications to a group chat. 
+## Current capabilities
 
----
+- Email or username authentication through Supabase
+- Email reset-code and password-recovery flow
+- Superuser, admin, and member access levels
+- Shared navigation and account menu across authenticated pages
+- Weekend, weekday, MatchPlay, and 1-1 student management
+- Attendance, missed-session, makeup, and undo workflows
+- Cross-programme makeup credits with automatic top-up calculation
+- Programme-specific payment tracking and monthly counters
+- Coach attendance polls sent through Telegram
+- Coach attendance reporting for individual coaches and administrators
+- User creation, role management, Telegram-handle management, password reset, and account deletion
+- Responsive data tables with contained horizontal scrolling
+- Telegram payment notifications and scheduled payment summaries
 
-## Main Features 
+## Technology
+
+- Next.js 16 App Router
+- React 19 and TypeScript
+- Supabase Authentication, PostgreSQL, RPC functions, and row-level security
+- Telegram Bot API integrations
+- Brevo transactional email for reset codes
+- Vercel-compatible scheduled routes
 
-- User login and authentication 
-- Role-based access control and superusers, admins and members
-- Student record management 
-- Attendance tracking 
-- Missed lesson and makeup lesson handling 
-- Payment tracking and payment history 
-- 1-on-1 training scheduling 
-- 1-on-1 payment tracking 
-- Telegram notification integration
-- User settings and account management 
+## Roles
+
+### Superuser
+
+Superusers can access all programme, payment, attendance, makeup, coach-attendance, and user-administration features. Destructive actions such as deleting students or users remain restricted to this role where implemented.
+
+### Admin
 
----
+Admins can perform the operational actions exposed by each page, including relevant attendance and coaching tasks. In Settings they can manage member accounts but cannot promote users to privileged roles.
 
-## User roles 
+### Member
 
-### Superuser 
+Members receive the limited navigation and data access intended for coaches or regular users. Database row-level security remains the final authority even when the interface hides restricted controls.
 
-Superusers have the highest level of access. They can manage student records, update student fields, reset courses, delete students, access payment pages, manage 1-on-1 training payments, and access admin-level settings. 
+## Application routes
 
-### Admin 
+| Route | Purpose |
+| --- | --- |
+| `/` | Sign in with an email address or username. |
+| `/reset` | Request and verify a six-digit recovery code or set a new password from a valid recovery session. |
+| `/signup` | Account-registration flow where enabled. |
+| `/dashboard` | Search and filter weekend students, manage attendance, edit permitted student fields, and access programme navigation. |
+| `/add` | Add a weekend student. |
+| `/attendance` | Detailed weekend attendance and student-management view. |
+| `/payment` | Weekend payment status, history, counters, undo, and Telegram notifications. |
+| `/weekday/add` | Register a weekday student and one or more weekly sessions. |
+| `/weekday/attendance` | Manage Monday, Wednesday, and Thursday attendance and makeup balances. |
+| `/weekday/payment` | Calculate and track month-specific weekday payments. |
+| `/matchplay` | MatchPlay programme overview. |
+| `/matchplay/add` | Register a MatchPlay student with weeks and per-session pricing. |
+| `/matchplay/attendance` | Track MatchPlay attendance and makeup activity. |
+| `/matchplay/payment` | Track MatchPlay payments and monthly totals. |
+| `/training/add` | Register and maintain 1-1 students and their payment amounts. |
+| `/training` | Schedule monthly 1-1 coach-student pairings and record attendance. |
+| `/trngpayment` | Track payment for scheduled 1-1 sessions. |
+| `/makeup` | Review makeup credits and usages across programmes. |
+| `/makeup/payment` | Track makeup top-up payments and payment events. |
+| `/coachattendance` | Create Saturday or Sunday Telegram coach-attendance polls. |
+| `/myattendance` | Show the signed-in coach's confirmed shifts and estimated payment. |
+| `/allattendance` | Administrative coach-attendance reporting. |
+| `/settings` | View the current account and, when authorised, create and manage application users. |
 
-Admins can view student records and perform attendance-related actions such as marking attendance, marking missed lessons, recording makeup lessons, and undoing attendance actions. They do not have full destructive access such as deleting students or resetting courses unless explicitly allowed. 
+## Attendance and makeup behaviour
 
+Weekend attendance is stored against the `students` records and audited through `student_audit`. Programme-specific attendance uses separate tables for weekday, MatchPlay, and 1-1 sessions.
 
-### Member 
+The cross-programme makeup dialog uses Supabase RPC functions to find the latest available credit and complete its usage. It records:
 
-Members have limited access. They can view the dashboard and perform basic attendance-related actions if allowed by the current row-level security policies. They should not be able to access superuser-only payment or admin pages.
+- the source programme and missed lesson;
+- the target programme and date;
+- the source credit value;
+- the target lesson value; and
+- any top-up amount when the target costs more than the credit.
 
----
+Weekday makeup values are calculated from the selected lesson duration at the configured hourly rate.
 
-## Directory Overview
+## Payment systems
 
-### `/`
+Payment data is separated by programme:
 
-The login page of the website.
+- Weekend uses `payment_history` and `weekend_payment_period_state`.
+- Weekday uses `weekday_payments` and the shared payment counter state.
+- MatchPlay uses `matchplay_payments` and the shared payment counter state.
+- 1-1 uses `training_payments` based on `one_to_one_sessions`.
+- Makeup top-ups use `makeup_topup_payments`, `makeup_payment_events`, and `makeup_payment_counter_state`.
 
-Users land here before entering the system. The page handles authentication and redirects logged-in users to the relevant authenticated area.
+Payment routes support the relevant combination of monthly filtering, paid/unpaid state, counter reset, undo, and Telegram summary delivery.
 
-Main purpose:
+## Coach attendance polling
 
-- User login
-- Authentication entry point
-- Redirect users after login
+`/coachattendance` creates a dated Saturday or Sunday poll and sends it through the coach-attendance Telegram bot. The webhook records responses in `coach_attendance_votes`, linked to `coach_attendance_polls`. Coach Telegram handles are maintained from Settings through `coach_profiles`.
 
-### `/dashboard`
+## Important API route groups
 
-The main student dashboard.
+### Authentication and users
 
-This is the central page for viewing student records and handling quick attendance actions. It displays students in a table with fields such as name, day, timeslot, level, attended count, missed count, actions, and attendance history.
+- `/api/auth/login`
+- `/api/auth/send-reset-code`
+- `/api/auth/verify-reset-code`
+- `/api/users/create`
+- `/api/users/list`
+- `/api/users/update`
+- `/api/users/delete`
+- `/api/users/resend-reset-code`
 
-Main purpose:
+### Student search and auditing
 
-- View all student records
-- Filter students by day, timeslot, and level
-- Search for students
-- Mark attendance
-- Mark missed lessons
-- Record makeup lessons
-- Undo attendance actions
-- View attendance history
-- Allow superusers to edit student fields
-- Allow superusers to reset or delete student records
+- `/api/search`
+- `/api/attendance-search`
+- `/api/payment-search`
+- `/api/audit/log-attendance`
+- `/api/students/delete`
 
-Attendance history behaviour:
+### Telegram delivery
 
-- `Mark` adds the current date
-- `Missed` adds the current date with `(missed)`
-- `Makeup` replaces the latest missed record with the current date and `(makeup)`
-- `Undo` reverses the latest valid attendance-related action
+- `/api/telegram-reminder`
+- `/api/telegram-weekend-payment`
+- `/api/telegram-weekday-payment`
+- `/api/telegram-matchplay-payment`
+- `/api/telegram-trngpayment`
+- `/api/telegram-makeup-payment`
+- `/api/telegram-coach-attendance/send`
+- `/api/telegram-coach-attendance/webhook`
 
----
+### Scheduled summaries
 
-### `/attendance`
+- `/api/cron/monthly-payment-summaries`
+- `/api/cron/makeup-payment-summary`
 
-A more detailed attendance management page.
+Protect scheduled routes with `CRON_SECRET` in production.
 
-This page is focused on attendance tracking and history management. It is mainly intended for superusers who need a more complete view of student attendance, lesson counts, pricing, weeks, and attendance records.
+## Environment variables
 
-Main purpose:
-
-- View detailed attendance records
-- Update attendance counts
-- Mark attendance
-- Mark missed lessons
-- Convert missed lessons into makeup lessons
-- Undo attendance actions
-- View detailed attendance history
-- Edit student-related training details such as day, timeslot, level, price, and weeks
-
----
-
-### `/payment`
-
-The main payment tracking page for regular group training.
-
-This page tracks whether students have paid for their training package. It calculates total collected payments, records payment history, and sends Telegram notifications when payment status changes.
-
-Main purpose:
-
-- View student payment status
-- Mark students as paid or unpaid
-- Track total payments collected
-- Store payment history
-- Send payment notifications to Telegram
-- Reset payment totals for a new tracking period
-- Undo the latest payment addition
-
-This page does not manage attendance history directly.
-
----
-
-### `/training`
-
-The 1-on-1 training scheduling page.
-
-This page is used to assign students to coaches for specific Sunday 1-on-1 training sessions. The layout is designed around coach-to-student pairing so that it is clear which coach is assigned to which student.
-
-Main purpose:
-
-- View Sundays for the selected month
-- Add 1-on-1 training sessions
-- Assign a coach to a student
-- Update coach-student pairings
-- Remove a student from a 1-on-1 training date
-
-Expected pairing format:
-
-```text
-Coach → Student
-```
-
----
-
-### `/trngpayment`
-
-The 1-on-1 payment tracking page.
-
-This page is separate from the normal `/payment` page. It tracks payment for 1-on-1 training sessions based on scheduled sessions from `/training`.
-
-Main purpose:
-
-- View 1-on-1 sessions for the selected month
-- Track paid and unpaid 1-on-1 sessions
-- Calculate total 1-on-1 payments collected
-- Send Telegram notifications using the 1-on-1 payment bot
-- Reset monthly 1-on-1 payment totals
-- Undo the latest 1-on-1 payment update
-
-Telegram flow:
-
-```text
-/trngpayment
-→ /api/telegram-trngpayment
-→ 1-on-1 payment bot token
-→ Telegram group chat
-```
-
----
-
-### `/settings`
-
-The user settings and account management page.
-
-This page allows users to view and update account-related information, depending on their role. Superusers may have access to more settings than admins or members.
-
-Main purpose:
-
-- View account details
-- Update user settings
-- Manage user-related options
-- Allow logout
-- Restrict sensitive role changes
-
----
-
-## API Routes
-
-The website uses several backend API routes to safely perform server-side actions.
-
-### `/api/search`
-
-Searches student records from the dashboard.
-
-Used by:
-
-- `/dashboard`
-
----
-
-### `/api/attendance-search`
-
-Searches student records from the attendance page.
-
-Used by:
-
-- `/attendance`
-
----
-
-### `/api/payment-search`
-
-Searches student records from the payment page.
-
-Used by:
-
-- `/payment`
-
----
-
-### `/api/audit/log-attendance`
-
-Logs attendance-related actions into the `student_audit` table.
-
-Used for:
-
-- `mark`
-- `missed`
-- `makeup`
-- `undo`
-- `reset`
-- `delete`
-
-This audit trail is important because undo logic depends on previous attendance actions.
-
----
-
-### `/api/students/delete`
-
-Deletes a student record.
-
-This should only be available to superusers.
-
----
-
-### `/api/telegram-reminder`
-
-Sends Telegram messages using the general Telegram notification bot.
-
-Used by:
-
-- Regular payment notifications
-- General reminders
-- Payment summaries
-
----
-
-### `/api/telegram-trngpayment`
-
-Sends Telegram messages using the dedicated 1-on-1 payment bot.
-
-Used by:
-
-- `/trngpayment`
-
-This route should use a separate bot token:
+Create `.env.local` and configure only the integrations you use. Never commit real credentials.
 
 ```env
-TELEGRAM_TRNGPAYMENT_BOT_TOKEN=your_1_on_1_payment_bot_token
-TELEGRAM_CHAT_ID=your_group_chat_id
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+
+# Password recovery email
+BREVO_API_KEY=
+BREVO_SENDER_EMAIL=
+
+# General reminders
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_IDS=
+
+# Shared or programme-specific payment delivery
+TELEGRAM_CHAT_ID=
+TELEGRAM_WEEKEND_PAYMENT_BOT_TOKEN=
+TELEGRAM_WEEKEND_PAYMENT_CHAT_ID=
+TELEGRAM_WEEKEND_PAYMENT_THREAD_ID=
+TELEGRAM_WEEKEND_THREAD_ID=
+TELEGRAM_WEEKDAY_PAYMENT_BOT_TOKEN=
+TELEGRAM_WEEKDAY_THREAD_ID=
+TELEGRAM_MATCHPLAY_PAYMENT_BOT_TOKEN=
+TELEGRAM_MATCHPLAY_THREAD_ID=
+TELEGRAM_TRNGPAYMENT_BOT_TOKEN=
+TELEGRAM_TRNGPAYMENT_THREAD_ID=
+TELEGRAM_MAKEUP_PAYMENT_BOT_TOKEN=
+TELEGRAM_MAKEUP_PAYMENT_CHAT_ID=
+TELEGRAM_MAKEUP_PAYMENT_THREAD_ID=
+
+# Coach attendance bot and topics
+TELEGRAM_COACH_ATTENDANCE_BOT_TOKEN=
+TELEGRAM_COACH_ATTENDANCE_CHAT_ID=
+TELEGRAM_COACH_ATTENDANCE_THREAD_ID=
+TELEGRAM_COACH_ATTENDANCE_SATURDAY_THREAD_ID=
+TELEGRAM_COACH_ATTENDANCE_SUNDAY_THREAD_ID=
+
+# Scheduled route protection
+CRON_SECRET=
 ```
 
----
+## Database setup
 
-### `/api/users/list`
+The application expects its Supabase tables, RPC functions, and RLS policies to exist before use. Versioned SQL currently included in the repository covers payment history and tracking-period setup:
 
-Fetches the list of app users.
+- `migrations/20250719102000_create_payment_history.sql`
+- `migrations/20250719102100_create_tracking_period.sql`
+- `sql/setup_payment_history_rls.sql`
 
-Used by:
+The running application also references programme, makeup, coach-attendance, reset-code, profile, and payment-state tables. Keep the deployed Supabase schema and RPC definitions in sync with the codebase, and enforce permissions with RLS rather than relying only on hidden interface controls.
 
-- `/training`
-
-This is used to populate the coach dropdown.
-
----
-
-### `/api/create-payment-table`
-
-Ensures payment history storage exists before recording payment history.
-
-Used by:
-
-- `/payment`
-
----
-
-## Database Tables
-
-### `students`
-
-Stores the main student records.
-
-Common fields include:
-
-- `student_id`
-- `student_name`
-- `student_day`
-- `student_timeslot`
-- `student_levelofplay`
-- `attended`
-- `missed`
-- `total_weeks`
-- `price`
-- `paid`
-- `attendance_records`
-- `created_at`
-- `updated_at`
-
-Important note:
-
-`attendance_records` should be stored as `text[]`, not `timestamp with time zone[]`, because the system stores labelled attendance records such as:
-
-```text
-2026-06-04T15:21:58.497Z
-2026-06-04T15:21:58.497Z|missed
-2026-06-04T15:21:58.497Z|makeup|2026-06-01T10:00:00.000Z
-```
-
----
-
-### `student_audit`
-
-Stores the history of attendance-related actions.
-
-Common fields include:
-
-- `id`
-- `student_id`
-- `action`
-- `created_at`
-- `user_id`
-
-This table supports undo logic. Every undo action should also be logged, so the system knows which previous action has already been reversed.
-
----
-
-### `payment_history`
-
-Stores regular training payment records.
-
-Common fields include:
-
-- `id`
-- `student_id`
-- `amount`
-- `recorded_at`
-
-Used by `/payment`.
-
----
-
-### `training_sessions`
-
-Stores 1-on-1 training sessions.
-
-Common fields include:
-
-- `id`
-- `session_date`
-- `student_id`
-- `coach_id`
-- `created_at`
-- `updated_at`
-
-Used by `/training` and `/trngpayment`.
-
----
-
-### `training_payments`
-
-Stores 1-on-1 payment status.
-
-Common fields include:
-
-- `id`
-- `training_student_id`
-- `week_date`
-- `paid`
-- `created_at`
-- `updated_at`
-
-Used by `/trngpayment`.
-
----
-
-## Environment Variables
-
-Create a `.env.local` file with the required Supabase and Telegram values.
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-
-TELEGRAM_BOT_TOKEN=your_general_telegram_bot_token
-TELEGRAM_PAYMENT_BOT_TOKEN=your_payment_bot_token
-TELEGRAM_TRNGPAYMENT_BOT_TOKEN=your_1_on_1_payment_bot_token
-TELEGRAM_CHAT_ID=your_telegram_group_chat_id
-```
-
-Keep all bot tokens private. Do not commit `.env.local` to GitHub.
-
----
-
-## Telegram Setup
-
-The app can send notifications to Telegram group chats through bots.
-
-Recommended setup:
-
-- One group chat for all badminton notifications
-- One general bot for reminders
-- One payment bot for normal payment updates
-- One 1-on-1 payment bot for `/trngpayment`
-
-The same Telegram group can be reused by all bots using the same `TELEGRAM_CHAT_ID`.
-
----
-
-## Access Control and RLS
-
-Supabase Row Level Security should be configured so that:
-
-- Superusers can view and manage all relevant tables
-- Admins can view students and perform attendance actions
-- Members can view allowed student records and perform allowed attendance actions
-- Only superusers can delete students or access sensitive payment/admin areas
-
-The frontend hides buttons based on role, but RLS should still enforce the actual security rules on the database side.
-
----
-
-## Running the Project Locally
-
-Install dependencies:
+## Local development
 
 ```bash
 npm install
-```
-
-Start the development server:
-
-```bash
 npm run dev
 ```
 
-Open the app in the browser:
+Open `http://localhost:3000`.
 
-```text
-http://localhost:3000
+Validation commands:
+
+```bash
+npm test
+npm run build
 ```
 
----
+`npm test` currently runs TypeScript without emitting files. `npm run build` performs the optimised Next.js production build.
 
-## Deployment Notes
+## Deployment checklist
 
-Before deploying:
-
-- Confirm `.env.local` values are correctly set in the deployment platform
-- Confirm Supabase RLS policies are active
-- Confirm Telegram bot tokens are valid
-- Confirm `attendance_records` is `text[]`
-- Test login for all roles: superuser, admin, member
-- Test attendance actions from `/dashboard`
-- Test detailed attendance from `/attendance`
-- Test payment notifications from `/payment`
-- Test 1-on-1 payment notifications from `/trngpayment`
-
----
-
-## Summary
-
-This website is a full badminton class management system. It centralises student tracking, attendance, payments, 1-on-1 training, role-based access control, and Telegram notifications so that the badminton group can manage operations more easily from one place.
-embers have limited access. They can view the dashboard and perform basic attendance-related actions if allowed by the current row-level security policies. They should not be able to access superuser-only payment or admin pages.
-
+- Configure all required Supabase, Brevo, Telegram, and cron variables.
+- Apply the required database tables, RPC functions, and RLS policies.
+- Configure the coach-attendance Telegram webhook.
+- Test login and recovery for each role.
+- Test attendance, makeup, payment, undo, and reset workflows for every enabled programme.
+- Test Settings permissions for superusers, admins, and members.
+- Confirm wide tables scroll inside their cards at mobile and reduced desktop widths.
