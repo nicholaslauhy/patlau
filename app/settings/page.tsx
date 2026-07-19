@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import AppHeader from "./../components/AppHeader";
+import PasswordField from "./../components/PasswordField";
 import "./../styles.css";
 import "./../dashboard/dashboard.css";
 import "./settings.css";
@@ -498,8 +499,7 @@ export default function SettingsPage() {
 
                                 <div className="form-group">
                                     <label htmlFor="password">Initial password (optional)</label>
-                                    <input
-                                        type="password"
+                                    <PasswordField
                                         id="password"
                                         value={newUserPassword}
                                         onChange={(e) => setNewUserPassword(e.target.value)}

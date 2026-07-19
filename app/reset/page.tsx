@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import AuthHeader from './../components/AuthHeader';
+import PasswordField from './../components/PasswordField';
 import './../styles.css';
 
 const supabase = createBrowserClient(
@@ -246,10 +247,9 @@ export default function ResetPage() {
                             <form onSubmit={handleSubmitPassword} className="auth-reset-form">
                                 <div className="form-group">
                                     <label htmlFor="new-password">New password</label>
-                                    <input
+                                    <PasswordField
                                         id="new-password"
                                         ref={passRef}
-                                        type="password"
                                         value={newPassword}
                                         onChange={(e) => setNewPassword(e.target.value)}
                                         placeholder="At least 6 characters"

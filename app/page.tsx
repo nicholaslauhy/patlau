@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import AuthHeader from './components/AuthHeader';
+import PasswordField from './components/PasswordField';
 import './styles.css';
 
 const supabase = createBrowserClient(
@@ -123,9 +124,8 @@ export default function Login() {
 
                         <div className="form-group">
                             <label htmlFor="password">Password</label>
-                            <input
+                            <PasswordField
                                 required
-                                type="password"
                                 id="password"
                                 className="form-input"
                                 placeholder="Enter your password"

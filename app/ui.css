@@ -51,6 +51,48 @@ textarea {
   font: inherit;
 }
 
+.password-field {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.password-field > input {
+  padding-right: 3rem !important;
+}
+
+.password-field__toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.45rem;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #687b8f;
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.password-field__toggle:hover {
+  background: #eaf2f8;
+  color: var(--primary-hover);
+}
+
+.password-field__toggle:focus-visible {
+  outline: 3px solid rgba(22, 119, 200, 0.22);
+  outline-offset: 1px;
+}
+
+.password-field__toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,

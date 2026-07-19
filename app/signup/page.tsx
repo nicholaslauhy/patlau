@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
+import PasswordField from './../components/PasswordField';
 import './../styles.css';
 import './signup.css';
 
@@ -151,8 +152,7 @@ export default function SignUp() {
 
               <div className="form-group">
                 <label htmlFor="password">Password *</label>
-                <input
-                    type="password"
+                <PasswordField
                     id="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
