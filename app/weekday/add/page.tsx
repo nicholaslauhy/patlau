@@ -215,12 +215,12 @@ export default function AddWeekdayStudentPage() {
                         <small className="muted">Default is S${DEFAULT_HOURLY_RATE}/hour, but you can change it for this student.</small>
                     </div>
 
-                    <div style={{ marginTop: 22 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                    <div className="session-builder">
+                        <div className="session-builder__heading">
                             <div>
                                 <h3 style={{ margin: 0 }}>Training Sessions</h3>
                                 <p className="muted" style={{ margin: '4px 0 0' }}>
-                                    Default rate: S${DEFAULT_HOURLY_RATE}/hour. You can customise this student's hourly rate below.
+                                    Add each day this student trains and the length of that session.
                                 </p>
                             </div>
 
@@ -234,28 +234,16 @@ export default function AddWeekdayStudentPage() {
                             </button>
                         </div>
 
-                        <div style={{ display: 'grid', gap: 12, marginTop: 14 }}>
+                        <div className="session-list">
                             {schedules.map((schedule, index) => {
                                 const availableDays = WEEKDAY_OPTIONS.filter(
                                     (day) => day === schedule.day || !usedDays.includes(day)
                                 );
 
                                 return (
-                                    <div
-                                        key={`${schedule.day}-${index}`}
-                                        style={{
-                                            display: 'grid',
-                                            gridTemplateColumns: 'minmax(180px, 1fr) minmax(180px, 1fr) auto',
-                                            gap: 12,
-                                            alignItems: 'end',
-                                            border: '1px solid #e5e7eb',
-                                            borderRadius: 14,
-                                            padding: 14,
-                                            background: '#f9fafb',
-                                        }}
-                                    >
-                                        <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-                                            Day
+                                    <div key={`${schedule.day}-${index}`} className="session-row">
+                                        <label className="session-field">
+                                            <span className="session-field__label">Training day</span>
                                             <select
                                                 className="filter-input"
                                                 value={schedule.day}
@@ -267,9 +255,9 @@ export default function AddWeekdayStudentPage() {
                                             </select>
                                         </label>
 
-                                        <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-                                            Number of Hours
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <label className="session-field">
+                                            <span className="session-field__label">Session length</span>
+                                            <div className="input-with-suffix">
                                                 <input
                                                     className="filter-input"
                                                     type="number"
@@ -279,9 +267,8 @@ export default function AddWeekdayStudentPage() {
                                                     onChange={(event) =>
                                                         updateSchedule(index, { duration_hours: Number(event.target.value) })
                                                     }
-                                                    style={{ width: '100%' }}
                                                 />
-                                                <span style={{ fontWeight: 800, color: '#2563eb' }}>h</span>
+                                                <span className="input-suffix">hours</span>
                                             </div>
                                         </label>
 
@@ -299,21 +286,22 @@ export default function AddWeekdayStudentPage() {
                         </div>
                     </div>
 
-                    <div
-                        style={{
-                            marginTop: 20,
-                            padding: 16,
-                            borderRadius: 14,
-                            background: '#eff6ff',
-                            border: '1px solid #bfdbfe',
-                            display: 'grid',
-                            gap: 6,
-                        }}
-                    >
-                        <strong>Estimated payment</strong>
-                        <span>Weekly hours: {weeklyHours.toFixed(2)}h</span>
-                        <span>Weekly amount: S${estimatedWeeklyAmount.toFixed(2)}</span>
-                        <span>Simple 4-week estimate: S${estimatedFourWeekAmount.toFixed(2)}</span>
+                    <div className="estimate-panel">
+                        <strong className="estimate-panel__title">Estimated payment</strong>
+                        <div className="estimate-grid">
+                            <div className="estimate-metric">
+                                <span>Weekly duration</span>
+                                <strong>{weeklyHours.toFixed(2)} hours</strong>
+                            </div>
+                            <div className="estimate-metric">
+                                <span>Weekly amount</span>
+                                <strong>S${estimatedWeeklyAmount.toFixed(2)}</strong>
+                            </div>
+                            <div className="estimate-metric">
+                                <span>Four-week estimate</span>
+                                <strong>S${estimatedFourWeekAmount.toFixed(2)}</strong>
+                            </div>
+                        </div>
                         <small className="muted">
                             Actual monthly payment is calculated on the payment page using the real number of Mondays, Wednesdays, and Thursdays in the selected month.
                         </small>

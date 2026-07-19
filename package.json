@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "tsc --noEmit"
   },
   "repository": {
     "type": "git",
@@ -21,18 +21,15 @@
   },
   "homepage": "https://github.com/nicholaslauhy/patlau#readme",
   "dependencies": {
-    "@supabase/auth-helpers-nextjs": "^0.10.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.52.0",
     "@types/node": "^24.0.14",
     "@types/uuid": "^10.0.0",
-    "jwt-decode": "^4.0.0",
     "next": "^16.2.6",
     "node-cron": "^4.2.1",
     "node-telegram-bot-api": "^0.66.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "supports-color": "^10.2.2",
     "typescript": "^5.8.3",
     "uuid": "^11.1.0"
   },

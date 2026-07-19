@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import './styles.css'
+import './ui.css'
 import AttendanceHistoryEnhancer from './components/AttendanceHistoryEnhancer'
 
 export const metadata: Metadata = {
