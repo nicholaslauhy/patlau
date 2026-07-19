@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../../components/AppHeader';
+import CalendarPicker from './../../components/CalendarPicker';
 import './../../styles.css';
 import './../../dashboard/dashboard.css';
 import './../../payment/payment.css';
@@ -613,11 +614,11 @@ export default function WeekdayPaymentPage() {
                         <div className="filter-group">
                             <label className="filter-label">
                                 Month
-                                <input
-                                    type="month"
+                                <CalendarPicker
+                                    mode="month"
                                     className="filter-input"
                                     value={selectedMonth}
-                                    onChange={(event) => setSelectedMonth(event.target.value)}
+                                    onChange={setSelectedMonth}
                                 />
                             </label>
                         </div>

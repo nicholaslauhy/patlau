@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
+import CalendarPicker from './CalendarPicker';
 
 export type TrainingType = 'weekend' | 'one_to_one' | 'weekday' | 'matchplay';
 
@@ -333,11 +334,11 @@ export default function CrossProgrammeMakeupModal({
 
                   <div className="form-group">
                     <label>Makeup date</label>
-                    <input
+                    <CalendarPicker
+                        mode="date"
                         className="form-input"
-                        type="date"
                         value={targetDate}
-                        onChange={(event) => setTargetDate(event.target.value)}
+                        onChange={setTargetDate}
                     />
                   </div>
 

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
 import AppHeader from './../components/AppHeader';
+import CalendarPicker from './../components/CalendarPicker';
 import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../components/CrossProgrammeMakeupModal';
 import './../styles.css';
 import './../dashboard/dashboard.css';
@@ -604,11 +605,11 @@ export default function TrainingPage() {
                     <div className="filter-grid training-toolbar-grid">
                         <div className="filter-group">
                             <label className="filter-label">Month</label>
-                            <input
-                                type="month"
+                            <CalendarPicker
+                                mode="month"
                                 className="filter-input"
                                 value={selectedMonth}
-                                onChange={(e) => setSelectedMonth(e.target.value)}
+                                onChange={setSelectedMonth}
                             />
                         </div>
                     </div>

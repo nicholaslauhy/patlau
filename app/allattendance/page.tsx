@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createBrowserClient } from "@supabase/ssr";
 import AppHeader from "./../components/AppHeader";
+import CalendarPicker from "./../components/CalendarPicker";
 import "./../styles.css";
 import "./../dashboard/dashboard.css";
 
@@ -592,11 +593,11 @@ export default function AllAttendancePage() {
 
                             <label style={{ display: "grid", gap: 8, fontWeight: 800, color: "#0f172a" }}>
                                 Calendar Day
-                                <input
-                                    type="date"
+                                <CalendarPicker
+                                    mode="date"
                                     className="form-input"
                                     value={selectedDate}
-                                    onChange={(event) => setSelectedDate(event.target.value)}
+                                    onChange={setSelectedDate}
                                     disabled={viewMode === "all"}
                                     style={{
                                         minHeight: 48,

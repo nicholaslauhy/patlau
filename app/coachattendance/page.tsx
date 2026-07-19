@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../components/AppHeader';
+import CalendarPicker from './../components/CalendarPicker';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 
@@ -630,11 +631,11 @@ export default function CoachAttendancePage() {
                                         Actual poll date
                                     </label>
 
-                                    <input
-                                        type="date"
+                                    <CalendarPicker
+                                        mode="date"
                                         className="filter-input"
                                         value={activePreset.date}
-                                        onChange={(event) => updatePresetDate(event.target.value)}
+                                        onChange={updatePresetDate}
                                         style={{
                                             width: '100%',
                                             boxSizing: 'border-box',
