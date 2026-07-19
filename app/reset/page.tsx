@@ -17,6 +17,7 @@ export default function ResetPage() {
     const [loading, setLoading] = useState(true);
 
     const [resetMode, setResetMode] = useState<'link' | 'code' | 'password'>('code');
+    const [recoveryStep, setRecoveryStep] = useState<'request' | 'verify'>('request');
     const [hasSession, setHasSession] = useState(false);
 
     const [email, setEmail] = useState('');
@@ -123,12 +124,20 @@ export default function ResetPage() {
             }
 
             setSuccess('Code sent to your email. Check your inbox (and spam folder).');
+            setRecoveryStep('verify');
         } catch (err) {
             console.error('Error requesting code:', err);
             setError('Error requesting code. Try again.');
         } finally {
             setBusy(false);
         }
+    };
+
+    const returnToEmailStep = () => {
+        setRecoveryStep('request');
+        setCode('');
+        setError(null);
+        setSuccess(null);
     };
 
     const handleVerifyCode = async (e: React.FormEvent) => {
@@ -211,14 +220,16 @@ export default function ResetPage() {
         <div className="container auth-shell">
             <AuthHeader />
             <main className="auth-main auth-reset-main">
-            <section className="form-card auth-reset-card">
+            <section className="form-card auth-reset-card auth-reset-card--single">
                 <div className="auth-card__intro">
                     <span className="auth-eyebrow">Account recovery</span>
                     <h1 className="page-title">Reset your password</h1>
                     <p>
                         {resetMode === 'password' && hasSession
                             ? 'Choose a secure new password for your account.'
-                            : 'Request a six-digit code, then verify it to continue.'}
+                            : recoveryStep === 'request'
+                                ? 'Enter your account email to receive a six-digit recovery code.'
+                                : 'Enter the code we sent to your email address.'}
                     </p>
                 </div>
 
@@ -258,12 +269,11 @@ export default function ResetPage() {
                                     {busy ? 'Saving...' : 'Set new password'}
                                 </button>
                             </form>
-                        ) : (
-                            <div className="auth-reset-steps">
-                                <form onSubmit={handleSendCode} className="auth-reset-form auth-reset-step">
-                                    <div className="auth-reset-step__heading">
-                                        <span>1</span>
-                                        <div><strong>Request a code</strong><small>We will email a six-digit verification code.</small></div>
+                        ) : recoveryStep === 'request' ? (
+                                <form onSubmit={handleSendCode} className="auth-reset-form auth-reset-step-panel">
+                                    <div className="auth-reset-progress">
+                                        <span>Step 1 of 2</span>
+                                        <div aria-hidden="true"><i className="is-active" /><i /></div>
                                     </div>
                                     <div className="form-group">
                                         <label htmlFor="reset-email">Email</label>
@@ -287,11 +297,15 @@ export default function ResetPage() {
                                         {busy ? 'Sending...' : 'Send Code'}
                                     </button>
                                 </form>
-
-                                <form onSubmit={handleVerifyCode} className="auth-reset-form auth-reset-step">
-                                    <div className="auth-reset-step__heading">
-                                        <span>2</span>
-                                        <div><strong>Verify the code</strong><small>Enter the code from your recovery email.</small></div>
+                        ) : (
+                                <form onSubmit={handleVerifyCode} className="auth-reset-form auth-reset-step-panel">
+                                    <div className="auth-reset-progress">
+                                        <span>Step 2 of 2</span>
+                                        <div aria-hidden="true"><i className="is-complete" /><i className="is-active" /></div>
+                                    </div>
+                                    <div className="auth-reset-email-summary">
+                                        <div><span>Code sent to</span><strong>{email}</strong></div>
+                                        <button type="button" onClick={returnToEmailStep} disabled={busy}>Change email</button>
                                     </div>
                                     <div className="form-group">
                                         <label htmlFor="reset-code">Reset Code</label>
@@ -309,15 +323,19 @@ export default function ResetPage() {
                                         <small className="hint">Enter the 6-digit code from your email.</small>
                                     </div>
 
-                                    <button
-                                        type="submit"
-                                        className="submit-btn auth-reset-primary"
-                                        disabled={busy}
-                                    >
-                                        {busy ? 'Verifying...' : 'Verify Code'}
-                                    </button>
+                                    <div className="auth-reset-form-actions">
+                                        <button type="button" className="auth-reset-back" onClick={returnToEmailStep} disabled={busy}>
+                                            Back
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="submit-btn auth-reset-primary"
+                                            disabled={busy}
+                                        >
+                                            {busy ? 'Verifying...' : 'Verify Code'}
+                                        </button>
+                                    </div>
                                 </form>
-                            </div>
                         )}
 
                         <div className="auth-reset-footer">
