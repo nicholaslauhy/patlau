@@ -20,7 +20,9 @@
 .settings-card h2 { margin: 0; color: var(--foreground); }
 
 .settings-account-card {
-    overflow: hidden;
+    position: relative;
+    z-index: 2;
+    overflow: visible;
     background: linear-gradient(135deg, #ffffff 0%, #f4f9fd 100%);
 }
 
@@ -43,6 +45,301 @@
     font-weight: 750;
     box-shadow: 0 10px 22px rgba(22, 119, 200, 0.2);
 }
+
+.settings-avatar-editor {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.settings-avatar-button {
+    position: relative;
+    padding: 0;
+    border: 0;
+    cursor: pointer;
+    overflow: visible;
+    transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.settings-avatar-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 13px 27px rgba(22, 119, 200, 0.28);
+}
+
+.settings-avatar-button:focus-visible {
+    outline: 3px solid rgba(22, 119, 200, 0.25);
+    outline-offset: 3px;
+}
+
+.settings-avatar-button:disabled {
+    cursor: wait;
+    opacity: 0.72;
+}
+
+.settings-account-avatar img,
+.settings-user-thumb img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: inherit;
+    object-fit: cover;
+}
+
+.settings-avatar-camera {
+    position: absolute;
+    right: -5px;
+    bottom: -5px;
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    border: 2px solid #fff;
+    border-radius: 999px;
+    background: #172b44;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1;
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.22);
+}
+
+.settings-photo-menu {
+    position: absolute;
+    top: calc(100% + 0.7rem);
+    left: 0;
+    z-index: 30;
+    width: min(250px, calc(100vw - 3rem));
+    padding: 0.42rem;
+    border: 1px solid var(--border-solid);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: var(--shadow-lg);
+}
+
+.settings-photo-menu button {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.12rem;
+    padding: 0.65rem 0.72rem;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--foreground);
+    text-align: left;
+    cursor: pointer;
+}
+
+.settings-photo-menu button:hover,
+.settings-photo-menu button:focus-visible {
+    background: var(--secondary);
+    outline: none;
+}
+
+.settings-photo-menu button span {
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.settings-photo-menu button small {
+    color: var(--muted-foreground);
+    font-size: 0.7rem;
+}
+
+.settings-photo-menu button.is-destructive span,
+.settings-photo-menu button.is-destructive small {
+    color: var(--destructive);
+}
+
+.settings-photo-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.settings-photo-status {
+    margin: 0.85rem 0 0 4.65rem;
+    color: var(--muted-foreground);
+    font-size: 0.78rem;
+}
+
+.settings-account-message {
+    margin-top: 0.9rem;
+}
+
+.profile-photo-editor-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgba(15, 31, 50, 0.55);
+    backdrop-filter: blur(5px);
+}
+
+.profile-photo-editor {
+    width: min(100%, 520px);
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    padding: clamp(1.1rem, 4vw, 1.55rem);
+    border: 1px solid var(--border-solid);
+    border-radius: 22px;
+    background: #fff;
+    box-shadow: 0 28px 70px rgba(15, 31, 50, 0.3);
+}
+
+.profile-photo-editor__heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.profile-photo-editor__heading h2 {
+    margin: 0.18rem 0 0;
+    color: var(--foreground);
+}
+
+.profile-photo-editor__heading p {
+    margin: 0.32rem 0 0;
+    color: var(--muted-foreground);
+    font-size: 0.8rem;
+    line-height: 1.45;
+}
+
+.profile-photo-editor__close {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--border-solid);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--muted-foreground);
+    font-size: 1.35rem;
+    cursor: pointer;
+}
+
+.profile-photo-editor__preview {
+    position: relative;
+    width: min(100%, 340px);
+    aspect-ratio: 1;
+    margin: 1.25rem auto;
+    overflow: hidden;
+    border-radius: 28px;
+    background: #e8eef5;
+    box-shadow: inset 0 0 0 1px var(--border-solid);
+}
+
+.profile-photo-editor__preview canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: grab;
+    touch-action: none;
+}
+
+.profile-photo-editor__preview canvas:active { cursor: grabbing; }
+
+.profile-photo-editor__crop-ring {
+    position: absolute;
+    inset: 9%;
+    pointer-events: none;
+    border: 2px solid rgba(255, 255, 255, 0.9);
+    border-radius: 22px;
+    box-shadow: 0 0 0 999px rgba(8, 23, 39, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.profile-photo-editor__zoom {
+    display: grid;
+    grid-template-columns: 36px auto minmax(120px, 1fr) 36px 48px;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.profile-photo-editor__zoom label {
+    color: var(--foreground);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.profile-photo-editor__zoom input { width: 100%; accent-color: var(--primary); }
+
+.profile-photo-editor__zoom button {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--border-solid);
+    border-radius: 10px;
+    background: #f7f9fb;
+    color: var(--foreground);
+    font-size: 1.1rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.profile-photo-editor__zoom button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.profile-photo-editor__zoom output {
+    color: var(--muted-foreground);
+    font-size: 0.72rem;
+    text-align: right;
+}
+
+.profile-photo-editor__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.7rem;
+    margin-top: 1.3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-solid);
+}
+
+.profile-photo-editor__error { margin-top: 1rem; }
+
+.profile-camera__preview {
+    position: relative;
+    width: min(100%, 420px);
+    aspect-ratio: 4 / 3;
+    display: grid;
+    place-items: center;
+    margin: 1.25rem auto 0;
+    overflow: hidden;
+    border-radius: 18px;
+    background: #102337;
+    color: #fff;
+}
+
+.profile-camera__preview video {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    transform: scaleX(-1);
+}
+
+.profile-camera__loading,
+.profile-camera__unavailable {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 2rem;
+    background: #102337;
+    color: #dce8f3;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.profile-photo-editor__actions button { min-width: 110px; }
 
 .settings-account-summary h1 {
     margin-top: 0.12rem;
@@ -119,6 +416,29 @@
 .users-table th { font-weight: 600; color: var(--muted-foreground); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; background: rgba(240,244,248,0.6); }
 .users-table tbody tr:hover { background: rgba(14,165,233,0.03); }
 
+.settings-user-identity {
+    min-width: 145px;
+    display: flex;
+    align-items: center;
+    gap: 0.62rem;
+    color: var(--foreground);
+    font-weight: 650;
+}
+
+.settings-user-thumb {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border-radius: 10px;
+    background: linear-gradient(145deg, var(--primary), #0f5f9f);
+    color: #fff;
+    font-size: 0.78rem;
+    font-weight: 750;
+}
+
 .delete-btn-small { background: var(--destructive); color: #fff; border: none; padding: 4px 10px; border-radius: 6px; font-weight: 500; cursor: pointer; font-size: 0.78rem; transition: var(--transition); }
 .delete-btn-small:hover:not(:disabled) { background: #dc2626; }
 .delete-btn-small:disabled { opacity: 0.55; cursor: not-allowed; }
@@ -132,4 +452,8 @@
     .settings-user-form .submit-btn { width: 100%; }
     .settings-account-summary { align-items: flex-start; }
     .settings-section-heading { flex-direction: column; }
+    .settings-photo-status { margin-left: 0; }
+    .profile-photo-editor__zoom { grid-template-columns: 36px minmax(100px, 1fr) 36px 44px; }
+    .profile-photo-editor__zoom label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    .profile-photo-editor__actions button { flex: 1; min-width: 0; }
 }

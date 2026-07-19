@@ -180,14 +180,31 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
     const pathname = usePathname();
     const accountRef = useRef<HTMLDivElement>(null);
     const [accountOpen, setAccountOpen] = useState(false);
+    const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
     const sectionColor = getSectionColor(pathname);
 
     useEffect(() => {
+        let mounted = true;
+
+        void supabase.auth.getUser().then(({ data }) => {
+            if (mounted) setAvatarUrl(data.user?.user_metadata?.avatar_url || null);
+        });
+
+        const syncAvatar = (event: Event) => {
+            const detail = (event as CustomEvent<{ avatarUrl: string | null }>).detail;
+            setAvatarUrl(detail?.avatarUrl || null);
+        };
+
         const dismiss = (event: PointerEvent) => {
             if (!accountRef.current?.contains(event.target as Node)) setAccountOpen(false);
         };
+        window.addEventListener('avatar-updated', syncAvatar);
         document.addEventListener('pointerdown', dismiss);
-        return () => document.removeEventListener('pointerdown', dismiss);
+        return () => {
+            mounted = false;
+            window.removeEventListener('avatar-updated', syncAvatar);
+            document.removeEventListener('pointerdown', dismiss);
+        };
     }, []);
 
     const signOut = async () => {
@@ -216,7 +233,16 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
                         aria-expanded={accountOpen}
                         aria-label="Open account menu"
                     >
-                        <AccountIcon />
+                        {avatarUrl ? (
+                            <img
+                                src={avatarUrl}
+                                alt=""
+                                className="account-avatar-image"
+                                onError={() => setAvatarUrl(null)}
+                            />
+                        ) : (
+                            <AccountIcon />
+                        )}
                     </button>
 
                     {accountOpen && (

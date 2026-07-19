@@ -17,6 +17,9 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        const { data: targetData } = await supabaseAdmin.auth.admin.getUserById(userId);
+        const avatarPath = targetData.user?.user_metadata?.avatar_path as string | undefined;
+
         const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
 
         if (error) {
@@ -24,6 +27,11 @@ export async function POST(request: NextRequest) {
                 { error: error.message },
                 { status: 400 }
             );
+        }
+
+        if (avatarPath) {
+            const { error: photoError } = await supabaseAdmin.storage.from('avatars').remove([avatarPath]);
+            if (photoError) console.warn('Unable to remove deleted user profile photo:', photoError.message);
         }
 
         return NextResponse.json({ message: 'User deleted successfully' });

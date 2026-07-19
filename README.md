@@ -8,6 +8,7 @@ PatLau is a role-based training operations system for managing badminton student
 - Email reset-code and password-recovery flow
 - Superuser, admin, and member access levels
 - Shared navigation and account menu across authenticated pages
+- User profile photos with camera/file selection, crop positioning, zoom controls, and default-icon fallback
 - Weekend, weekday, MatchPlay, and 1-1 student management
 - Attendance, missed-session, makeup, and undo workflows
 - Cross-programme makeup credits with automatic top-up calculation
@@ -111,6 +112,7 @@ Payment routes support the relevant combination of monthly filtering, paid/unpai
 - `/api/users/update`
 - `/api/users/delete`
 - `/api/users/resend-reset-code`
+- `/api/profile/photo`
 
 ### Student search and auditing
 
@@ -190,6 +192,7 @@ The application expects its Supabase tables, RPC functions, and RLS policies to 
 
 - `migrations/20250719102000_create_payment_history.sql`
 - `migrations/20250719102100_create_tracking_period.sql`
+- `migrations/20260719090000_create_avatars_bucket.sql`
 - `sql/setup_payment_history_rls.sql`
 
 The running application also references programme, makeup, coach-attendance, reset-code, profile, and payment-state tables. Keep the deployed Supabase schema and RPC definitions in sync with the codebase, and enforce permissions with RLS rather than relying only on hidden interface controls.
