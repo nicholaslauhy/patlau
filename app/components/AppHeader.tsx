@@ -26,6 +26,7 @@ const SECTION_COLORS: Record<string, string> = {
     '/training': '#168765',
     '/trngpayment': '#168765',
     '/makeup': '#d97706',
+    '/chats': '#0f766e',
     '/settings': '#64748b',
     '/myattendance': '#64748b',
     '/allattendance': '#64748b',
@@ -181,6 +182,7 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
     const accountRef = useRef<HTMLDivElement>(null);
     const [accountOpen, setAccountOpen] = useState(false);
     const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+    const [escalatedChats, setEscalatedChats] = useState(0);
     const sectionColor = getSectionColor(pathname);
 
     useEffect(() => {
@@ -206,6 +208,36 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
             document.removeEventListener('pointerdown', dismiss);
         };
     }, []);
+
+    useEffect(() => {
+        if (userRole !== 'superuser') {
+            setEscalatedChats(0);
+            return;
+        }
+
+        let active = true;
+        const loadEscalations = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.access_token) return;
+            try {
+                const response = await fetch('/api/support?view=count', {
+                    headers: { Authorization: `Bearer ${session.access_token}` },
+                });
+                if (!response.ok) return;
+                const data = await response.json();
+                if (active) setEscalatedChats(Number(data.escalated || 0));
+            } catch {
+                // The Chats migration or configuration may not be active yet.
+            }
+        };
+
+        void loadEscalations();
+        const timer = window.setInterval(loadEscalations, 30000);
+        return () => {
+            active = false;
+            window.clearInterval(timer);
+        };
+    }, [userRole]);
 
     const signOut = async () => {
         const { error } = await supabase.auth.signOut();
@@ -271,6 +303,17 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
                     <>
                         {userRole === 'superuser' && (
                             <>
+                                <Link
+                                    href="/chats"
+                                    className={`app-header__nav-button app-header__chat-link${pathname === '/chats' ? ' is-active' : ''}`}
+                                >
+                                    <span>Chats</span>
+                                    {escalatedChats > 0 && (
+                                        <span className="app-header__notification" aria-label={`${escalatedChats} escalated chats`}>
+                                            {escalatedChats > 99 ? '99+' : escalatedChats}
+                                        </span>
+                                    )}
+                                </Link>
                                 <NavMenu label="Makeup" items={makeupItems} userRole={userRole} />
                                 <NavMenu label="Weekday" items={weekdayItems} userRole={userRole} />
                                 <NavMenu label="MatchPlay" items={matchPlayItems} userRole={userRole} />
