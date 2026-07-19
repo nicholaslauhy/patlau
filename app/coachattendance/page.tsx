@@ -583,6 +583,7 @@ export default function CoachAttendancePage() {
                             }}
                         >
                             <div
+                                className="coach-poll-actions"
                                 style={{
                                     display: 'flex',
                                     justifyContent: 'space-between',
@@ -834,19 +835,9 @@ export default function CoachAttendancePage() {
                             >
                                 <button
                                     type="button"
+                                    className="coach-poll-submit"
                                     onClick={sendPoll}
                                     disabled={sending}
-                                    style={{
-                                        minWidth: 220,
-                                        border: 'none',
-                                        borderRadius: 12,
-                                        padding: '12px 18px',
-                                        background: sending ? '#93c5fd' : '#2563eb',
-                                        color: '#ffffff',
-                                        fontWeight: 900,
-                                        cursor: sending ? 'not-allowed' : 'pointer',
-                                        boxShadow: sending ? 'none' : '0 8px 18px rgba(37, 99, 235, 0.22)',
-                                    }}
                                 >
                                     {sending ? 'Sending…' : `Send ${activePreset.title}`}
                                 </button>
