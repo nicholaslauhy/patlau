@@ -132,6 +132,23 @@ export default function CrossProgrammeMakeupModal({
     setTargetLabel(`${LABELS[targetType]} makeup lesson`);
   }, [targetType, weekdayHours]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !confirming) onClose();
+    };
+
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open, confirming, onClose]);
+
   const topUp = useMemo(() => {
     return Math.max(0, Number(targetValue || 0) - Number(credit?.credit_value || 0));
   }, [targetValue, credit]);
@@ -181,8 +198,10 @@ export default function CrossProgrammeMakeupModal({
 
   return (
       <div
+          className="makeup-modal__backdrop"
           role="dialog"
           aria-modal="true"
+          aria-labelledby="makeup-modal-title"
           style={{
             position: 'fixed',
             inset: 0,
@@ -198,6 +217,7 @@ export default function CrossProgrammeMakeupModal({
           }}
       >
         <div
+            className="makeup-modal"
             style={{
               position: 'relative',
               zIndex: 50001,
@@ -214,6 +234,7 @@ export default function CrossProgrammeMakeupModal({
             }}
         >
           <div
+              className="makeup-modal__header"
               style={{
                 flex: '0 0 auto',
                 padding: '22px 24px',
@@ -223,18 +244,21 @@ export default function CrossProgrammeMakeupModal({
                 zIndex: 2,
               }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}>
+            <div className="makeup-modal__heading-row" style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}>
               <div>
-                <h2 style={{ margin: 0 }}>Choose Makeup Programme</h2>
-                <p style={{ margin: '7px 0 0', color: '#64748b' }}>
-                  {studentName} · missed from {LABELS[sourceTrainingType]}
+                <span className="settings-eyebrow">Makeup credit</span>
+                <h2 id="makeup-modal-title" style={{ margin: 0 }}>Choose a makeup programme</h2>
+                <p className="makeup-modal__subtitle" style={{ margin: '7px 0 0', color: '#64748b' }}>
+                  <strong>{studentName}</strong> · missed from {LABELS[sourceTrainingType]}
                 </p>
               </div>
 
               <button
                   type="button"
+                  className="makeup-modal__close"
                   onClick={onClose}
                   disabled={confirming}
+                  aria-label="Close makeup selection"
                   style={{
                     border: 'none',
                     background: '#f1f5f9',
@@ -245,12 +269,15 @@ export default function CrossProgrammeMakeupModal({
                     fontSize: '1.2rem',
                   }}
               >
-                ×
+                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path d="m5 5 10 10M15 5 5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
               </button>
             </div>
           </div>
 
           <div
+              className="makeup-modal__body"
               style={{
                 flex: '1 1 auto',
                 minHeight: 0,
@@ -267,10 +294,14 @@ export default function CrossProgrammeMakeupModal({
             {error && <div className="error-message">{error}</div>}
 
             {loading ? (
-                <p className="muted">Finding available makeup credit...</p>
+                <div className="makeup-modal__loading">
+                  <span className="makeup-modal__spinner" aria-hidden="true" />
+                  <p>Finding available makeup credit...</p>
+                </div>
             ) : credit ? (
                 <>
                   <div
+                      className="makeup-credit-card"
                       style={{
                         border: '1px solid #bfdbfe',
                         background: '#eff6ff',
@@ -278,8 +309,11 @@ export default function CrossProgrammeMakeupModal({
                         padding: 14,
                       }}
                   >
-                    Available credit: <strong>{money(credit.credit_value)}</strong>
-                    <div style={{ color: '#64748b', marginTop: 4, fontSize: '0.86rem' }}>
+                    <div className="makeup-credit-card__value">
+                      <span>Available credit</span>
+                      <strong>{money(credit.credit_value)}</strong>
+                    </div>
+                    <div className="makeup-credit-card__source" style={{ color: '#64748b', marginTop: 4, fontSize: '0.86rem' }}>
                       {credit.source_label}
                     </div>
                   </div>
@@ -371,21 +405,22 @@ export default function CrossProgrammeMakeupModal({
                   </div>
 
                   <div
+                      className="makeup-summary-grid"
                       style={{
                         display: 'grid',
                         gridTemplateColumns: 'repeat(3, 1fr)',
                         gap: 10,
                       }}
                   >
-                    <div style={{ background: '#f8fafc', borderRadius: 12, padding: 12 }}>
+                    <div className="makeup-summary-card" style={{ background: '#f8fafc', borderRadius: 12, padding: 12 }}>
                       <div className="muted">Credit</div>
                       <strong>{money(credit.credit_value)}</strong>
                     </div>
-                    <div style={{ background: '#f8fafc', borderRadius: 12, padding: 12 }}>
+                    <div className="makeup-summary-card" style={{ background: '#f8fafc', borderRadius: 12, padding: 12 }}>
                       <div className="muted">Target</div>
                       <strong>{money(targetValue)}</strong>
                     </div>
-                    <div style={{ background: topUp > 0 ? '#fff1f2' : '#ecfdf5', borderRadius: 12, padding: 12 }}>
+                    <div className={`makeup-summary-card ${topUp > 0 ? 'has-top-up' : 'no-top-up'}`} style={{ background: topUp > 0 ? '#fff1f2' : '#ecfdf5', borderRadius: 12, padding: 12 }}>
                       <div className="muted">Top-up</div>
                       <strong style={{ color: topUp > 0 ? '#dc2626' : '#047857' }}>
                         {money(topUp)}
@@ -393,11 +428,12 @@ export default function CrossProgrammeMakeupModal({
                     </div>
                   </div>
 
-                  <p className="muted" style={{ margin: 0, fontSize: '0.84rem' }}>
+                  <p className="makeup-modal__note muted" style={{ margin: 0, fontSize: '0.84rem' }}>
                     If the target lesson costs more than the available credit, the difference is charged as a top-up. If it costs less, there is no refund or remaining credit.
                   </p>
 
                   <div
+                      className="makeup-modal__actions"
                       style={{
                         display: 'grid',
                         gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
@@ -407,6 +443,7 @@ export default function CrossProgrammeMakeupModal({
                   >
                     <button
                         type="button"
+                        className="makeup-modal__cancel"
                         onClick={onClose}
                         disabled={confirming}
                         style={{
@@ -431,6 +468,7 @@ export default function CrossProgrammeMakeupModal({
 
                     <button
                         type="button"
+                        className="makeup-modal__confirm"
                         onClick={confirmMakeup}
                         disabled={confirming || Number(targetValue) <= 0}
                         style={{
