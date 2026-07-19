@@ -274,6 +274,24 @@ small.muted {
   text-decoration: none;
 }
 
+.app-header__chat-link {
+  border-color: rgba(15, 118, 110, 0.22);
+}
+
+.app-header__notification {
+  min-width: 19px;
+  height: 19px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.64rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .nav-menu__panel,
 .account-menu {
   position: absolute;
