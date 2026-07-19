@@ -612,11 +612,6 @@ export default function TrainingPage() {
                             />
                         </div>
                     </div>
-                    <div className="filter-buttons training-toolbar-actions">
-                        <Link href="/training/add" className="filter-button" style={{ textAlign: 'center', textDecoration: 'none' }}>
-                            Add 1-1 Student
-                        </Link>
-                    </div>
                 </div>
 
                 {message && <p className="error-message">{message}</p>}
