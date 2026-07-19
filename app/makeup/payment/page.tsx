@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../../components/AppHeader';
+import CalendarPicker from './../../components/CalendarPicker';
 import './../../styles.css';
 import './../../dashboard/dashboard.css';
 import './../../payment/payment.css';
@@ -409,11 +410,11 @@ export default function MakeupPaymentPage() {
                         <div className="filter-grid">
                             <label className="filter-label">
                                 Month
-                                <input
-                                    type="month"
+                                <CalendarPicker
+                                    mode="month"
                                     className="filter-input"
                                     value={selectedMonth}
-                                    onChange={(event) => setSelectedMonth(event.target.value)}
+                                    onChange={setSelectedMonth}
                                 />
                             </label>
 

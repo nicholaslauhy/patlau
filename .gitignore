@@ -4,7 +4,6 @@ out/
 
 # dependencies
 node_modules/
-.next/
 
 # production
 /build/
@@ -30,3 +29,15 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+# editor and IDE metadata
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# editor backup and recovery files
+*~
+*.un~
+*.bak
+*.tmp

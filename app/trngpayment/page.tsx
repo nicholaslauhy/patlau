@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
 import AppHeader from './../components/AppHeader';
+import CalendarPicker from './../components/CalendarPicker';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 import './../payment/payment.css';
@@ -709,11 +710,11 @@ export default function TrngPaymentPage() {
                         <div className="filter-group">
                             <label className="filter-label">
                                 Month
-                                <input
-                                    type="month"
+                                <CalendarPicker
+                                    mode="month"
                                     className="filter-input"
                                     value={selectedMonth}
-                                    onChange={(e) => setSelectedMonth(e.target.value)}
+                                    onChange={setSelectedMonth}
                                 />
                             </label>
                         </div>

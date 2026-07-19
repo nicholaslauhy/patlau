@@ -780,46 +780,6 @@ main {
   min-width: 0;
 }
 
-.internal-scroll-table {
-  display: block !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  overflow-x: auto !important;
-  overflow-y: hidden !important;
-  border-collapse: separate;
-  border-spacing: 0;
-  overscroll-behavior-x: contain;
-  scrollbar-gutter: stable;
-  -webkit-overflow-scrolling: touch;
-}
-
-.internal-scroll-table > thead,
-.internal-scroll-table > tbody,
-.internal-scroll-table > tfoot {
-  display: table;
-  width: max-content;
-  min-width: 100%;
-  table-layout: auto;
-}
-
-.internal-scroll-table th,
-.internal-scroll-table td {
-  white-space: nowrap;
-}
-
-/* Keep long/action/history cells readable instead of crushing them. */
-.internal-scroll-table th.actions-header,
-.internal-scroll-table td.actions-cell {
-  min-width: 280px;
-  white-space: normal;
-}
-
-.internal-scroll-table td.attendance-history,
-.internal-scroll-table th:last-child {
-  min-width: 170px;
-  white-space: normal;
-}
-
 /* ============================================================
    ATTENDANCE HISTORY DROPDOWN
    ============================================================ */

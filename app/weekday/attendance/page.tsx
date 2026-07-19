@@ -523,19 +523,19 @@ export default function WeekdayAttendancePage() {
                                                 <tr key={getRowKey(student.id, schedule.day)}>
                                                     <td>{student.student_name}</td>
                                                     <td>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                        <div className="input-with-suffix input-with-suffix--compact">
                                                             <input
-                                                                className="weeks-input"
+                                                                className="weeks-input filter-input"
                                                                 type="number"
                                                                 min="0.25"
                                                                 step="0.25"
                                                                 value={hours}
                                                                 onChange={(event) => setHoursForRow(student.id, schedule.day, Number(event.target.value))}
                                                             />
-                                                            <strong>h</strong>
+                                                            <span className="input-suffix">hours</span>
                                                         </div>
                                                     </td>
-                                                    <td>{makeupBalance.toFixed(2)}h</td>
+                                                    <td>{makeupBalance.toFixed(2)} hours</td>
                                                     <td className="actions-cell">
                                                         <div className="actions-row" style={{ flexWrap: 'nowrap' }}>
                                                             <button

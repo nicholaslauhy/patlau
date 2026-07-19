@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { createBrowserClient } from "@supabase/ssr";
+import AppHeader from "./../components/AppHeader";
+import PasswordField from "./../components/PasswordField";
+import ProfilePhotoEditor from "./../components/ProfilePhotoEditor";
+import ProfileCameraCapture from "./../components/ProfileCameraCapture";
 import "./../styles.css";
 import "./../dashboard/dashboard.css";
 import "./settings.css";
@@ -21,6 +24,8 @@ interface User {
     user_metadata?: {
         name?: string;
         role?: UserRole;
+        avatar_url?: string | null;
+        avatar_path?: string | null;
     };
     app_metadata?: {
         role?: UserRole;
@@ -47,6 +52,15 @@ export default function SettingsPage() {
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
     const [currentUserId, setCurrentUserId] = useState("");
+    const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+    const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
+    const [photoBusy, setPhotoBusy] = useState(false);
+    const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
+    const [cameraOpen, setCameraOpen] = useState(false);
+    const [photoError, setPhotoError] = useState("");
+    const [photoSuccess, setPhotoSuccess] = useState("");
+    const photoEditorRef = useRef<HTMLDivElement>(null);
+    const photoFileRef = useRef<HTMLInputElement>(null);
     const [profileHandles, setProfileHandles] = useState<Record<string, string>>(
         {},
     );
@@ -64,6 +78,16 @@ export default function SettingsPage() {
         loadCoachProfiles();
     }, []);
 
+    useEffect(() => {
+        const dismiss = (event: PointerEvent) => {
+            if (!photoEditorRef.current?.contains(event.target as Node)) {
+                setPhotoMenuOpen(false);
+            }
+        };
+        document.addEventListener("pointerdown", dismiss);
+        return () => document.removeEventListener("pointerdown", dismiss);
+    }, []);
+
     const loadUserInfo = async () => {
         try {
             const {
@@ -73,12 +97,127 @@ export default function SettingsPage() {
                 setCurrentUserId(user.id);
                 setUserName(user.user_metadata?.name || user.email || "User");
                 setUserRole((user.user_metadata?.role as UserRole) || "member");
+                setAvatarUrl(user.user_metadata?.avatar_url || null);
             } else {
                 router.push("/");
             }
         } catch (err) {
             console.error("Failed to load user info:", err);
             router.push("/");
+        }
+    };
+
+    const announceAvatar = (nextAvatarUrl: string | null) => {
+        window.dispatchEvent(
+            new CustomEvent("avatar-updated", {
+                detail: { avatarUrl: nextAvatarUrl },
+            }),
+        );
+    };
+
+    const handlePhotoSelected = (file?: File) => {
+        if (!file) return;
+
+        setPhotoError("");
+        setPhotoSuccess("");
+        setPhotoMenuOpen(false);
+
+        if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+            setPhotoError("Choose a JPG, PNG, or WebP image.");
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            setPhotoError("Profile photos must be 5 MB or smaller.");
+            return;
+        }
+
+        setPendingPhoto(file);
+        if (photoFileRef.current) photoFileRef.current.value = "";
+    };
+
+    const uploadCroppedPhoto = async (blob: Blob) => {
+        try {
+            setPhotoBusy(true);
+            setPhotoError("");
+            const {
+                data: { session },
+            } = await supabase.auth.getSession();
+            if (!session?.access_token) throw new Error("Please sign in again to update your photo.");
+
+            const formData = new FormData();
+            formData.append("photo", new File([blob], "profile-photo.jpg", { type: "image/jpeg" }));
+            const response = await fetch("/api/profile/photo", {
+                method: "POST",
+                headers: { Authorization: `Bearer ${session.access_token}` },
+                body: formData,
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || "Failed to update profile photo");
+
+            setAvatarUrl(data.avatarUrl);
+            announceAvatar(data.avatarUrl);
+            setUsers((previous) =>
+                previous.map((managedUser) =>
+                    managedUser.id === currentUserId
+                        ? {
+                            ...managedUser,
+                            user_metadata: {
+                                ...(managedUser.user_metadata || {}),
+                                avatar_url: data.avatarUrl,
+                            },
+                        }
+                        : managedUser,
+                ),
+            );
+            setPhotoSuccess("Profile photo updated.");
+            setPendingPhoto(null);
+        } catch (err) {
+            setPhotoError(err instanceof Error ? err.message : "Failed to update profile photo");
+        } finally {
+            setPhotoBusy(false);
+        }
+    };
+
+    const handleRemovePhoto = async () => {
+        setPhotoError("");
+        setPhotoSuccess("");
+        setPhotoMenuOpen(false);
+
+        try {
+            setPhotoBusy(true);
+            const {
+                data: { session },
+            } = await supabase.auth.getSession();
+            if (!session?.access_token) throw new Error("Please sign in again to remove your photo.");
+
+            const response = await fetch("/api/profile/photo", {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${session.access_token}` },
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || "Failed to remove profile photo");
+
+            setAvatarUrl(null);
+            announceAvatar(null);
+            setUsers((previous) =>
+                previous.map((managedUser) =>
+                    managedUser.id === currentUserId
+                        ? {
+                            ...managedUser,
+                            user_metadata: {
+                                ...(managedUser.user_metadata || {}),
+                                avatar_url: null,
+                                avatar_path: null,
+                            },
+                        }
+                        : managedUser,
+                ),
+            );
+            setPhotoSuccess("Profile photo removed.");
+        } catch (err) {
+            setPhotoError(err instanceof Error ? err.message : "Failed to remove profile photo");
+        } finally {
+            setPhotoBusy(false);
         }
     };
 
@@ -428,46 +567,100 @@ export default function SettingsPage() {
 
     return (
         <div className="container">
-            <header className="dashboard-header">
-                <div className="header-left">
-                    <h1 className="page-title">Settings</h1>
-                </div>
-
-                <div className="user-controls">
-                    <Link href="/dashboard" className="btn share-btn">
-                        Return to Dashboard
-                    </Link>
-                </div>
-            </header>
+            <AppHeader
+                title="Settings"
+                userName={userName}
+                userRole={userRole}
+                mode="dashboard"
+            />
 
             <main>
                 <div className="settings-container">
                     {/* Current User Info */}
-                    <section className="settings-card">
-                        <h2>Your Account</h2>
-                        <div className="user-info">
-                            <p>
-                                <strong>Name:</strong> {userName}
-                            </p>
-                            <p>
-                                <strong>Role:</strong>{" "}
-                                <span className={`role-badge ${userRole}`}>
-                  {userRole.toUpperCase()}
-                </span>
-                            </p>
+                    <section className="settings-card settings-account-card">
+                        <div className="settings-account-summary">
+                            <div className="settings-avatar-editor" ref={photoEditorRef}>
+                                <button
+                                    type="button"
+                                    className="settings-account-avatar settings-avatar-button"
+                                    onClick={() => setPhotoMenuOpen((open) => !open)}
+                                    disabled={photoBusy}
+                                    aria-haspopup="menu"
+                                    aria-expanded={photoMenuOpen}
+                                    aria-label={avatarUrl ? "Change profile photo" : "Add profile photo"}
+                                    title={avatarUrl ? "Change profile photo" : "Add profile photo"}
+                                >
+                                    {avatarUrl ? (
+                                        <img src={avatarUrl} alt="" onError={() => setAvatarUrl(null)} />
+                                    ) : (
+                                        (userName || "U").trim().charAt(0).toUpperCase()
+                                    )}
+                                    <span className="settings-avatar-camera" aria-hidden="true">+</span>
+                                </button>
+
+                                {photoMenuOpen && (
+                                    <div className="settings-photo-menu" role="menu" aria-label="Profile photo options">
+                                        <button type="button" role="menuitem" onClick={() => photoFileRef.current?.click()}>
+                                            <span>Choose photo</span>
+                                            <small>JPG, PNG or WebP</small>
+                                        </button>
+                                        <button type="button" role="menuitem" onClick={() => {
+                                            setPhotoMenuOpen(false);
+                                            setCameraOpen(true);
+                                        }}>
+                                            <span>Take photo</span>
+                                            <small>Use this device&apos;s camera</small>
+                                        </button>
+                                        {avatarUrl && (
+                                            <button type="button" role="menuitem" className="is-destructive" onClick={handleRemovePhoto}>
+                                                <span>Remove photo</span>
+                                                <small>Restore the default icon</small>
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+
+                                <input
+                                    ref={photoFileRef}
+                                    className="settings-photo-input"
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    onChange={(event) => void handlePhotoSelected(event.target.files?.[0])}
+                                    tabIndex={-1}
+                                />
+                            </div>
+                            <div>
+                                <span className="settings-eyebrow">Signed in account</span>
+                                <h1>{userName || "User"}</h1>
+                                <div className="settings-account-meta">
+                                    <span className={`role-badge ${userRole}`}>
+                                        {userRole.toUpperCase()}
+                                    </span>
+                                    <span>Manage your account access and application users.</span>
+                                </div>
+                            </div>
                         </div>
+                        {photoBusy && <p className="settings-photo-status" role="status">Updating your profile photo…</p>}
+                        {photoError && !pendingPhoto && <div className="error-message settings-account-message">{photoError}</div>}
+                        {photoSuccess && <div className="success-message settings-account-message">{photoSuccess}</div>}
                     </section>
 
                     {/* Add New User */}
                     {/* Admins and superusers can add new users. Admins can only create 'member' accounts. */}
                     {(userRole === "superuser" || userRole === "admin") && (
                         <section className="settings-card">
-                            <h2>Add New User</h2>
+                            <div className="settings-section-heading">
+                                <div>
+                                    <span className="settings-eyebrow">Account administration</span>
+                                    <h2>Add New User</h2>
+                                    <p>Create a new login and assign the appropriate access level.</p>
+                                </div>
+                            </div>
 
                             {error && <div className="error-message">{error}</div>}
                             {success && <div className="success-message">{success}</div>}
 
-                            <form onSubmit={handleAddUser} className="user-form">
+                            <form onSubmit={handleAddUser} className="user-form settings-user-form">
                                 <div className="form-group">
                                     <label htmlFor="name">Full Name *</label>
                                     <input
@@ -494,8 +687,7 @@ export default function SettingsPage() {
 
                                 <div className="form-group">
                                     <label htmlFor="password">Initial password (optional)</label>
-                                    <input
-                                        type="password"
+                                    <PasswordField
                                         id="password"
                                         value={newUserPassword}
                                         onChange={(e) => setNewUserPassword(e.target.value)}
@@ -554,15 +746,23 @@ export default function SettingsPage() {
                     {/* Users List (manage) */}
                     {(userRole === "superuser" || userRole === "admin") && (
                         <section className="settings-card">
-                            <h2>Manage Users</h2>
+                            <div className="settings-section-heading">
+                                <div>
+                                    <span className="settings-eyebrow">User directory</span>
+                                    <h2>Manage Users</h2>
+                                    <p>Update Telegram handles, roles, passwords, and account access.</p>
+                                </div>
+                                <span className="settings-count">{visibleUsers.length} users</span>
+                            </div>
 
                             {isLoading ? (
                                 <p>Loading users...</p>
                             ) : visibleUsers.length === 0 ? (
                                 <p>No users found</p>
                             ) : (
-                                <div className="users-table">
-                                    <table>
+                                <div className="users-table table-container">
+                                    <div className="table-scroll">
+                                        <table>
                                         <thead>
                                         <tr>
                                             <th>Name</th>
@@ -578,7 +778,39 @@ export default function SettingsPage() {
 
                                             return (
                                                 <tr key={managedUser.id}>
-                                                    <td>{managedUser.user_metadata?.name || "N/A"}</td>
+                                                    <td>
+                                                        <div className="settings-user-identity">
+                                                            <span className="settings-user-thumb" aria-hidden="true">
+                                                                {managedUser.user_metadata?.avatar_url ? (
+                                                                    <img
+                                                                        src={managedUser.user_metadata.avatar_url}
+                                                                        alt=""
+                                                                        onError={() =>
+                                                                            setUsers((previous) =>
+                                                                                previous.map((candidate) =>
+                                                                                    candidate.id === managedUser.id
+                                                                                        ? {
+                                                                                            ...candidate,
+                                                                                            user_metadata: {
+                                                                                                ...(candidate.user_metadata || {}),
+                                                                                                avatar_url: null,
+                                                                                            },
+                                                                                        }
+                                                                                        : candidate,
+                                                                                ),
+                                                                            )
+                                                                        }
+                                                                    />
+                                                                ) : (
+                                                                    (managedUser.user_metadata?.name || managedUser.email || "U")
+                                                                        .trim()
+                                                                        .charAt(0)
+                                                                        .toUpperCase()
+                                                                )}
+                                                            </span>
+                                                            <span>{managedUser.user_metadata?.name || "N/A"}</span>
+                                                        </div>
+                                                    </td>
                                                     <td>{managedUser.email}</td>
                                                     <td>
                                                         <div
@@ -780,13 +1012,41 @@ export default function SettingsPage() {
                                             );
                                         })}
                                         </tbody>
-                                    </table>
+                                        </table>
+                                    </div>
                                 </div>
                             )}
                         </section>
                     )}
                 </div>
             </main>
+            {pendingPhoto && (
+                <ProfilePhotoEditor
+                    file={pendingPhoto}
+                    saving={photoBusy}
+                    error={photoError}
+                    onCancel={() => {
+                        if (!photoBusy) {
+                            setPendingPhoto(null);
+                            setPhotoError("");
+                        }
+                    }}
+                    onSave={(blob) => void uploadCroppedPhoto(blob)}
+                />
+            )}
+            {cameraOpen && (
+                <ProfileCameraCapture
+                    onCancel={() => setCameraOpen(false)}
+                    onChoosePhoto={() => {
+                        setCameraOpen(false);
+                        photoFileRef.current?.click();
+                    }}
+                    onCapture={(file) => {
+                        setCameraOpen(false);
+                        handlePhotoSelected(file);
+                    }}
+                />
+            )}
         </div>
     );
 }

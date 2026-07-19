@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import AppHeader from "./../components/AppHeader";
+import CalendarPicker from "./../components/CalendarPicker";
 import "./../styles.css";
 import "./../dashboard/dashboard.css";
 
@@ -537,11 +538,11 @@ export default function MyAttendancePage() {
                 Month
               </span>
 
-                            <input
-                                type="month"
+                            <CalendarPicker
+                                mode="month"
                                 className="form-input"
                                 value={selectedMonth}
-                                onChange={(event) => setSelectedMonth(event.target.value)}
+                                onChange={setSelectedMonth}
                                 style={{
                                     width: "100%",
                                     minHeight: 48,

@@ -6,9 +6,9 @@ export interface Student {
   student_levelofplay: string;
   price: number;
   total_weeks: number;
-  attended: number;          // NEW: number of attended lessons
-  missed: number;            // NEW: number of missed lessons
-  attendance_records?: string[]; // optional history (kept for display)
+  attended: number;
+  missed: number;
+  attendance_records?: string[];
   created_by: string | null;
   created_at: string;
   updated_at?: string;

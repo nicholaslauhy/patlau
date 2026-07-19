@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
+import AuthHeader from './../components/AuthHeader';
+import PasswordField from './../components/PasswordField';
 import './../styles.css';
 
 const supabase = createBrowserClient(
@@ -16,6 +18,7 @@ export default function ResetPage() {
     const [loading, setLoading] = useState(true);
 
     const [resetMode, setResetMode] = useState<'link' | 'code' | 'password'>('code');
+    const [recoveryStep, setRecoveryStep] = useState<'request' | 'verify'>('request');
     const [hasSession, setHasSession] = useState(false);
 
     const [email, setEmail] = useState('');
@@ -122,12 +125,20 @@ export default function ResetPage() {
             }
 
             setSuccess('Code sent to your email. Check your inbox (and spam folder).');
+            setRecoveryStep('verify');
         } catch (err) {
             console.error('Error requesting code:', err);
             setError('Error requesting code. Try again.');
         } finally {
             setBusy(false);
         }
+    };
+
+    const returnToEmailStep = () => {
+        setRecoveryStep('request');
+        setCode('');
+        setError(null);
+        setSuccess(null);
     };
 
     const handleVerifyCode = async (e: React.FormEvent) => {
@@ -207,10 +218,20 @@ export default function ResetPage() {
     };
 
     return (
-        <div className="container" style={{ display: 'flex', justifyContent: 'center', padding: '3rem 1rem' }}>
-            <div className="form-card" style={{ maxWidth: 720, width: '100%' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <h1 className="page-title" style={{ margin: 0 }}>Reset Password</h1>
+        <div className="container auth-shell">
+            <AuthHeader />
+            <main className="auth-main auth-reset-main">
+            <section className="form-card auth-reset-card auth-reset-card--single">
+                <div className="auth-card__intro">
+                    <span className="auth-eyebrow">Account recovery</span>
+                    <h1 className="page-title">Reset your password</h1>
+                    <p>
+                        {resetMode === 'password' && hasSession
+                            ? 'Choose a secure new password for your account.'
+                            : recoveryStep === 'request'
+                                ? 'Enter your account email to receive a six-digit recovery code.'
+                                : 'Enter the code we sent to your email address.'}
+                    </p>
                 </div>
 
                 {loading ? (
@@ -223,13 +244,12 @@ export default function ResetPage() {
                         {error && <div className="error-message" style={{ marginBottom: 12 }}>{error}</div>}
 
                         {resetMode === 'password' && hasSession ? (
-                            <form onSubmit={handleSubmitPassword} className="student-form" style={{ gap: 12 }}>
+                            <form onSubmit={handleSubmitPassword} className="auth-reset-form">
                                 <div className="form-group">
                                     <label htmlFor="new-password">New password</label>
-                                    <input
+                                    <PasswordField
                                         id="new-password"
                                         ref={passRef}
-                                        type="password"
                                         value={newPassword}
                                         onChange={(e) => setNewPassword(e.target.value)}
                                         placeholder="At least 6 characters"
@@ -238,21 +258,23 @@ export default function ResetPage() {
                                         minLength={6}
                                         disabled={busy}
                                     />
-                                    <small className="hint">Use at least 6 characters. For security, choose a strong password.</small>
+                                    <small className="hint">Use at least 6 characters and avoid reusing an old password.</small>
                                 </div>
 
                                 <button
                                     type="submit"
-                                    className="submit-btn home-btn"
+                                    className="submit-btn auth-reset-primary"
                                     disabled={busy}
-                                    style={{ background: '#10B981', color: '#fff', border: 'none' }}
                                 >
                                     {busy ? 'Saving...' : 'Set new password'}
                                 </button>
                             </form>
-                        ) : (
-                            <div className="student-form" style={{ gap: 12 }}>
-                                <form onSubmit={handleSendCode} className="student-form" style={{ gap: 12 }}>
+                        ) : recoveryStep === 'request' ? (
+                                <form onSubmit={handleSendCode} className="auth-reset-form auth-reset-step-panel">
+                                    <div className="auth-reset-progress">
+                                        <span>Step 1 of 2</span>
+                                        <div aria-hidden="true"><i className="is-active" /><i /></div>
+                                    </div>
                                     <div className="form-group">
                                         <label htmlFor="reset-email">Email</label>
                                         <input
@@ -269,15 +291,22 @@ export default function ResetPage() {
 
                                     <button
                                         type="submit"
-                                        className="submit-btn"
+                                        className="submit-btn auth-reset-primary"
                                         disabled={busy}
-                                        style={{ background: '#2563eb', color: '#fff', border: 'none' }}
                                     >
                                         {busy ? 'Sending...' : 'Send Code'}
                                     </button>
                                 </form>
-
-                                <form onSubmit={handleVerifyCode} className="student-form" style={{ gap: 12, marginTop: '1rem' }}>
+                        ) : (
+                                <form onSubmit={handleVerifyCode} className="auth-reset-form auth-reset-step-panel">
+                                    <div className="auth-reset-progress">
+                                        <span>Step 2 of 2</span>
+                                        <div aria-hidden="true"><i className="is-complete" /><i className="is-active" /></div>
+                                    </div>
+                                    <div className="auth-reset-email-summary">
+                                        <div><span>Code sent to</span><strong>{email}</strong></div>
+                                        <button type="button" onClick={returnToEmailStep} disabled={busy}>Change email</button>
+                                    </div>
                                     <div className="form-group">
                                         <label htmlFor="reset-code">Reset Code</label>
                                         <input
@@ -286,35 +315,38 @@ export default function ResetPage() {
                                             value={code}
                                             onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                                             placeholder="000000"
-                                            className="input"
                                             maxLength={6}
                                             required
                                             disabled={busy}
-                                            style={{ letterSpacing: '8px', textAlign: 'center', fontSize: '18px' }}
+                                            className="input auth-code-input"
                                         />
                                         <small className="hint">Enter the 6-digit code from your email.</small>
                                     </div>
 
-                                    <button
-                                        type="submit"
-                                        className="submit-btn"
-                                        disabled={busy}
-                                        style={{ background: '#2563eb', color: '#fff', border: 'none' }}
-                                    >
-                                        {busy ? 'Verifying...' : 'Verify Code'}
-                                    </button>
+                                    <div className="auth-reset-form-actions">
+                                        <button type="button" className="auth-reset-back" onClick={returnToEmailStep} disabled={busy}>
+                                            Back
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="submit-btn auth-reset-primary"
+                                            disabled={busy}
+                                        >
+                                            {busy ? 'Verifying...' : 'Verify Code'}
+                                        </button>
+                                    </div>
                                 </form>
-                            </div>
                         )}
 
-                        <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
-                            <Link href="/" className="share-btn home-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px' }}>
-                                Back to Home
+                        <div className="auth-reset-footer">
+                            <Link href="/" className="auth-link-button">
+                                Back to sign in
                             </Link>
                         </div>
                     </>
                 )}
-            </div>
+            </section>
+            </main>
         </div>
     );
 }
