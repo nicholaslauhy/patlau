@@ -254,7 +254,9 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
                             <NavMenu label="1-1" items={oneToOneItems} userRole={userRole} />
                         )}
                         {userRole === 'member' ? (
-                            <Link href="/dashboard" className="app-header__nav-button">Dashboard</Link>
+                            pathname !== '/dashboard' && (
+                                <Link href="/dashboard" className="app-header__nav-button">Dashboard</Link>
+                            )
                         ) : (
                             <NavMenu label="Weekend" items={weekendItems} userRole={userRole} />
                         )}
