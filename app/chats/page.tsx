@@ -50,6 +50,43 @@ const formatTime = (value: string) => new Date(value).toLocaleString("en-SG", {
     minute: "2-digit",
 });
 
+function ChatsNotification({
+    kind,
+    message,
+    onDismiss,
+}: {
+    kind: "error" | "success";
+    message: string;
+    onDismiss: () => void;
+}) {
+    const [exiting, setExiting] = useState(false);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => setExiting(true), 10000);
+        return () => window.clearTimeout(timer);
+    }, []);
+
+    return (
+        <div
+            className={`${kind}-message chats-message${exiting ? " is-exiting" : ""}`}
+            role={kind === "error" ? "alert" : "status"}
+            onAnimationEnd={() => {
+                if (exiting) onDismiss();
+            }}
+        >
+            <span>{message}</span>
+            <button
+                type="button"
+                className="chats-message__close"
+                onClick={() => setExiting(true)}
+                aria-label={kind === "error" ? "Dismiss error notification" : "Dismiss notification"}
+            >
+                ×
+            </button>
+        </div>
+    );
+}
+
 export default function ChatsPage() {
     const router = useRouter();
     const messageEndRef = useRef<HTMLDivElement>(null);
@@ -270,8 +307,12 @@ export default function ChatsPage() {
                     ))}
                 </nav>
 
-                {error && <div className="error-message chats-message" role="alert">{error}</div>}
-                {success && <div className="success-message chats-message" role="status">{success}</div>}
+                {error && (
+                    <ChatsNotification key={`error-${error}`} kind="error" message={error} onDismiss={() => setError("")} />
+                )}
+                {success && (
+                    <ChatsNotification key={`success-${success}`} kind="success" message={success} onDismiss={() => setSuccess("")} />
+                )}
 
                 {tab === "inbox" && (
                     <section className="chats-inbox">
