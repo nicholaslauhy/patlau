@@ -1,9 +1,7 @@
-import Link from 'next/link';
-
 export default function AuthHeader() {
     return (
         <header className="auth-header">
-            <Link href="/" className="auth-brand" aria-label="PatLau home">
+            <div className="auth-brand" aria-label="PatLau training management">
                 <span className="auth-brand__mark" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none">
                         <path d="m8 4 8 8M10.5 1.5l-5 5 7 12 6-6-8-11Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
@@ -14,7 +12,7 @@ export default function AuthHeader() {
                     <strong>PatLau</strong>
                     <small>Training management</small>
                 </span>
-            </Link>
+            </div>
         </header>
     );
 }
