@@ -197,6 +197,9 @@
 .chats-form-actions { display:flex; justify-content:flex-end; gap:0.6rem; padding-top:0.25rem; }
 .chats-form-actions button { width:auto; min-width:120px; }
 .chats-record-list { display:grid; gap:0.8rem; }
+.chats-record-search { display:flex; align-items:center; gap:0.65rem; padding-bottom:0.8rem; border-bottom:1px solid var(--border-solid); }
+.chats-record-search input { min-width:0; flex:1; margin:0; }
+.chats-record-search span { flex:0 0 auto; color:var(--muted-foreground); font-size:0.66rem; font-weight:700; white-space:nowrap; }
 .chats-empty-card { color:var(--muted-foreground); font-size:0.78rem; text-align:center; padding:2rem; }
 .chats-record-card { padding:0.95rem; border:1px solid var(--border-solid); border-radius:14px; background:#fbfcfd; }
 .chats-record-card > div:first-child { display:flex; align-items:center; gap:0.5rem; }

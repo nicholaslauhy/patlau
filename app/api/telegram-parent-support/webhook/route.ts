@@ -169,11 +169,11 @@ async function generateSupportReply(conversationId: string, telegramUserId: stri
             .limit(50),
         supportAdmin
             .from("support_announcements")
-            .select("title, content, programme, starts_on, ends_on, priority, updated_at")
+            .select("title, content, programme, starts_on, ends_on, updated_at")
             .eq("status", "published")
             .lte("starts_on", today)
             .gte("ends_on", today)
-            .order("priority", { ascending: false })
+            .order("updated_at", { ascending: false })
             .limit(30),
         supportAdmin
             .from("support_messages")

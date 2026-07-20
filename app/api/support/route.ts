@@ -65,7 +65,6 @@ export async function GET(request: NextRequest) {
             supportAdmin
                 .from("support_announcements")
                 .select("*")
-                .order("priority", { ascending: false })
                 .order("starts_on", { ascending: false }),
         ]);
 
@@ -207,7 +206,7 @@ export async function POST(request: NextRequest) {
                 programme: String(body.programme || "all"),
                 starts_on: String(body.startsOn || ""),
                 ends_on: String(body.endsOn || ""),
-                priority: Math.max(0, Math.min(100, Number(body.priority) || 0)),
+                priority: 0,
                 status: ["draft", "published", "archived"].includes(body.status) ? body.status : "draft",
                 updated_by: user.id,
             };

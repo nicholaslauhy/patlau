@@ -101,6 +101,8 @@ export default function ChatsPage() {
     const [messages, setMessages] = useState<SupportMessage[]>([]);
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
+    const [knowledgeSearch, setKnowledgeSearch] = useState("");
+    const [announcementSearch, setAnnouncementSearch] = useState("");
     const [reply, setReply] = useState("");
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
@@ -121,7 +123,6 @@ export default function ChatsPage() {
         programme: "all",
         startsOn: todayKey(),
         endsOn: todayKey(),
-        priority: 50,
         status: "draft" as SupportAnnouncement["status"],
     });
 
@@ -259,7 +260,7 @@ export default function ChatsPage() {
     };
 
     const resetAnnouncementForm = () => setAnnouncementForm({
-        id: "", title: "", content: "", programme: "all", startsOn: todayKey(), endsOn: todayKey(), priority: 50, status: "draft",
+        id: "", title: "", content: "", programme: "all", startsOn: todayKey(), endsOn: todayKey(), status: "draft",
     });
     const saveAnnouncement = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -272,6 +273,22 @@ export default function ChatsPage() {
         const matchesSearch = !term || `${contactName(conversation)} ${conversation.contact?.username || ""} ${conversation.last_message_preview || ""}`.toLowerCase().includes(term);
         return matchesSearch && (statusFilter === "all" || conversation.status === statusFilter);
     }), [conversations, search, statusFilter]);
+
+    const filteredKnowledge = useMemo(() => {
+        const term = knowledgeSearch.trim().toLowerCase();
+        if (!term) return knowledge;
+        return knowledge.filter((item) =>
+            `${item.title} ${item.content} ${item.category} ${item.status}`.toLowerCase().includes(term),
+        );
+    }, [knowledge, knowledgeSearch]);
+
+    const filteredAnnouncements = useMemo(() => {
+        const term = announcementSearch.trim().toLowerCase();
+        if (!term) return announcements;
+        return announcements.filter((item) =>
+            `${item.title} ${item.content} ${item.programme} ${item.status}`.toLowerCase().includes(term),
+        );
+    }, [announcements, announcementSearch]);
 
     const counts = useMemo(() => ({
         escalated: conversations.filter((item) => item.status === "escalated").length,
@@ -409,7 +426,11 @@ export default function ChatsPage() {
                             <div className="chats-form-actions">{knowledgeForm.id && <button type="button" className="cancel-btn" onClick={resetKnowledgeForm}>Cancel edit</button>}<button type="submit" className="submit-btn" disabled={busy}>{busy ? "Saving…" : "Save knowledge"}</button></div>
                         </form>
                         <div className="chats-record-list">
-                            {knowledge.length === 0 ? <p className="chats-empty-card">No knowledge has been added. The chatbot will escalate rather than guess.</p> : knowledge.map((item) => (
+                            <div className="chats-record-search">
+                                <input value={knowledgeSearch} onChange={(event) => setKnowledgeSearch(event.target.value)} placeholder="Search title, information, category or status…" aria-label="Search knowledge" />
+                                <span>{filteredKnowledge.length} of {knowledge.length}</span>
+                            </div>
+                            {knowledge.length === 0 ? <p className="chats-empty-card">No knowledge has been added. The chatbot will escalate rather than guess.</p> : filteredKnowledge.length === 0 ? <p className="chats-empty-card">No knowledge matches your search.</p> : filteredKnowledge.map((item) => (
                                 <article key={item.id} className="chats-record-card">
                                     <div><span className={`chats-record-status is-${item.status}`}>{item.status}</span><small>{item.category}</small></div>
                                     <h3>{item.title}</h3><p>{item.content}</p><time>Updated {formatTime(item.updated_at)}</time>
@@ -428,15 +449,19 @@ export default function ChatsPage() {
                             <label>Programme<select value={announcementForm.programme} onChange={(event) => setAnnouncementForm((form) => ({ ...form, programme: event.target.value }))}><option value="all">All programmes</option><option value="weekend">Weekend</option><option value="weekday">Weekday</option><option value="matchplay">MatchPlay</option><option value="1-1">1-1</option></select></label>
                             <div className="chats-date-grid"><label>Starts on<CalendarPicker mode="date" value={announcementForm.startsOn} onChange={(value) => setAnnouncementForm((form) => ({ ...form, startsOn: value }))} ariaLabel="Announcement start date" /></label><label>Ends on<CalendarPicker mode="date" value={announcementForm.endsOn} onChange={(value) => setAnnouncementForm((form) => ({ ...form, endsOn: value }))} ariaLabel="Announcement end date" /></label></div>
                             <label>Announcement<textarea value={announcementForm.content} onChange={(event) => setAnnouncementForm((form) => ({ ...form, content: event.target.value }))} rows={6} placeholder="State exactly what parents should be told…" /></label>
-                            <div className="chats-date-grid"><label>Priority<input type="number" min="0" max="100" value={announcementForm.priority} onChange={(event) => setAnnouncementForm((form) => ({ ...form, priority: Number(event.target.value) }))} /></label><label>Status<select value={announcementForm.status} onChange={(event) => setAnnouncementForm((form) => ({ ...form, status: event.target.value as SupportAnnouncement["status"] }))}><option value="draft">Draft</option><option value="published">Published</option><option value="archived">Archived</option></select></label></div>
+                            <label>Status<select value={announcementForm.status} onChange={(event) => setAnnouncementForm((form) => ({ ...form, status: event.target.value as SupportAnnouncement["status"] }))}><option value="draft">Draft</option><option value="published">Published</option><option value="archived">Archived</option></select></label>
                             <div className="chats-form-actions">{announcementForm.id && <button type="button" className="cancel-btn" onClick={resetAnnouncementForm}>Cancel edit</button>}<button type="submit" className="submit-btn" disabled={busy}>{busy ? "Saving…" : "Save announcement"}</button></div>
                         </form>
                         <div className="chats-record-list">
-                            {announcements.length === 0 ? <p className="chats-empty-card">No announcements yet. Add dated holiday or operational information here.</p> : announcements.map((item) => (
+                            <div className="chats-record-search">
+                                <input value={announcementSearch} onChange={(event) => setAnnouncementSearch(event.target.value)} placeholder="Search title, announcement, programme or status…" aria-label="Search announcements" />
+                                <span>{filteredAnnouncements.length} of {announcements.length}</span>
+                            </div>
+                            {announcements.length === 0 ? <p className="chats-empty-card">No announcements yet. Add dated holiday or operational information here.</p> : filteredAnnouncements.length === 0 ? <p className="chats-empty-card">No announcements match your search.</p> : filteredAnnouncements.map((item) => (
                                 <article key={item.id} className="chats-record-card">
-                                    <div><span className={`chats-record-status is-${item.status}`}>{item.status}</span><small>{item.programme} · Priority {item.priority}</small></div>
+                                    <div><span className={`chats-record-status is-${item.status}`}>{item.status}</span><small>{item.programme}</small></div>
                                     <h3>{item.title}</h3><p>{item.content}</p><time>{item.starts_on} to {item.ends_on} · Updated {formatTime(item.updated_at)}</time>
-                                    <div className="chats-record-actions"><button type="button" onClick={() => setAnnouncementForm({ id: item.id, title: item.title, content: item.content, programme: item.programme, startsOn: item.starts_on, endsOn: item.ends_on, priority: item.priority, status: item.status })}>Edit</button><button type="button" className="is-destructive" onClick={() => confirm(`Delete “${item.title}”?`) && void runAction({ action: "delete_announcement", id: item.id }, "Announcement deleted.")}>Delete</button></div>
+                                    <div className="chats-record-actions"><button type="button" onClick={() => setAnnouncementForm({ id: item.id, title: item.title, content: item.content, programme: item.programme, startsOn: item.starts_on, endsOn: item.ends_on, status: item.status })}>Edit</button><button type="button" className="is-destructive" onClick={() => confirm(`Delete “${item.title}”?`) && void runAction({ action: "delete_announcement", id: item.id }, "Announcement deleted.")}>Delete</button></div>
                                 </article>
                             ))}
                         </div>
