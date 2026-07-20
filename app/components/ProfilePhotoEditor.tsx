@@ -11,11 +11,19 @@ interface ProfilePhotoEditorProps {
 }
 
 const CANVAS_SIZE = 480;
+const MIN_ZOOM = 0.7;
+const MAX_ZOOM = 3;
+const MIN_PAN_DISTANCE = CANVAS_SIZE * 0.15;
 
 export default function ProfilePhotoEditor({ file, saving, error, onCancel, onSave }: ProfilePhotoEditorProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const imageRef = useRef<HTMLImageElement | null>(null);
-    const dragRef = useRef<{ x: number; y: number } | null>(null);
+    const dragRef = useRef<{
+        startX: number;
+        startY: number;
+        originX: number;
+        originY: number;
+    } | null>(null);
     const [objectUrl, setObjectUrl] = useState("");
     const [ready, setReady] = useState(false);
     const [zoom, setZoom] = useState(1);
@@ -32,6 +40,8 @@ export default function ProfilePhotoEditor({ file, saving, error, onCancel, onSa
         const image = new Image();
         image.onload = () => {
             imageRef.current = image;
+            setZoom(1);
+            setOffset({ x: 0, y: 0 });
             setReady(true);
         };
         image.src = objectUrl;
@@ -47,8 +57,8 @@ export default function ProfilePhotoEditor({ file, saving, error, onCancel, onSa
         return {
             width,
             height,
-            maxX: Math.max(0, (width - CANVAS_SIZE) / 2),
-            maxY: Math.max(0, (height - CANVAS_SIZE) / 2),
+            maxX: Math.max(MIN_PAN_DISTANCE, (width - CANVAS_SIZE) / 2),
+            maxY: Math.max(MIN_PAN_DISTANCE, (height - CANVAS_SIZE) / 2),
         };
     };
 
@@ -69,8 +79,29 @@ export default function ProfilePhotoEditor({ file, saving, error, onCancel, onSa
         if (!canvas || !context || !image || !geometry) return;
 
         context.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-        context.fillStyle = "#ffffff";
+        context.fillStyle = "#e8eef5";
         context.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+        const backgroundScale = Math.max(
+            CANVAS_SIZE / image.naturalWidth,
+            CANVAS_SIZE / image.naturalHeight,
+        ) * 1.16;
+        const backgroundWidth = image.naturalWidth * backgroundScale;
+        const backgroundHeight = image.naturalHeight * backgroundScale;
+        context.save();
+        context.filter = "blur(22px)";
+        context.globalAlpha = 0.48;
+        context.drawImage(
+            image,
+            (CANVAS_SIZE - backgroundWidth) / 2,
+            (CANVAS_SIZE - backgroundHeight) / 2,
+            backgroundWidth,
+            backgroundHeight,
+        );
+        context.restore();
+        context.fillStyle = "rgba(255, 255, 255, 0.18)";
+        context.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
         context.drawImage(
             image,
             (CANVAS_SIZE - geometry.width) / 2 + offset.x,
@@ -81,7 +112,7 @@ export default function ProfilePhotoEditor({ file, saving, error, onCancel, onSa
     }, [ready, zoom, offset]);
 
     const changeZoom = (nextZoom: number) => {
-        const safeZoom = Math.max(1, Math.min(3, nextZoom));
+        const safeZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZoom));
         setZoom(safeZoom);
         setOffset((current) => clampOffset(current, safeZoom));
     };
@@ -92,10 +123,9 @@ export default function ProfilePhotoEditor({ file, saving, error, onCancel, onSa
         const bounds = event.currentTarget.getBoundingClientRect();
         const multiplier = CANVAS_SIZE / bounds.width;
         const next = clampOffset({
-            x: offset.x + (event.clientX - last.x) * multiplier,
-            y: offset.y + (event.clientY - last.y) * multiplier,
+            x: last.originX + (event.clientX - last.startX) * multiplier,
+            y: last.originY + (event.clientY - last.startY) * multiplier,
         });
-        dragRef.current = { x: event.clientX, y: event.clientY };
         setOffset(next);
     };
 
@@ -112,7 +142,7 @@ export default function ProfilePhotoEditor({ file, saving, error, onCancel, onSa
                     <div>
                         <span className="settings-eyebrow">Profile photo</span>
                         <h2 id="photo-editor-title">Adjust your photo</h2>
-                        <p>Drag to reposition, then zoom until the framing looks right.</p>
+                        <p>Drag in any direction to reposition, then zoom in or out until the framing looks right.</p>
                     </div>
                     <button type="button" className="profile-photo-editor__close" onClick={onCancel} disabled={saving} aria-label="Close photo editor">×</button>
                 </div>
@@ -123,7 +153,12 @@ export default function ProfilePhotoEditor({ file, saving, error, onCancel, onSa
                         width={CANVAS_SIZE}
                         height={CANVAS_SIZE}
                         onPointerDown={(event) => {
-                            dragRef.current = { x: event.clientX, y: event.clientY };
+                            dragRef.current = {
+                                startX: event.clientX,
+                                startY: event.clientY,
+                                originX: offset.x,
+                                originY: offset.y,
+                            };
                             event.currentTarget.setPointerCapture(event.pointerId);
                         }}
                         onPointerMove={handlePointerMove}
@@ -138,19 +173,19 @@ export default function ProfilePhotoEditor({ file, saving, error, onCancel, onSa
                 </div>
 
                 <div className="profile-photo-editor__zoom">
-                    <button type="button" onClick={() => changeZoom(zoom - 0.1)} disabled={saving || zoom <= 1} aria-label="Zoom out">−</button>
+                    <button type="button" onClick={() => changeZoom(zoom - 0.1)} disabled={saving || zoom <= MIN_ZOOM} aria-label="Zoom out">−</button>
                     <label htmlFor="profile-photo-zoom">Zoom</label>
                     <input
                         id="profile-photo-zoom"
                         type="range"
-                        min="1"
-                        max="3"
+                        min={MIN_ZOOM}
+                        max={MAX_ZOOM}
                         step="0.01"
                         value={zoom}
                         onChange={(event) => changeZoom(Number(event.target.value))}
                         disabled={saving}
                     />
-                    <button type="button" onClick={() => changeZoom(zoom + 0.1)} disabled={saving || zoom >= 3} aria-label="Zoom in">+</button>
+                    <button type="button" onClick={() => changeZoom(zoom + 0.1)} disabled={saving || zoom >= MAX_ZOOM} aria-label="Zoom in">+</button>
                     <output>{Math.round(zoom * 100)}%</output>
                 </div>
 
