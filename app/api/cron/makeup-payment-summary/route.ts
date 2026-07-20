@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { safeAuditError, writeAuditEvent } from '../../../lib/audit-server';
 
 const previousMonth = () => {
     const date = new Date();
@@ -22,16 +23,35 @@ const readableMonth = (key: string) => {
 const money = (value: number) => `S$${Number(value || 0).toFixed(2)}`;
 
 export async function GET(request: Request) {
+    let paymentMonth = '';
     try {
         const cronSecret = process.env.CRON_SECRET;
         const authorization = request.headers.get('authorization');
 
-        if (cronSecret && authorization !== `Bearer ${cronSecret}`) {
-            return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+        if (!cronSecret || authorization !== `Bearer ${cronSecret}`) {
+            await writeAuditEvent({
+                request,
+                eventKind: 'security',
+                category: 'system',
+                eventType: 'cron.makeup_summary.denied',
+                action: 'run_cron',
+                outcome: 'denied',
+                summary: cronSecret
+                    ? 'An unauthorized makeup-summary run was denied'
+                    : 'Makeup-summary cron is unavailable because CRON_SECRET is missing',
+                actorSource: 'cron',
+                metadata: {
+                    reason: cronSecret ? 'invalid_cron_secret' : 'missing_cron_secret',
+                },
+            });
+            return NextResponse.json(
+                { error: cronSecret ? 'Unauthorized.' : 'Scheduled route is not configured.' },
+                { status: cronSecret ? 401 : 503 },
+            );
         }
 
         const url = new URL(request.url);
-        const paymentMonth = url.searchParams.get('month') || previousMonth();
+        paymentMonth = url.searchParams.get('month') || previousMonth();
 
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
         const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -107,6 +127,18 @@ export async function GET(request: Request) {
             );
         }
 
+        await writeAuditEvent({
+            request,
+            eventKind: 'system',
+            category: 'payments',
+            eventType: 'cron.makeup_summary.completed',
+            action: 'send_monthly_summary',
+            outcome: 'success',
+            summary: `Monthly makeup payment summary completed for ${readableMonth(paymentMonth)}`,
+            actorSource: 'cron',
+            targetLabel: paymentMonth,
+            metadata: { total, students: details.length },
+        });
         return NextResponse.json({
             success: true,
             paymentMonth,
@@ -114,6 +146,18 @@ export async function GET(request: Request) {
             students: details.length,
         });
     } catch (error: any) {
+        await writeAuditEvent({
+            request,
+            eventKind: 'system',
+            category: 'payments',
+            eventType: 'cron.makeup_summary.failed',
+            action: 'send_monthly_summary',
+            outcome: 'failure',
+            summary: 'Monthly makeup payment summary failed',
+            actorSource: 'cron',
+            targetLabel: paymentMonth || null,
+            metadata: { error: safeAuditError(error) },
+        });
         return NextResponse.json(
             { error: error?.message || 'Monthly summary failed.' },
             { status: 500 }

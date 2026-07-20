@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../components/AppHeader';
 import CalendarPicker from './../components/CalendarPicker';
+import { authenticatedFetch } from './../lib/authenticated-fetch';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 
@@ -377,7 +378,7 @@ export default function CoachAttendancePage() {
         try {
             setSending(true);
 
-            const response = await fetch('/api/telegram-coach-attendance/send', {
+            const response = await authenticatedFetch('/api/telegram-coach-attendance/send', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

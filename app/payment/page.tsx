@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
 import AppHeader from './../components/AppHeader';
+import { authenticatedFetch } from './../lib/authenticated-fetch';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 import './payment.css';
@@ -66,7 +67,7 @@ export default function PaymentPage() {
   const levels = ['all', 'Beginner', 'Intermediate', 'Advanced'];
 
   const sendWeekendTelegram = async (message: string) => {
-    const response = await fetch('/api/telegram-weekend-payment', {
+    const response = await authenticatedFetch('/api/telegram-weekend-payment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store',

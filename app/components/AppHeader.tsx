@@ -27,6 +27,7 @@ const SECTION_COLORS: Record<string, string> = {
     '/trngpayment': '#168765',
     '/makeup': '#d97706',
     '/chats': '#0f766e',
+    '/audit-logs': '#475569',
     '/settings': '#64748b',
     '/myattendance': '#64748b',
     '/allattendance': '#64748b',
@@ -240,6 +241,28 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
     }, [userRole]);
 
     const signOut = async () => {
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.access_token) {
+                const controller = new AbortController();
+                const timeout = window.setTimeout(() => controller.abort(), 1800);
+                try {
+                    await fetch('/api/audit/events', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${session.access_token}`,
+                        },
+                        body: JSON.stringify({ eventType: 'authentication.logout' }),
+                        signal: controller.signal,
+                    });
+                } finally {
+                    window.clearTimeout(timeout);
+                }
+            }
+        } catch {
+            // Audit delivery must never prevent a user from signing out.
+        }
         const { error } = await supabase.auth.signOut();
         if (error) {
             alert('Logout failed');
@@ -286,7 +309,10 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
                             <MenuItem href="/settings" label="Settings" active={pathname === '/settings'} onSelect={() => setAccountOpen(false)} />
                             <MenuItem href="/myattendance" label="My attendance" active={pathname === '/myattendance'} onSelect={() => setAccountOpen(false)} />
                             {userRole === 'superuser' && (
-                                <MenuItem href="/allattendance" label="All attendance" active={pathname === '/allattendance'} onSelect={() => setAccountOpen(false)} />
+                                <>
+                                    <MenuItem href="/allattendance" label="All attendance" active={pathname === '/allattendance'} onSelect={() => setAccountOpen(false)} />
+                                    <MenuItem href="/audit-logs" label="Audit logs" active={pathname === '/audit-logs'} onSelect={() => setAccountOpen(false)} />
+                                </>
                             )}
                             <button type="button" className="menu-item" role="menuitem" onClick={signOut}>
                                 <span>Log out</span>

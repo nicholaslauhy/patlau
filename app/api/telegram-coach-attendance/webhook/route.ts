@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { auditRateLimitExceeded, safeAuditError, writeAuditEvent } from '../../../lib/audit-server';
 
 const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -11,6 +13,27 @@ type VoteResponse = 'yes' | 'remove';
 type CoachSlot = {
     key: string;
     label: string;
+};
+
+const getWebhookSecret = () => {
+    const dedicated = process.env.TELEGRAM_COACH_ATTENDANCE_WEBHOOK_SECRET;
+    if (dedicated) return dedicated;
+
+    // Existing installations can derive an isolated coach secret from the
+    // parent-support secret without exposing or reusing that raw value.
+    const parentSupportSecret = process.env.TELEGRAM_PARENT_SUPPORT_WEBHOOK_SECRET;
+    return parentSupportSecret
+        ? createHmac('sha256', parentSupportSecret)
+            .update('coach-attendance-webhook')
+            .digest('hex')
+        : '';
+};
+
+const secretsMatch = (received: string, expected: string) => {
+    const receivedBuffer = Buffer.from(received);
+    const expectedBuffer = Buffer.from(expected);
+    return receivedBuffer.length === expectedBuffer.length
+        && timingSafeEqual(receivedBuffer, expectedBuffer);
 };
 
 const getHandle = (from: any) => {
@@ -135,6 +158,53 @@ const editPollMessage = async (poll: any) => {
 
 export async function POST(request: Request) {
     try {
+        const expectedSecret = getWebhookSecret();
+        const receivedSecret = request.headers.get('x-telegram-bot-api-secret-token') || '';
+        if (!expectedSecret || !secretsMatch(receivedSecret, expectedSecret)) {
+            const deniedAuditLimited = await auditRateLimitExceeded({
+                request,
+                eventType: 'telegram.coach_attendance.webhook_denied',
+                targetLabel: 'coach attendance webhook',
+                limit: 5,
+                windowMs: 10 * 60_000,
+            });
+
+            if (!deniedAuditLimited) {
+                await writeAuditEvent({
+                    request,
+                    eventKind: 'security',
+                    category: 'coach_attendance',
+                    eventType: 'telegram.coach_attendance.webhook_denied',
+                    action: 'process_webhook',
+                    outcome: 'denied',
+                    summary: expectedSecret
+                        ? 'A coach-attendance webhook with an invalid secret was denied'
+                        : 'Coach-attendance webhook processing is unavailable because its secret is not configured',
+                    actorSource: 'telegram_webhook',
+                    targetTable: 'telegram',
+                    targetLabel: 'coach attendance webhook',
+                    metadata: { reason: expectedSecret ? 'invalid_webhook_secret' : 'missing_webhook_secret' },
+                });
+            } else {
+                await writeAuditEvent({
+                    request,
+                    eventKind: 'security',
+                    category: 'coach_attendance',
+                    eventType: 'telegram.coach_attendance.webhook_denied.rate_limited',
+                    action: 'process_webhook',
+                    outcome: 'denied',
+                    summary: 'Repeated invalid coach-attendance webhook requests were suppressed',
+                    actorSource: 'telegram_webhook',
+                    targetTable: 'telegram',
+                    targetLabel: 'coach attendance webhook',
+                });
+            }
+            return NextResponse.json(
+                { error: expectedSecret ? 'Unauthorized' : 'Webhook is not configured' },
+                { status: expectedSecret ? 401 : 503 },
+            );
+        }
+
         const update = await request.json();
         const callbackQuery = update.callback_query;
 
@@ -210,11 +280,11 @@ export async function POST(request: Request) {
         );
 
         return NextResponse.json({ ok: true });
-    } catch (error: any) {
-        console.error('Coach attendance webhook error:', error);
+    } catch (error) {
+        console.error('Coach attendance webhook error:', safeAuditError(error));
 
         return NextResponse.json(
-            { error: error?.message || 'Unexpected coach attendance webhook error.' },
+            { error: 'Unexpected coach attendance webhook error.' },
             { status: 500 }
         );
     }

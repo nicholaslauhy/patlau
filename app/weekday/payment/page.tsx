@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../../components/AppHeader';
 import CalendarPicker from './../../components/CalendarPicker';
+import { authenticatedFetch } from './../../lib/authenticated-fetch';
 import './../../styles.css';
 import './../../dashboard/dashboard.css';
 import './../../payment/payment.css';
@@ -304,7 +305,7 @@ export default function WeekdayPaymentPage() {
     };
 
     const sendWeekdayTelegramNotification = async (message: string) => {
-        const response = await fetch('/api/telegram-weekday-payment', {
+        const response = await authenticatedFetch('/api/telegram-weekday-payment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message }),

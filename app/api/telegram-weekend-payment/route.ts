@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { recordTelegramDelivery } from '../../lib/telegram-audit';
+import { authorizeTelegramSender } from '../../lib/telegram-auth';
 
 const getConfig = () => {
     const botToken = process.env.TELEGRAM_WEEKEND_PAYMENT_BOT_TOKEN;
@@ -85,6 +87,18 @@ export async function GET() {
 
 export async function POST(request: Request) {
     try {
+        const authorization = await authorizeTelegramSender(
+            request,
+            ['superuser'],
+            'weekend_payment'
+        );
+        if ('status' in authorization) {
+            return NextResponse.json(
+                { error: authorization.status === 401 ? 'Unauthorized' : 'Forbidden' },
+                { status: authorization.status }
+            );
+        }
+
         const body = await request.json();
         const message = String(body?.message || body?.text || '').trim();
         const { botToken, chatId, threadId } = getConfig();
@@ -130,6 +144,13 @@ export async function POST(request: Request) {
 
         if (!telegramResponse.ok || !telegramData?.ok) {
             console.error('Weekend Telegram sendMessage failed:', telegramData);
+            await recordTelegramDelivery({
+                request,
+                programme: 'weekend_payment',
+                category: 'payments',
+                outcome: 'failure',
+                error: telegramData?.description || 'Telegram rejected the message',
+            });
 
             return NextResponse.json(
                 {
@@ -147,6 +168,13 @@ export async function POST(request: Request) {
             );
         }
 
+        await recordTelegramDelivery({
+            request,
+            programme: 'weekend_payment',
+            category: 'payments',
+            outcome: 'success',
+            providerMessageId: telegramData.result?.message_id,
+        });
         return NextResponse.json({
             success: true,
             result: telegramData.result,
@@ -157,6 +185,7 @@ export async function POST(request: Request) {
         });
     } catch (error: any) {
         console.error('Weekend Telegram route failed:', error);
+        await recordTelegramDelivery({ request, programme: 'weekend_payment', category: 'payments', outcome: 'failure', error });
 
         return NextResponse.json(
             {

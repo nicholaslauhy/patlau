@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { safeAuditError, writeAuditEvent } from '../../../lib/audit-server';
 
 const previousMonthKey = () => {
     const date = new Date();
@@ -26,10 +27,29 @@ const readableMonth = (monthKey: string) => {
 const money = (value: number) => `S$${Number(value || 0).toFixed(2)}`;
 
 export async function GET(request: Request) {
+    let monthKey = '';
     try {
         const secret = process.env.CRON_SECRET;
-        if (secret && request.headers.get('authorization') !== `Bearer ${secret}`) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        if (!secret || request.headers.get('authorization') !== `Bearer ${secret}`) {
+            await writeAuditEvent({
+                request,
+                eventKind: 'security',
+                category: 'system',
+                eventType: 'cron.payment_summaries.denied',
+                action: 'run_cron',
+                outcome: 'denied',
+                summary: secret
+                    ? 'An unauthorized monthly payment-summary run was denied'
+                    : 'Monthly payment-summary cron is unavailable because CRON_SECRET is missing',
+                actorSource: 'cron',
+                metadata: {
+                    reason: secret ? 'invalid_cron_secret' : 'missing_cron_secret',
+                },
+            });
+            return NextResponse.json(
+                { error: secret ? 'Unauthorized' : 'Scheduled route is not configured.' },
+                { status: secret ? 401 : 503 },
+            );
         }
 
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -39,7 +59,7 @@ export async function GET(request: Request) {
         }
 
         const origin = new URL(request.url).origin;
-        const monthKey = previousMonthKey();
+        monthKey = previousMonthKey();
         const startDate = `${monthKey}-01`;
         const endDate = `${nextMonthKey(monthKey)}-01`;
 
@@ -68,7 +88,10 @@ export async function GET(request: Request) {
 
             const response = await fetch(`${origin}${endpoint}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${secret}`,
+                },
                 body: JSON.stringify({ message }),
             });
 
@@ -155,8 +178,32 @@ export async function GET(request: Request) {
             `Payment records were preserved.`
         );
 
+        await writeAuditEvent({
+            request,
+            eventKind: 'system',
+            category: 'payments',
+            eventType: 'cron.payment_summaries.completed',
+            action: 'send_monthly_summaries',
+            outcome: 'success',
+            summary: `Monthly payment summaries completed for ${readableMonth(monthKey)}`,
+            actorSource: 'cron',
+            targetLabel: monthKey,
+            metadata: { results },
+        });
         return NextResponse.json({ success: true, monthKey, results });
     } catch (error: any) {
+        await writeAuditEvent({
+            request,
+            eventKind: 'system',
+            category: 'payments',
+            eventType: 'cron.payment_summaries.failed',
+            action: 'send_monthly_summaries',
+            outcome: 'failure',
+            summary: 'Monthly payment summaries failed',
+            actorSource: 'cron',
+            targetLabel: monthKey || null,
+            metadata: { error: safeAuditError(error) },
+        });
         return NextResponse.json(
             { error: error?.message || 'Monthly payment summary failed.' },
             { status: 500 }

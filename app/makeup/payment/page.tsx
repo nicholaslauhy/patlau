@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../../components/AppHeader';
 import CalendarPicker from './../../components/CalendarPicker';
+import { authenticatedFetch } from './../../lib/authenticated-fetch';
 import './../../styles.css';
 import './../../dashboard/dashboard.css';
 import './../../payment/payment.css';
@@ -171,7 +172,7 @@ export default function MakeupPaymentPage() {
     }, [paidRows, counterState]);
 
     const sendTelegram = async (text: string) => {
-        const response = await fetch('/api/telegram-makeup-payment', {
+        const response = await authenticatedFetch('/api/telegram-makeup-payment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text }),

@@ -1,7 +1,21 @@
 import { NextResponse } from 'next/server';
+import { recordTelegramDelivery } from '../../lib/telegram-audit';
+import { authorizeTelegramSender } from '../../lib/telegram-auth';
 
 export async function POST(request: Request) {
     try {
+        const authorization = await authorizeTelegramSender(
+            request,
+            ['superuser'],
+            'matchplay_payment'
+        );
+        if ('status' in authorization) {
+            return NextResponse.json(
+                { error: authorization.status === 401 ? 'Unauthorized' : 'Forbidden' },
+                { status: authorization.status }
+            );
+        }
+
         const body = await request.json();
         const message = String(body?.message || body?.text || '').trim();
 
@@ -43,6 +57,13 @@ export async function POST(request: Request) {
 
         if (!telegramResponse.ok) {
             console.error('MatchPlay payment Telegram error:', telegramData);
+            await recordTelegramDelivery({
+                request,
+                programme: 'matchplay_payment',
+                category: 'payments',
+                outcome: 'failure',
+                error: telegramData?.description || 'Telegram rejected the message',
+            });
 
             return NextResponse.json(
                 {
@@ -55,12 +76,20 @@ export async function POST(request: Request) {
             );
         }
 
+        await recordTelegramDelivery({
+            request,
+            programme: 'matchplay_payment',
+            category: 'payments',
+            outcome: 'success',
+            providerMessageId: telegramData.result?.message_id,
+        });
         return NextResponse.json({
             success: true,
             result: telegramData.result,
         });
     } catch (error: any) {
         console.error('MatchPlay payment Telegram route error:', error);
+        await recordTelegramDelivery({ request, programme: 'matchplay_payment', category: 'payments', outcome: 'failure', error });
 
         return NextResponse.json(
             {

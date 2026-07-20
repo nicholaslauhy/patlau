@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { SupportStatus } from "../../../types/support";
+import { createAuditedAdminClient, getOptionalAuditActor, safeAuditError, writeAuditEvent } from "../../lib/audit-server";
 import {
-    getSupportSuperuser,
     recordSupportStatus,
     sendSupportTelegramMessage,
-    supportAdmin,
 } from "../../lib/support-server";
 
 const validStatuses: SupportStatus[] = [
@@ -19,13 +18,33 @@ const validStatuses: SupportStatus[] = [
 const asError = (error: unknown) => error instanceof Error ? error.message : "Unexpected support error.";
 
 export async function GET(request: NextRequest) {
-    const user = await getSupportSuperuser(request);
-    if (!user) return NextResponse.json({ error: "Superuser access required." }, { status: 403 });
+    const actor = await getOptionalAuditActor(request);
+    if (!actor || actor.role !== "superuser") {
+        await writeAuditEvent({
+            request,
+            actor,
+            eventKind: "security",
+            category: "support",
+            eventType: "support.access.denied",
+            action: "view_support",
+            outcome: "denied",
+            summary: actor
+                ? "A signed-in user without permission attempted to view parent support data."
+                : "An unauthenticated request attempted to view parent support data.",
+            actorSource: actor ? "support_api" : "anonymous",
+            metadata: { reason: actor ? "insufficient_role" : "authentication_required" },
+        });
+        return NextResponse.json(
+            { error: actor ? "Superuser access required." : "Authentication required." },
+            { status: actor ? 403 : 401 },
+        );
+    }
+    const auditedAdmin = createAuditedAdminClient(request, actor, "support_api");
 
     try {
         const view = request.nextUrl.searchParams.get("view");
         if (view === "count") {
-            const { count, error } = await supportAdmin
+            const { count, error } = await auditedAdmin
                 .from("support_conversations")
                 .select("id", { count: "exact", head: true })
                 .eq("status", "escalated");
@@ -35,21 +54,21 @@ export async function GET(request: NextRequest) {
 
         const conversationId = request.nextUrl.searchParams.get("conversation_id");
         if (conversationId) {
-            const { data: conversation, error: conversationError } = await supportAdmin
+            const { data: conversation, error: conversationError } = await auditedAdmin
                 .from("support_conversations")
                 .select("*, contact:support_contacts(*)")
                 .eq("id", conversationId)
                 .single();
             if (conversationError) throw conversationError;
 
-            const { data: messages, error: messagesError } = await supportAdmin
+            const { data: messages, error: messagesError } = await auditedAdmin
                 .from("support_messages")
                 .select("*")
                 .eq("conversation_id", conversationId)
                 .order("created_at", { ascending: true });
             if (messagesError) throw messagesError;
 
-            await supportAdmin
+            await auditedAdmin
                 .from("support_conversations")
                 .update({ unread_count: 0 })
                 .eq("id", conversationId);
@@ -57,12 +76,12 @@ export async function GET(request: NextRequest) {
         }
 
         const [conversationsResult, knowledgeResult, announcementsResult] = await Promise.all([
-            supportAdmin
+            auditedAdmin
                 .from("support_conversations")
                 .select("*, contact:support_contacts(*)")
                 .order("last_message_at", { ascending: false }),
-            supportAdmin.from("support_knowledge").select("*").order("updated_at", { ascending: false }),
-            supportAdmin
+            auditedAdmin.from("support_knowledge").select("*").order("updated_at", { ascending: false }),
+            auditedAdmin
                 .from("support_announcements")
                 .select("*")
                 .order("starts_on", { ascending: false }),
@@ -87,12 +106,35 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-    const user = await getSupportSuperuser(request);
-    if (!user) return NextResponse.json({ error: "Superuser access required." }, { status: 403 });
+    const actor = await getOptionalAuditActor(request);
+    if (!actor || actor.role !== "superuser") {
+        await writeAuditEvent({
+            request,
+            actor,
+            eventKind: "security",
+            category: "support",
+            eventType: "support.access.denied",
+            action: "mutate_support",
+            outcome: "denied",
+            summary: actor
+                ? "A signed-in user without permission attempted to change parent support data."
+                : "An unauthenticated request attempted to change parent support data.",
+            actorSource: actor ? "support_api" : "anonymous",
+            metadata: { reason: actor ? "insufficient_role" : "authentication_required" },
+        });
+        return NextResponse.json(
+            { error: actor ? "Superuser access required." : "Authentication required." },
+            { status: actor ? 403 : 401 },
+        );
+    }
+    const user = actor.user;
+    const auditedAdmin = createAuditedAdminClient(request, actor, "support_api");
+    let attemptedAction = "unknown";
 
     try {
         const body = await request.json();
         const action = String(body.action || "");
+        attemptedAction = action || "unknown";
 
         if (action === "send_message") {
             const conversationId = String(body.conversationId || "");
@@ -104,7 +146,7 @@ export async function POST(request: NextRequest) {
                 return NextResponse.json({ error: "Telegram replies must be 3,900 characters or fewer." }, { status: 400 });
             }
 
-            const { data: conversation, error } = await supportAdmin
+            const { data: conversation, error } = await auditedAdmin
                 .from("support_conversations")
                 .select("*, contact:support_contacts(*)")
                 .eq("id", conversationId)
@@ -112,7 +154,7 @@ export async function POST(request: NextRequest) {
             if (error || !conversation) throw error || new Error("Conversation not found.");
 
             const telegramMessage = await sendSupportTelegramMessage(conversation.contact.telegram_chat_id, content);
-            const { data: message, error: insertError } = await supportAdmin
+            const { data: message, error: insertError } = await auditedAdmin
                 .from("support_messages")
                 .insert({
                     conversation_id: conversationId,
@@ -128,7 +170,7 @@ export async function POST(request: NextRequest) {
             if (insertError) throw insertError;
 
             const previousStatus = conversation.status as SupportStatus;
-            await supportAdmin.from("support_conversations").update({
+            await auditedAdmin.from("support_conversations").update({
                 status: "human_active",
                 assigned_to: user.id,
                 last_message_at: new Date().toISOString(),
@@ -138,6 +180,20 @@ export async function POST(request: NextRequest) {
             if (previousStatus !== "human_active") {
                 await recordSupportStatus(conversationId, previousStatus, "human_active", "superuser", "Superuser replied.", user.id);
             }
+            await writeAuditEvent({
+                request,
+                actor,
+                category: "support",
+                eventType: "support.reply.sent",
+                action: "send_message",
+                outcome: "success",
+                summary: `${user.user_metadata?.name || user.email || "Superuser"} replied to a parent conversation`,
+                actorSource: "support_api",
+                targetTable: "support_conversations",
+                targetRecordId: { id: conversationId },
+                targetLabel: conversation.contact?.username || conversation.contact?.first_name || conversationId,
+                metadata: { message_id: message.id, delivery_status: "sent" },
+            });
             return NextResponse.json({ message });
         }
 
@@ -147,7 +203,7 @@ export async function POST(request: NextRequest) {
             if (!conversationId || !validStatuses.includes(status)) {
                 return NextResponse.json({ error: "A valid conversation status is required." }, { status: 400 });
             }
-            const { data: current, error: currentError } = await supportAdmin
+            const { data: current, error: currentError } = await auditedAdmin
                 .from("support_conversations")
                 .select("status")
                 .eq("id", conversationId)
@@ -161,7 +217,7 @@ export async function POST(request: NextRequest) {
                 resolved_at: status === "resolved" ? now : null,
                 closed_at: status === "closed_parent" ? now : null,
             };
-            const { error } = await supportAdmin.from("support_conversations").update(updates).eq("id", conversationId);
+            const { error } = await auditedAdmin.from("support_conversations").update(updates).eq("id", conversationId);
             if (error) throw error;
             await recordSupportStatus(
                 conversationId,
@@ -171,6 +227,22 @@ export async function POST(request: NextRequest) {
                 String(body.reason || "Status changed in Chats."),
                 user.id,
             );
+            await writeAuditEvent({
+                request,
+                actor,
+                category: "support",
+                eventType: "support.status.changed",
+                action: "change_status",
+                outcome: "success",
+                summary: `${user.user_metadata?.name || user.email || "Superuser"} changed a conversation from ${current.status} to ${status}`,
+                actorSource: "support_api",
+                targetTable: "support_conversations",
+                targetRecordId: { id: conversationId },
+                targetLabel: conversationId,
+                changedFields: ["status"],
+                oldValues: { status: current.status },
+                newValues: { status },
+            });
             return NextResponse.json({ success: true });
         }
 
@@ -186,16 +258,44 @@ export async function POST(request: NextRequest) {
                 return NextResponse.json({ error: "Title and content are required." }, { status: 400 });
             }
             const query = body.id
-                ? supportAdmin.from("support_knowledge").update(record).eq("id", body.id)
-                : supportAdmin.from("support_knowledge").insert(record);
+                ? auditedAdmin.from("support_knowledge").update(record).eq("id", body.id)
+                : auditedAdmin.from("support_knowledge").insert(record);
             const { data, error } = await query.select("*").single();
             if (error) throw error;
+            await writeAuditEvent({
+                request,
+                actor,
+                category: "support",
+                eventType: body.id ? "support.knowledge.updated" : "support.knowledge.created",
+                action: body.id ? "update" : "create",
+                outcome: "success",
+                summary: `${user.user_metadata?.name || user.email || "Superuser"} ${body.id ? "updated" : "created"} knowledge “${record.title}”`,
+                actorSource: "support_api",
+                targetTable: "support_knowledge",
+                targetRecordId: { id: data.id },
+                targetLabel: record.title,
+                metadata: { category: record.category, status: record.status },
+            });
             return NextResponse.json({ record: data });
         }
 
         if (action === "delete_knowledge") {
-            const { error } = await supportAdmin.from("support_knowledge").delete().eq("id", body.id);
+            const { data: existing } = await auditedAdmin.from("support_knowledge").select("title").eq("id", body.id).maybeSingle();
+            const { error } = await auditedAdmin.from("support_knowledge").delete().eq("id", body.id);
             if (error) throw error;
+            await writeAuditEvent({
+                request,
+                actor,
+                category: "support",
+                eventType: "support.knowledge.deleted",
+                action: "delete",
+                outcome: "success",
+                summary: `${user.user_metadata?.name || user.email || "Superuser"} deleted knowledge “${existing?.title || body.id}”`,
+                actorSource: "support_api",
+                targetTable: "support_knowledge",
+                targetRecordId: { id: body.id },
+                targetLabel: existing?.title || String(body.id),
+            });
             return NextResponse.json({ success: true });
         }
 
@@ -217,22 +317,66 @@ export async function POST(request: NextRequest) {
                 return NextResponse.json({ error: "End date cannot be before the start date." }, { status: 400 });
             }
             const query = body.id
-                ? supportAdmin.from("support_announcements").update(record).eq("id", body.id)
-                : supportAdmin.from("support_announcements").insert(record);
+                ? auditedAdmin.from("support_announcements").update(record).eq("id", body.id)
+                : auditedAdmin.from("support_announcements").insert(record);
             const { data, error } = await query.select("*").single();
             if (error) throw error;
+            await writeAuditEvent({
+                request,
+                actor,
+                category: "support",
+                eventType: body.id ? "support.announcement.updated" : "support.announcement.created",
+                action: body.id ? "update" : "create",
+                outcome: "success",
+                summary: `${user.user_metadata?.name || user.email || "Superuser"} ${body.id ? "updated" : "created"} announcement “${record.title}”`,
+                actorSource: "support_api",
+                targetTable: "support_announcements",
+                targetRecordId: { id: data.id },
+                targetLabel: record.title,
+                metadata: {
+                    programme: record.programme,
+                    starts_on: record.starts_on,
+                    ends_on: record.ends_on,
+                    status: record.status,
+                },
+            });
             return NextResponse.json({ record: data });
         }
 
         if (action === "delete_announcement") {
-            const { error } = await supportAdmin.from("support_announcements").delete().eq("id", body.id);
+            const { data: existing } = await auditedAdmin.from("support_announcements").select("title").eq("id", body.id).maybeSingle();
+            const { error } = await auditedAdmin.from("support_announcements").delete().eq("id", body.id);
             if (error) throw error;
+            await writeAuditEvent({
+                request,
+                actor,
+                category: "support",
+                eventType: "support.announcement.deleted",
+                action: "delete",
+                outcome: "success",
+                summary: `${user.user_metadata?.name || user.email || "Superuser"} deleted announcement “${existing?.title || body.id}”`,
+                actorSource: "support_api",
+                targetTable: "support_announcements",
+                targetRecordId: { id: body.id },
+                targetLabel: existing?.title || String(body.id),
+            });
             return NextResponse.json({ success: true });
         }
 
         return NextResponse.json({ error: "Unknown support action." }, { status: 400 });
     } catch (error) {
         console.error("Support POST error:", error);
+        await writeAuditEvent({
+            request,
+            actor,
+            category: "support",
+            eventType: `support.${attemptedAction}.failed`,
+            action: attemptedAction,
+            outcome: "failure",
+            summary: `Support action “${attemptedAction}” failed`,
+            actorSource: "support_api",
+            metadata: { error: safeAuditError(error) },
+        });
         return NextResponse.json({ error: asError(error) }, { status: 500 });
     }
 }

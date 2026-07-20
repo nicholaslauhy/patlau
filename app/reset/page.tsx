@@ -199,11 +199,25 @@ export default function ResetPage() {
 
         setBusy(true);
         try {
-            const { error: updateErr } = await supabase.auth.updateUser({ password: newPassword });
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.access_token) {
+                setError('Your reset session has expired. Please request a new code.');
+                setBusy(false);
+                return;
+            }
 
-            if (updateErr) {
-                console.error('updateUser error:', updateErr);
-                setError(updateErr.message || 'Failed to update password.');
+            const response = await fetch('/api/auth/change-password', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({ password: newPassword }),
+            });
+            const payload = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                setError(payload.error || 'Failed to update password.');
                 setBusy(false);
                 return;
             }

@@ -1,5 +1,6 @@
 import { createClient, type User } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+import { safeAuditError, writeAuditEvent } from "../../../lib/audit-server";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -37,20 +38,74 @@ async function ensureAvatarBucket() {
 
 export async function POST(request: NextRequest) {
     let uploadedPath = "";
+    let caller: User | null = null;
 
     try {
-        const caller = await getCaller(request);
-        if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        caller = await getCaller(request);
+        if (!caller) {
+            await writeAuditEvent({
+                request,
+                actor: null,
+                eventKind: "security",
+                category: "profiles",
+                eventType: "profile.photo_upload",
+                action: "upload_profile_photo",
+                outcome: "denied",
+                summary: "An unauthorized profile photo upload was denied.",
+                actorSource: "anonymous",
+                targetTable: "auth.users",
+            });
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
 
         const formData = await request.formData();
         const photo = formData.get("photo");
         if (!(photo instanceof File)) {
+            await writeAuditEvent({
+                request,
+                actor: { user: caller },
+                category: "profiles",
+                eventType: "profile.photo_upload",
+                action: "upload_profile_photo",
+                outcome: "failure",
+                summary: "A profile photo upload failed because no photo was provided.",
+                targetTable: "auth.users",
+                targetRecordId: { user_id: caller.id },
+                targetLabel: caller.user_metadata?.name || caller.email || caller.id,
+                metadata: { reason: "missing_photo" },
+            });
             return NextResponse.json({ error: "A profile photo is required." }, { status: 400 });
         }
         if (!allowedTypes[photo.type]) {
+            await writeAuditEvent({
+                request,
+                actor: { user: caller },
+                category: "profiles",
+                eventType: "profile.photo_upload",
+                action: "upload_profile_photo",
+                outcome: "failure",
+                summary: "A profile photo upload used an unsupported file type.",
+                targetTable: "auth.users",
+                targetRecordId: { user_id: caller.id },
+                targetLabel: caller.user_metadata?.name || caller.email || caller.id,
+                metadata: { reason: "unsupported_file_type", file_type: photo.type },
+            });
             return NextResponse.json({ error: "Use a JPG, PNG, or WebP image." }, { status: 415 });
         }
         if (photo.size > maximumFileSize) {
+            await writeAuditEvent({
+                request,
+                actor: { user: caller },
+                category: "profiles",
+                eventType: "profile.photo_upload",
+                action: "upload_profile_photo",
+                outcome: "failure",
+                summary: "A profile photo upload exceeded the file-size limit.",
+                targetTable: "auth.users",
+                targetRecordId: { user_id: caller.id },
+                targetLabel: caller.user_metadata?.name || caller.email || caller.id,
+                metadata: { reason: "file_too_large", file_size_bytes: photo.size },
+            });
             return NextResponse.json({ error: "Profile photos must be 5 MB or smaller." }, { status: 413 });
         }
 
@@ -74,23 +129,80 @@ export async function POST(request: NextRequest) {
         });
         if (metadataError) throw metadataError;
 
+        let previousPhotoCleanupFailed = false;
         if (previousPath && previousPath !== uploadedPath) {
             const { error: cleanupError } = await adminClient.storage.from(bucketName).remove([previousPath]);
-            if (cleanupError) console.warn("Unable to remove previous profile photo:", cleanupError.message);
+            if (cleanupError) {
+                previousPhotoCleanupFailed = true;
+                console.warn("Unable to remove previous profile photo:", cleanupError.message);
+            }
         }
+
+        await writeAuditEvent({
+            request,
+            actor: { user: caller },
+            category: "profiles",
+            eventType: "profile.photo_upload",
+            action: "upload_profile_photo",
+            outcome: previousPhotoCleanupFailed ? "warning" : "success",
+            summary: previousPhotoCleanupFailed
+                ? "Updated the profile photo, but the previous file could not be removed."
+                : "Updated the profile photo.",
+            targetTable: "auth.users",
+            targetRecordId: { user_id: caller.id },
+            targetLabel: caller.user_metadata?.name || caller.email || caller.id,
+            changedFields: ["profile_photo"],
+            oldValues: { had_profile_photo: Boolean(previousPath) },
+            newValues: {
+                has_profile_photo: true,
+                file_type: photo.type,
+                file_size_bytes: photo.size,
+            },
+            metadata: { previous_photo_cleanup_failed: previousPhotoCleanupFailed },
+        });
 
         return NextResponse.json({ avatarUrl });
     } catch (error) {
         if (uploadedPath) await adminClient.storage.from(bucketName).remove([uploadedPath]);
-        console.error("Profile photo upload failed:", error);
+        console.error("Profile photo upload failed:", safeAuditError(error));
+        await writeAuditEvent({
+            request,
+            actor: caller ? { user: caller } : null,
+            category: "profiles",
+            eventType: "profile.photo_upload",
+            action: "upload_profile_photo",
+            outcome: "failure",
+            summary: "A profile photo upload failed unexpectedly.",
+            actorSource: caller ? "authenticated" : "anonymous",
+            targetTable: "auth.users",
+            targetRecordId: caller ? { user_id: caller.id } : null,
+            targetLabel: caller?.user_metadata?.name || caller?.email || null,
+            metadata: { reason: "unexpected_error" },
+        });
         return NextResponse.json({ error: "Failed to save the profile photo." }, { status: 500 });
     }
 }
 
 export async function DELETE(request: NextRequest) {
+    let caller: User | null = null;
+
     try {
-        const caller = await getCaller(request);
-        if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        caller = await getCaller(request);
+        if (!caller) {
+            await writeAuditEvent({
+                request,
+                actor: null,
+                eventKind: "security",
+                category: "profiles",
+                eventType: "profile.photo_remove",
+                action: "remove_profile_photo",
+                outcome: "denied",
+                summary: "An unauthorized profile photo removal was denied.",
+                actorSource: "anonymous",
+                targetTable: "auth.users",
+            });
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
 
         const previousPath = caller.user_metadata?.avatar_path as string | undefined;
         const { error: metadataError } = await adminClient.auth.admin.updateUserById(caller.id, {
@@ -102,14 +214,53 @@ export async function DELETE(request: NextRequest) {
         });
         if (metadataError) throw metadataError;
 
+        let photoRemovalFailed = false;
         if (previousPath) {
             const { error: removalError } = await adminClient.storage.from(bucketName).remove([previousPath]);
-            if (removalError) console.warn("Unable to remove profile photo file:", removalError.message);
+            if (removalError) {
+                photoRemovalFailed = true;
+                console.warn("Unable to remove profile photo file:", removalError.message);
+            }
         }
+
+        await writeAuditEvent({
+            request,
+            actor: { user: caller },
+            category: "profiles",
+            eventType: "profile.photo_remove",
+            action: "remove_profile_photo",
+            outcome: photoRemovalFailed ? "warning" : "success",
+            summary: photoRemovalFailed
+                ? "Removed the profile photo from the account, but its stored file could not be deleted."
+                : previousPath
+                    ? "Removed the profile photo."
+                    : "Confirmed that the account has no profile photo.",
+            targetTable: "auth.users",
+            targetRecordId: { user_id: caller.id },
+            targetLabel: caller.user_metadata?.name || caller.email || caller.id,
+            changedFields: previousPath ? ["profile_photo"] : [],
+            oldValues: { had_profile_photo: Boolean(previousPath) },
+            newValues: { has_profile_photo: false },
+            metadata: { stored_file_removal_failed: photoRemovalFailed },
+        });
 
         return NextResponse.json({ avatarUrl: null });
     } catch (error) {
-        console.error("Profile photo removal failed:", error);
+        console.error("Profile photo removal failed:", safeAuditError(error));
+        await writeAuditEvent({
+            request,
+            actor: caller ? { user: caller } : null,
+            category: "profiles",
+            eventType: "profile.photo_remove",
+            action: "remove_profile_photo",
+            outcome: "failure",
+            summary: "A profile photo removal failed unexpectedly.",
+            actorSource: caller ? "authenticated" : "anonymous",
+            targetTable: "auth.users",
+            targetRecordId: caller ? { user_id: caller.id } : null,
+            targetLabel: caller?.user_metadata?.name || caller?.email || null,
+            metadata: { reason: "unexpected_error" },
+        });
         return NextResponse.json({ error: "Failed to remove the profile photo." }, { status: 500 });
     }
 }

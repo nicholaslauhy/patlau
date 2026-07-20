@@ -1,10 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { createAuditedAdminClient } from '../../../lib/audit-server';
+import { recordTelegramDelivery } from '../../../lib/telegram-audit';
+import { authorizeTelegramSender } from '../../../lib/telegram-auth';
 
 type CoachSlotInput = {
     key: string;
@@ -56,6 +53,23 @@ const buildMessageText = (
 
 export async function POST(request: Request) {
     try {
+        const authorization = await authorizeTelegramSender(
+            request,
+            ['admin', 'superuser'],
+            'coach_attendance'
+        );
+        if ('status' in authorization) {
+            return NextResponse.json(
+                { error: authorization.status === 401 ? 'Unauthorized' : 'Forbidden' },
+                { status: authorization.status }
+            );
+        }
+
+        const supabaseAdmin = createAuditedAdminClient(
+            request,
+            authorization.actor,
+            'coach_attendance_api'
+        );
         const bodyJson = await request.json();
 
         const introText = String(bodyJson.introText || '').trim();
@@ -183,6 +197,15 @@ export async function POST(request: Request) {
                 .delete()
                 .eq('id', poll.id);
 
+            await recordTelegramDelivery({
+                request,
+                programme: `${topic || 'weekend'}_coach_attendance`,
+                category: 'coach_attendance',
+                outcome: 'failure',
+                targetLabel: pollDate,
+                error: telegramData?.description || 'Telegram rejected the poll',
+            });
+
             return NextResponse.json(
                 {
                     error: 'Failed to send Telegram coach attendance poll.',
@@ -200,6 +223,15 @@ export async function POST(request: Request) {
             })
             .eq('id', poll.id);
 
+        await recordTelegramDelivery({
+            request,
+            programme: `${topic || 'weekend'}_coach_attendance`,
+            category: 'coach_attendance',
+            outcome: 'success',
+            providerMessageId: telegramData?.result?.message_id,
+            targetLabel: pollDate,
+        });
+
         return NextResponse.json({
             success: true,
             poll_id: poll.id,
@@ -207,6 +239,13 @@ export async function POST(request: Request) {
         });
     } catch (error: any) {
         console.error('Coach attendance send error:', error);
+        await recordTelegramDelivery({
+            request,
+            programme: 'coach_attendance',
+            category: 'coach_attendance',
+            outcome: 'failure',
+            error,
+        });
 
         return NextResponse.json(
             { error: error?.message || 'Unexpected coach attendance send error.' },

@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import TelegramBot from 'node-telegram-bot-api'
 import cron from 'node-cron'
+import { authorizeTelegramSender } from '../../lib/telegram-auth'
+import { recordTelegramDelivery } from '../../lib/telegram-audit'
+import { safeAuditError, writeAuditEvent } from '../../lib/audit-server'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -11,7 +14,7 @@ const supabase = createClient(
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN!, { polling: false })
 
 // Function to send payment reminders
-async function sendPaymentReminders() {
+async function sendPaymentReminders(request?: Request) {
   try {
     // Get all unpaid students
     const { data: unpaidStudents, error } = await supabase
@@ -23,7 +26,20 @@ async function sendPaymentReminders() {
 
     if (!unpaidStudents || unpaidStudents.length === 0) {
       console.log('No unpaid students found')
-      return
+      await writeAuditEvent({
+        request,
+        eventKind: 'activity',
+        category: 'payments',
+        eventType: 'telegram.payment_reminders.completed',
+        action: 'send_payment_reminders',
+        outcome: 'success',
+        summary: 'Payment reminder check completed with no unpaid students',
+        actorSource: request ? 'authenticated_or_cron_api' : 'scheduled_job',
+        targetTable: 'telegram',
+        targetLabel: 'payment reminders',
+        metadata: { student_count: 0 },
+      })
+      return 0
     }
 
     // Send reminder for each unpaid student
@@ -42,19 +58,55 @@ async function sendPaymentReminders() {
     }
 
     console.log(`Sent reminders for ${unpaidStudents.length} unpaid students`)
+    await writeAuditEvent({
+      request,
+      eventKind: 'activity',
+      category: 'payments',
+      eventType: 'telegram.payment_reminders.completed',
+      action: 'send_payment_reminders',
+      outcome: 'success',
+      summary: `Sent payment reminders for ${unpaidStudents.length} unpaid students`,
+      actorSource: request ? 'authenticated_or_cron_api' : 'scheduled_job',
+      targetTable: 'telegram',
+      targetLabel: 'payment reminders',
+      metadata: { student_count: unpaidStudents.length },
+    })
+    return unpaidStudents.length
   } catch (error) {
     console.error('Error sending payment reminders:', error)
+    await writeAuditEvent({
+      request,
+      eventKind: 'system',
+      category: 'payments',
+      eventType: 'telegram.payment_reminders.failed',
+      action: 'send_payment_reminders',
+      outcome: 'failure',
+      summary: 'Payment reminder delivery failed',
+      actorSource: request ? 'authenticated_or_cron_api' : 'scheduled_job',
+      targetTable: 'telegram',
+      targetLabel: 'payment reminders',
+      metadata: { error: safeAuditError(error) },
+    })
+    throw error
   }
 }
 
 // Set up weekly cron job (runs every Monday at 9am)
-cron.schedule('0 9 * * 1', () => {
+cron.schedule('0 9 * * 1', async () => {
   console.log('Running weekly payment reminder check...')
-  sendPaymentReminders()
+  await sendPaymentReminders().catch(() => undefined)
 })
 
 export async function POST(request: Request) {
   try {
+    const authorization = await authorizeTelegramSender(request, ['superuser'], 'payment_reminder')
+    if ('status' in authorization) {
+      return NextResponse.json(
+        { error: authorization.status === 401 ? 'Unauthorized' : 'Forbidden' },
+        { status: authorization.status },
+      )
+    }
+
     const { message } = await request.json();
     
     if (!message) {
@@ -69,12 +121,27 @@ export async function POST(request: Request) {
       await bot.sendMessage(chatId.trim(), message);
     }
 
+    await recordTelegramDelivery({
+      request,
+      programme: 'payment_reminder',
+      category: 'payments',
+      outcome: 'success',
+      targetLabel: `${chatIds.length} configured chats`,
+    })
+
     return NextResponse.json(
       { message: 'Notification sent successfully' },
       { status: 200 }
     );
   } catch (error) {
     console.error('Error in POST handler:', error);
+    await recordTelegramDelivery({
+      request,
+      programme: 'payment_reminder',
+      category: 'payments',
+      outcome: 'failure',
+      error,
+    })
     return NextResponse.json(
       { message: 'Failed to send notification' },
       { status: 500 }
@@ -82,9 +149,17 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    await sendPaymentReminders();
+    const authorization = await authorizeTelegramSender(request, ['superuser'], 'payment_reminder')
+    if ('status' in authorization) {
+      return NextResponse.json(
+        { error: authorization.status === 401 ? 'Unauthorized' : 'Forbidden' },
+        { status: authorization.status },
+      )
+    }
+
+    await sendPaymentReminders(request);
     return NextResponse.json(
       { message: 'Payment reminders sent successfully' },
       { status: 200 }
