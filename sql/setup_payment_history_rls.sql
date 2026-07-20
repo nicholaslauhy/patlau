@@ -12,19 +12,18 @@ CREATE TABLE IF NOT EXISTS public.payment_history (
 -- Enable Row Level Security
 ALTER TABLE public.payment_history ENABLE ROW LEVEL SECURITY;
 
--- Read access for authenticated users
-CREATE POLICY "Allow read access to all authenticated users" 
+-- Weekend payment history is restricted to superusers.
+CREATE POLICY "payment history read for superusers"
 ON public.payment_history
 FOR SELECT
 TO authenticated
-USING (true);
+USING ((SELECT public.current_app_role()) = 'superuser');
 
--- Insert access for authenticated users  
-CREATE POLICY "Allow insert for authenticated users"
+CREATE POLICY "payment history insert for superusers"
 ON public.payment_history
 FOR INSERT
 TO authenticated
-WITH CHECK (true);
+WITH CHECK ((SELECT public.current_app_role()) = 'superuser');
 
 -- Create indexes
 CREATE INDEX IF NOT EXISTS idx_payment_history_student_id ON public.payment_history(student_id);

@@ -96,6 +96,7 @@ create index if not exists support_knowledge_status_idx
 create or replace function public.set_support_updated_at()
 returns trigger
 language plpgsql
+set search_path = pg_catalog, public
 as $$
 begin
     new.updated_at = now();
@@ -128,10 +129,9 @@ returns boolean
 language sql
 stable
 security definer
-set search_path = public
+set search_path = ''
 as $$
-    select coalesce(auth.jwt() -> 'user_metadata' ->> 'role', '') = 'superuser'
-        or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'superuser';
+    select coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'superuser';
 $$;
 
 revoke all on function public.is_support_superuser() from public;

@@ -1,13 +1,15 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { requireRole, serverAdmin, type UserRole } from '../../../lib/server-auth';
 
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const VALID_ROLES: UserRole[] = ['member', 'admin', 'superuser'];
 
 export async function POST(request: NextRequest) {
     try {
+        const caller = await requireRole(request, ['admin', 'superuser']);
+        if (!caller) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const { email, name, role, password } = await request.json();
 
         if (!email || !name || !role) {
@@ -19,9 +21,21 @@ export async function POST(request: NextRequest) {
 
         const normalizedEmail = email.toLowerCase().trim();
         const normalizedName = name.trim();
+        const requestedRole = role as UserRole;
+
+        if (!VALID_ROLES.includes(requestedRole)) {
+            return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
+        }
+
+        if (caller.role === 'admin' && requestedRole !== 'member') {
+            return NextResponse.json(
+                { error: 'Admins can only create member accounts' },
+                { status: 403 },
+            );
+        }
 
         // List all users to check for duplicates
-        const { data: usersData, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
+        const { data: usersData, error: listErr } = await serverAdmin.auth.admin.listUsers();
 
         if (listErr || !usersData?.users) {
             console.error('Failed to list users:', listErr);
@@ -56,12 +70,17 @@ export async function POST(request: NextRequest) {
         }
 
         // Create the user with metadata
-        const { data: userData, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+        const { data: userData, error: createErr } = await serverAdmin.auth.admin.createUser({
             email: normalizedEmail,
             password: password || undefined,
+            app_metadata: {
+                role: requestedRole,
+            },
             user_metadata: {
                 name: normalizedName,
-                role: role,
+                // Kept in sync temporarily for older deployed clients. All
+                // authorization uses protected app_metadata after migration.
+                role: requestedRole,
             },
             email_confirm: true,
         });
@@ -76,7 +95,7 @@ export async function POST(request: NextRequest) {
 
         // Send reset password email so user can set their own password
         const redirectTo = `${process.env.NEXT_PUBLIC_SITE_URL}/reset`;
-        const { error: resetErr } = await supabaseAdmin.auth.resetPasswordForEmail(normalizedEmail, {
+        const { error: resetErr } = await serverAdmin.auth.resetPasswordForEmail(normalizedEmail, {
             redirectTo,
         });
 

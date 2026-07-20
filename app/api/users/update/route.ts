@@ -1,13 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { requireRole } from '../../../lib/server-auth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
-
-const supabaseAuthClient = createClient(supabaseUrl, anonKey);
 
 type UserRole = 'member' | 'admin' | 'superuser';
 
@@ -31,41 +29,16 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const authHeader = request.headers.get('authorization');
-
-        if (!authHeader?.startsWith('Bearer ')) {
+        const caller = await requireRole(request, ['superuser']);
+        if (!caller) {
             return NextResponse.json(
                 { error: 'Unauthorized' },
                 { status: 401 }
             );
         }
 
-        const token = authHeader.replace('Bearer ', '');
-
-        // Verify token properly instead of only decoding it
-        const {
-            data: { user: caller },
-            error: authError
-        } = await supabaseAuthClient.auth.getUser(token);
-
-        if (authError || !caller) {
-            return NextResponse.json(
-                { error: 'Invalid or expired token' },
-                { status: 401 }
-            );
-        }
-
-        const callerRole = caller.user_metadata?.role as UserRole | undefined;
-
-        if (callerRole !== 'superuser') {
-            return NextResponse.json(
-                { error: 'Only superusers can update user roles' },
-                { status: 403 }
-            );
-        }
-
         // Important: prevent self-demotion / self-role-change
-        if (caller.id === userId) {
+        if (caller.user.id === userId) {
             return NextResponse.json(
                 { error: 'You cannot change your own role.' },
                 { status: 403 }
@@ -84,8 +57,13 @@ export async function POST(request: NextRequest) {
         }
 
         const existingMetadata = targetData.user.user_metadata || {};
+        const existingAppMetadata = targetData.user.app_metadata || {};
 
         const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+            app_metadata: {
+                ...existingAppMetadata,
+                role,
+            },
             user_metadata: {
                 ...existingMetadata,
                 role

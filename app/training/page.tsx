@@ -7,6 +7,7 @@ import Link from 'next/link';
 import AppHeader from './../components/AppHeader';
 import CalendarPicker from './../components/CalendarPicker';
 import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../components/CrossProgrammeMakeupModal';
+import { authenticatedFetch } from './../lib/authenticated-fetch';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 
@@ -183,7 +184,7 @@ export default function TrainingPage() {
 
             if (studentError) throw studentError;
 
-            const { data: authUsers, error: userError } = await fetch('/api/users/list')
+            const { data: authUsers, error: userError } = await authenticatedFetch('/api/users/list')
                 .then(res => res.json())
                 .then(json => ({ data: json.users as AppUser[], error: null }))
                 .catch(err => ({ data: null, error: err }));

@@ -1,14 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { getStoredUserRole, requireRole } from '../../../lib/server-auth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
-const supabaseAuthClient = createClient(supabaseUrl, anonKey);
-
-type UserRole = 'member' | 'admin' | 'superuser';
 
 function generateCode(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();
@@ -16,35 +13,11 @@ function generateCode(): string {
 
 export async function POST(request: NextRequest) {
     try {
-        const authHeader = request.headers.get('authorization');
-
-        if (!authHeader?.startsWith('Bearer ')) {
+        const caller = await requireRole(request, ['admin', 'superuser']);
+        if (!caller) {
             return NextResponse.json(
                 { error: 'Unauthorized' },
                 { status: 401 }
-            );
-        }
-
-        const token = authHeader.replace('Bearer ', '');
-
-        const {
-            data: { user: caller },
-            error: authError
-        } = await supabaseAuthClient.auth.getUser(token);
-
-        if (authError || !caller) {
-            return NextResponse.json(
-                { error: 'Invalid or expired token' },
-                { status: 401 }
-            );
-        }
-
-        const callerRole = caller.user_metadata?.role as UserRole | undefined;
-
-        if (callerRole !== 'admin' && callerRole !== 'superuser') {
-            return NextResponse.json(
-                { error: 'Only admins and superusers can resend reset codes' },
-                { status: 403 }
             );
         }
 
@@ -81,9 +54,9 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const targetRole = (targetUser.user_metadata?.role || 'member') as UserRole;
+        const targetRole = getStoredUserRole(targetUser);
 
-        if (callerRole === 'admin' && targetRole !== 'member') {
+        if (caller.role === 'admin' && targetRole !== 'member') {
             return NextResponse.json(
                 { error: 'Admins can only resend reset codes to member accounts' },
                 { status: 403 }

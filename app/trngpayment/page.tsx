@@ -6,6 +6,7 @@ import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
 import AppHeader from './../components/AppHeader';
 import CalendarPicker from './../components/CalendarPicker';
+import { authenticatedFetch } from './../lib/authenticated-fetch';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 import './../payment/payment.css';
@@ -206,7 +207,7 @@ export default function TrngPaymentPage() {
 
             let coachesById = new Map<string, string>();
             if (coachIds.length > 0) {
-                const { data: authUsers } = await fetch('/api/users/list')
+                const { data: authUsers } = await authenticatedFetch('/api/users/list')
                     .then(res => res.json())
                     .then(json => ({ data: json.users as AppUser[] }))
                     .catch(() => ({ data: [] as AppUser[] }));

@@ -7,6 +7,7 @@ import AppHeader from "./../components/AppHeader";
 import PasswordField from "./../components/PasswordField";
 import ProfilePhotoEditor from "./../components/ProfilePhotoEditor";
 import ProfileCameraCapture from "./../components/ProfileCameraCapture";
+import { authenticatedFetch } from "./../lib/authenticated-fetch";
 import "./../styles.css";
 import "./../dashboard/dashboard.css";
 import "./settings.css";
@@ -224,7 +225,7 @@ export default function SettingsPage() {
     const loadUsers = async () => {
         try {
             setIsLoading(true);
-            const response = await fetch("/api/users/list", {
+            const response = await authenticatedFetch("/api/users/list", {
                 method: "GET",
                 headers: { "Content-Type": "application/json" },
             });
@@ -341,7 +342,7 @@ export default function SettingsPage() {
             // If current user is admin, force role to 'member' to prevent creating privileged accounts
             const roleToSend = userRole === "admin" ? "member" : newUserRole;
 
-            const response = await fetch("/api/users/create", {
+            const response = await authenticatedFetch("/api/users/create", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -421,7 +422,7 @@ export default function SettingsPage() {
         }
 
         try {
-            const response = await fetch(`/api/users/delete`, {
+            const response = await authenticatedFetch(`/api/users/delete`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ userId }),
@@ -455,7 +456,7 @@ export default function SettingsPage() {
                 return;
             }
 
-            const response = await fetch("/api/users/update", {
+            const response = await authenticatedFetch("/api/users/update", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -517,7 +518,7 @@ export default function SettingsPage() {
                 return;
             }
 
-            const response = await fetch("/api/users/resend-reset-code", {
+            const response = await authenticatedFetch("/api/users/resend-reset-code", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",

@@ -1,5 +1,6 @@
 import { createClient, type User } from "@supabase/supabase-js";
 import type { SupportStatus } from "../../types/support";
+import { getStoredUserRole } from "./server-auth";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -18,8 +19,10 @@ export async function getSupportSuperuser(request: Request): Promise<User | null
     if (!authorization?.startsWith("Bearer ")) return null;
     const { data, error } = await supportAuth.auth.getUser(authorization.slice(7));
     if (error || !data.user) return null;
-    const role = data.user.app_metadata?.role || data.user.user_metadata?.role;
-    return role === "superuser" ? data.user : null;
+    const { data: current, error: currentError } =
+        await supportAdmin.auth.admin.getUserById(data.user.id);
+    if (currentError || !current.user) return null;
+    return getStoredUserRole(current.user) === "superuser" ? current.user : null;
 }
 
 export function getSingaporeDateKey() {

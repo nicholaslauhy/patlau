@@ -1,14 +1,14 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { requireRole, serverAdmin } from '../../../lib/server-auth';
 
 export async function GET(request: NextRequest) {
     try {
-        const { data, error } = await supabaseAdmin.auth.admin.listUsers();
+        const caller = await requireRole(request, ['admin', 'superuser']);
+        if (!caller) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        const { data, error } = await serverAdmin.auth.admin.listUsers();
 
         if (error) {
             return NextResponse.json(
@@ -17,7 +17,16 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        return NextResponse.json({ users: data.users });
+        return NextResponse.json({
+            users: data.users.map((user) => ({
+                id: user.id,
+                email: user.email,
+                app_metadata: user.app_metadata,
+                user_metadata: user.user_metadata,
+                created_at: user.created_at,
+                last_sign_in_at: user.last_sign_in_at,
+            })),
+        });
     } catch (error) {
         console.error('List users error:', error);
         return NextResponse.json(

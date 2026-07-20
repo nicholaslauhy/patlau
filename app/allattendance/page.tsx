@@ -6,6 +6,7 @@ import Link from "next/link";
 import { createBrowserClient } from "@supabase/ssr";
 import AppHeader from "./../components/AppHeader";
 import CalendarPicker from "./../components/CalendarPicker";
+import { authenticatedFetch } from "./../lib/authenticated-fetch";
 import "./../styles.css";
 import "./../dashboard/dashboard.css";
 
@@ -279,7 +280,7 @@ export default function AllAttendancePage() {
             const nextDateKey = getNextDateKey(selectedDate);
             const isAllRecordsView = viewMode === "all";
 
-            const usersPromise = fetch("/api/users/list", {
+            const usersPromise = authenticatedFetch("/api/users/list", {
                 method: "GET",
                 headers: { "Content-Type": "application/json" },
             }).then(async (res) => {
