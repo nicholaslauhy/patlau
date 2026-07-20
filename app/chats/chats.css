@@ -206,6 +206,7 @@
 .chats-record-card small,.chats-record-card time { color:var(--muted-foreground); font-size:0.62rem; }
 .chats-record-card h3 { margin:0.55rem 0 0; font-size:0.9rem; font-weight:750; }
 .chats-record-card p { margin:0.3rem 0 0.5rem; white-space:pre-wrap; color:#415166; font-size:0.73rem; line-height:1.5; }
+.chats-search-highlight { padding:0.04em 0.12em; border-radius:3px; background:#fde68a; color:inherit; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
 .chats-record-status { padding:0.18rem 0.42rem; border-radius:999px; font-size:0.58rem; font-weight:800; text-transform:uppercase; }
 .chats-record-status.is-published { background:#dcfce7; color:#166534; }
 .chats-record-status.is-draft { background:#fef3c7; color:#92400e; }

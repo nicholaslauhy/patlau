@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import AppHeader from "../components/AppHeader";
@@ -49,6 +49,31 @@ const formatTime = (value: string) => new Date(value).toLocaleString("en-SG", {
     hour: "numeric",
     minute: "2-digit",
 });
+
+function highlightSearchMatch(value: string, query: string): ReactNode {
+    const term = query.trim();
+    if (!term) return value;
+
+    const source = value.toLowerCase();
+    const target = term.toLowerCase();
+    const parts: ReactNode[] = [];
+    let cursor = 0;
+    let matchIndex = source.indexOf(target);
+
+    while (matchIndex !== -1) {
+        if (matchIndex > cursor) parts.push(value.slice(cursor, matchIndex));
+        parts.push(
+            <mark className="chats-search-highlight" key={`${matchIndex}-${value.slice(matchIndex, matchIndex + term.length)}`}>
+                {value.slice(matchIndex, matchIndex + term.length)}
+            </mark>,
+        );
+        cursor = matchIndex + term.length;
+        matchIndex = source.indexOf(target, cursor);
+    }
+
+    if (cursor < value.length) parts.push(value.slice(cursor));
+    return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>);
+}
 
 function ChatsNotification({
     kind,
@@ -432,8 +457,8 @@ export default function ChatsPage() {
                             </div>
                             {knowledge.length === 0 ? <p className="chats-empty-card">No knowledge has been added. The chatbot will escalate rather than guess.</p> : filteredKnowledge.length === 0 ? <p className="chats-empty-card">No knowledge matches your search.</p> : filteredKnowledge.map((item) => (
                                 <article key={item.id} className="chats-record-card">
-                                    <div><span className={`chats-record-status is-${item.status}`}>{item.status}</span><small>{item.category}</small></div>
-                                    <h3>{item.title}</h3><p>{item.content}</p><time>Updated {formatTime(item.updated_at)}</time>
+                                    <div><span className={`chats-record-status is-${item.status}`}>{highlightSearchMatch(item.status, knowledgeSearch)}</span><small>{highlightSearchMatch(item.category, knowledgeSearch)}</small></div>
+                                    <h3>{highlightSearchMatch(item.title, knowledgeSearch)}</h3><p>{highlightSearchMatch(item.content, knowledgeSearch)}</p><time>Updated {formatTime(item.updated_at)}</time>
                                     <div className="chats-record-actions"><button type="button" onClick={() => setKnowledgeForm({ id: item.id, title: item.title, category: item.category, content: item.content, status: item.status })}>Edit</button><button type="button" className="is-destructive" onClick={() => confirm(`Delete “${item.title}”?`) && void runAction({ action: "delete_knowledge", id: item.id }, "Knowledge deleted.")}>Delete</button></div>
                                 </article>
                             ))}
@@ -459,8 +484,8 @@ export default function ChatsPage() {
                             </div>
                             {announcements.length === 0 ? <p className="chats-empty-card">No announcements yet. Add dated holiday or operational information here.</p> : filteredAnnouncements.length === 0 ? <p className="chats-empty-card">No announcements match your search.</p> : filteredAnnouncements.map((item) => (
                                 <article key={item.id} className="chats-record-card">
-                                    <div><span className={`chats-record-status is-${item.status}`}>{item.status}</span><small>{item.programme}</small></div>
-                                    <h3>{item.title}</h3><p>{item.content}</p><time>{item.starts_on} to {item.ends_on} · Updated {formatTime(item.updated_at)}</time>
+                                    <div><span className={`chats-record-status is-${item.status}`}>{highlightSearchMatch(item.status, announcementSearch)}</span><small>{highlightSearchMatch(item.programme, announcementSearch)}</small></div>
+                                    <h3>{highlightSearchMatch(item.title, announcementSearch)}</h3><p>{highlightSearchMatch(item.content, announcementSearch)}</p><time>{item.starts_on} to {item.ends_on} · Updated {formatTime(item.updated_at)}</time>
                                     <div className="chats-record-actions"><button type="button" onClick={() => setAnnouncementForm({ id: item.id, title: item.title, content: item.content, programme: item.programme, startsOn: item.starts_on, endsOn: item.ends_on, status: item.status })}>Edit</button><button type="button" className="is-destructive" onClick={() => confirm(`Delete “${item.title}”?`) && void runAction({ action: "delete_announcement", id: item.id }, "Announcement deleted.")}>Delete</button></div>
                                 </article>
                             ))}
