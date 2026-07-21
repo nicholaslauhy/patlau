@@ -666,12 +666,15 @@ export default function AuditLogsPage() {
                                     <button ref={detailCloseRef} type="button" onClick={() => setDetailOpen(false)} aria-label="Close activity details">← Back to activity</button>
                                 </div>
                                 <header className="audit-detail-header">
-                                    <div>
+                                    <div className="audit-detail-header-topline">
                                         <span className="audit-eyebrow">Event #{selectedEntry.id}</span>
-                                        <h2 id="audit-detail-title">{selectedEntry.summary}</h2>
-                                        <time>{formatDateTime(selectedEntry.occurred_at)}</time>
+                                        <OutcomeBadge outcome={selectedEntry.outcome} />
                                     </div>
-                                    <OutcomeBadge outcome={selectedEntry.outcome} />
+                                    <h2 id="audit-detail-title">{selectedEntry.summary}</h2>
+                                    <div className="audit-detail-timestamp">
+                                        <span>Recorded</span>
+                                        <time dateTime={selectedEntry.occurred_at}>{formatDateTime(selectedEntry.occurred_at)}</time>
+                                    </div>
                                 </header>
 
                                 <section className="audit-detail-section">
