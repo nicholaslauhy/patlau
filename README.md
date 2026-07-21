@@ -231,7 +231,7 @@ SENTRY_AUDIT_SEARCH_URL=
 AUDIT_LOCAL_RETENTION_DAYS=7
 AUDIT_EXPORT_BATCH_SIZE=200
 AUDIT_EXPORT_MAX_BATCHES=20
-# Leave false until an exported event has been confirmed in Sentry.
+# Leave false until a structured log record has been confirmed in Sentry Logs.
 AUDIT_PRUNING_ENABLED=false
 ```
 
@@ -244,10 +244,13 @@ Keep `SENTRY_AUTH_TOKEN`, `SENTRY_DSN`, and server Supabase credentials in Verce
 3. Copy the organisation slug and project slug into `SENTRY_ORG` and `SENTRY_PROJECT`.
 4. If production source maps are wanted, create a Sentry organisation auth token with release/source-map permissions and save it as the server-only `SENTRY_AUTH_TOKEN`. Audit export itself does not require this token.
 5. In Sentry security/privacy settings, keep server-side data scrubbing enabled and add sensitive keys such as `password`, `token`, `secret`, `code`, `cookie`, `authorization`, `session`, and `api_key`.
-6. Apply both Sentry audit migrations, leave `AUDIT_PRUNING_ENABLED=false`, redeploy the application, then use **Audit Logs → Export now**.
-7. In Sentry **Explore → Logs**, verify a row by searching for `source:supabase_audit` or its `audit_stable_id`. Save that Logs view and place its HTTPS URL in `SENTRY_AUDIT_SEARCH_URL` if the website should link directly to it.
-8. Create a Sentry alert for errors tagged `subsystem:audit-export`, and keep Vercel function-failure notifications enabled. This makes a broken exporter visible before the local queue grows substantially.
-9. Only after verifying delivery and alerts, set `AUDIT_PRUNING_ENABLED=true` in Vercel and redeploy. Until this switch is enabled, exports can be tested but no local audit row can be cleaned up.
+6. Apply both Sentry audit migrations, leave `AUDIT_PRUNING_ENABLED=false`, and redeploy the application.
+7. Open **Audit Logs → Test Sentry**. This sends one fresh minimal log through the audit transport and one through Sentry's official SDK. Confirm that the page reports raw ingestion accepted, SDK initialized, SDK Logs enabled, and SDK local queue drained.
+8. Copy the exact `source:patlau_sentry_probe probe_id:<id>` query shown by the test into Sentry **Explore → Logs** with the `patlau` project, **All Environments**, and a time range that includes the current time. An HTTP acknowledgement or a drained SDK queue proves transport, but the probe appearing in Logs is the proof that Sentry indexed it.
+9. Use **Audit Logs → Export now**, then search the displayed `audit_export_run_id:<id>` token. Historic audit records retain their original timestamps, so use a 30-day range when checking an older backlog. The official SDK also emits a fresh `source:patlau_audit_export_summary` record for every manual run.
+10. Save the working Logs view and place its HTTPS URL in `SENTRY_AUDIT_SEARCH_URL` if the website should link directly to it.
+11. Create a Sentry alert for errors tagged `subsystem:audit-export`, and keep Vercel function-failure notifications enabled. This makes a broken exporter visible before the local queue grows substantially.
+12. Only after verifying a probe and an audit export in Sentry Logs, set `AUDIT_PRUNING_ENABLED=true` in Vercel and redeploy. Until this switch is enabled, exports can be tested but no local audit row can be cleaned up.
 
 The export route fails closed when the DSN is absent. In that state it does not acknowledge or prune any audit row, so configuring the website and Supabase in separate deployments does not lose history.
 

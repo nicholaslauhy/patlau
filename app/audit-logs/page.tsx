@@ -27,6 +27,27 @@ interface AuditFilters {
     to: string;
 }
 
+interface SentryLogsProbeResult {
+    probeId: string;
+    raw: {
+        accepted: boolean;
+        httpStatus: number | null;
+        rateLimitHeaderPresent: boolean;
+        error: string | null;
+        destination: {
+            host: string;
+            projectId: string;
+            environment: string;
+        } | null;
+    };
+    sdk: {
+        initialized: boolean;
+        logsEnabled: boolean;
+        queueDrained: boolean;
+        error: string | null;
+    };
+}
+
 const EMPTY_FILTERS: AuditFilters = {
     search: '',
     category: '',
@@ -206,6 +227,9 @@ export default function AuditLogsPage() {
     const [copied, setCopied] = useState(false);
     const [copyError, setCopyError] = useState('');
     const [exporting, setExporting] = useState(false);
+    const [probingSentry, setProbingSentry] = useState(false);
+    const [lastExportRunId, setLastExportRunId] = useState('');
+    const [sentryProbe, setSentryProbe] = useState<SentryLogsProbeResult | null>(null);
     const [exportNotice, setExportNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
     const detailRef = useRef<HTMLElement>(null);
     const detailCloseRef = useRef<HTMLButtonElement>(null);
@@ -396,7 +420,7 @@ export default function AuditLogsPage() {
     };
 
     const exportNow = async () => {
-        if (exporting) return;
+        if (exporting || probingSentry) return;
 
         setExporting(true);
         setExportNotice(null);
@@ -410,16 +434,24 @@ export default function AuditLogsPage() {
             const exported = Number(payload.result?.exported) || 0;
             const pruned = Number(payload.result?.pruned) || 0;
             const requeued = Number(payload.result?.requeued) || 0;
+            const exportRunId = typeof payload.result?.exportRunId === 'string'
+                ? payload.result.exportRunId
+                : '';
+            const sdkSummaryQueueDrained = payload.result?.sdkSummaryQueueDrained === true;
+            setLastExportRunId(exportRunId);
             const summary = exported > 0
-                ? `${exported.toLocaleString()} ${exported === 1 ? 'event was' : 'events were'} sent to Sentry.`
-                : 'All queued events are already up to date.';
+                ? `${exported.toLocaleString()} ${exported === 1 ? 'log record was' : 'log records were'} accepted by Sentry ingestion.`
+                : 'All queued audit records are already up to date.';
             const retrySummary = requeued > 0
                 ? ` ${requeued.toLocaleString()} previously failed ${requeued === 1 ? 'event was' : 'events were'} retried.`
                 : '';
             const pruningSummary = pruned > 0
                 ? ` ${pruned.toLocaleString()} safely exported ${pruned === 1 ? 'record was' : 'records were'} removed from the local buffer.`
                 : '';
-            setExportNotice({ type: 'success', message: `${summary}${retrySummary}${pruningSummary}` });
+            const sdkSummary = sdkSummaryQueueDrained
+                ? ' The official Sentry SDK also drained its verification record from the local queue.'
+                : ' The official Sentry SDK did not confirm that its local queue drained; use Test Sentry for details.';
+            setExportNotice({ type: 'success', message: `${summary}${retrySummary}${pruningSummary}${sdkSummary}` });
             await loadLogs();
         } catch (requestError) {
             setExportNotice({
@@ -428,6 +460,37 @@ export default function AuditLogsPage() {
             });
         } finally {
             setExporting(false);
+        }
+    };
+
+    const testSentryLogs = async () => {
+        if (probingSentry || exporting) return;
+
+        setProbingSentry(true);
+        setSentryProbe(null);
+        setExportNotice(null);
+        try {
+            const result = await authenticatedFetch('/api/audit/sentry-probe', { method: 'POST' });
+            const payload = await result.json().catch(() => ({}));
+            if (!result.ok || !payload.result) {
+                throw new Error(payload.error || 'Could not run the Sentry Logs test.');
+            }
+
+            const probe = payload.result as SentryLogsProbeResult;
+            setSentryProbe(probe);
+            setExportNotice({
+                type: probe.raw.accepted && probe.sdk.queueDrained ? 'success' : 'error',
+                message: probe.raw.accepted && probe.sdk.queueDrained
+                    ? 'The raw probe was accepted and the official SDK queue drained. Search the exact probe ID shown below in Sentry Logs.'
+                    : 'The Sentry test found a delivery or SDK configuration problem. Review the checks below.',
+            });
+        } catch (requestError) {
+            setExportNotice({
+                type: 'error',
+                message: requestError instanceof Error ? requestError.message : 'Could not run the Sentry Logs test.',
+            });
+        } finally {
+            setProbingSentry(false);
         }
     };
 
@@ -467,12 +530,25 @@ export default function AuditLogsPage() {
                                 : 'Cleanup is paused. Verify an exported event in Sentry, then enable pruning in Vercel.'}</p>
                         </div>
                         <div className="audit-export-actions">
+                            <button
+                                type="button"
+                                className="audit-probe-button"
+                                onClick={() => void testSentryLogs()}
+                                disabled={probingSentry || exporting}
+                            >
+                                {probingSentry ? 'Testing Sentry...' : 'Test Sentry'}
+                            </button>
                             {response.sentryLogsUrl && (
                                 <a href={response.sentryLogsUrl} target="_blank" rel="noreferrer" className="audit-sentry-link">
                                     Open Sentry Logs <span aria-hidden="true">↗</span>
                                 </a>
                             )}
-                            <button type="button" className="audit-export-button" onClick={() => void exportNow()} disabled={exporting}>
+                            <button
+                                type="button"
+                                className="audit-export-button"
+                                onClick={() => void exportNow()}
+                                disabled={exporting || probingSentry}
+                            >
                                 {exporting ? 'Exporting…' : 'Export now'}
                             </button>
                         </div>
@@ -495,6 +571,63 @@ export default function AuditLogsPage() {
                         </>
                     ) : (
                         <p className="audit-export-unavailable">Export monitoring will appear after the audit offload database migration is installed.</p>
+                    )}
+
+                    {lastExportRunId && (
+                        <div className="audit-export-search-token" role="status">
+                            <span>Search this export in Sentry Logs</span>
+                            <code>audit_export_run_id:{lastExportRunId}</code>
+                        </div>
+                    )}
+
+                    {sentryProbe && (
+                        <section className="audit-probe-result" aria-labelledby="audit-probe-title">
+                            <div className="audit-probe-result-heading">
+                                <div>
+                                    <h3 id="audit-probe-title">Sentry Logs delivery test</h3>
+                                    <p>These checks compare the audit exporter with Sentry's official SDK using the same fresh probe ID.</p>
+                                </div>
+                                <button type="button" onClick={() => setSentryProbe(null)} aria-label="Dismiss Sentry test details">Dismiss</button>
+                            </div>
+
+                            <div className="audit-probe-checks">
+                                <div className={sentryProbe.raw.accepted ? 'is-good' : 'is-bad'}>
+                                    <span>Raw ingestion</span>
+                                    <strong>{sentryProbe.raw.accepted ? `Accepted (HTTP ${sentryProbe.raw.httpStatus})` : 'Not accepted'}</strong>
+                                </div>
+                                <div className={sentryProbe.sdk.initialized ? 'is-good' : 'is-bad'}>
+                                    <span>SDK initialized</span>
+                                    <strong>{sentryProbe.sdk.initialized ? 'Yes' : 'No'}</strong>
+                                </div>
+                                <div className={sentryProbe.sdk.logsEnabled ? 'is-good' : 'is-bad'}>
+                                    <span>SDK Logs enabled</span>
+                                    <strong>{sentryProbe.sdk.logsEnabled ? 'Yes' : 'No'}</strong>
+                                </div>
+                                <div className={sentryProbe.sdk.queueDrained ? 'is-good' : 'is-bad'}>
+                                    <span>SDK local queue</span>
+                                    <strong>{sentryProbe.sdk.queueDrained ? 'Drained' : 'Not confirmed'}</strong>
+                                </div>
+                            </div>
+
+                            <div className="audit-probe-query">
+                                <span>Copy this exact query into Sentry Logs</span>
+                                <code>source:patlau_sentry_probe probe_id:{sentryProbe.probeId}</code>
+                            </div>
+
+                            {sentryProbe.raw.destination && (
+                                <p className="audit-probe-destination">
+                                    Destination: <strong>{sentryProbe.raw.destination.host}</strong>, project ID <strong>{sentryProbe.raw.destination.projectId}</strong>, environment <strong>{sentryProbe.raw.destination.environment}</strong>.
+                                </p>
+                            )}
+                            {sentryProbe.raw.rateLimitHeaderPresent && (
+                                <p className="audit-probe-warning">Sentry announced a rate-limit window while accepting the raw probe.</p>
+                            )}
+                            {sentryProbe.raw.error && <p className="audit-probe-error">Raw ingestion: {sentryProbe.raw.error}</p>}
+                            {sentryProbe.sdk.error && <p className="audit-probe-error">Official SDK: {sentryProbe.sdk.error}</p>}
+                            <p className="audit-probe-note">
+                                Accepted and queue drained confirm transport only. The final proof is that the probe appears in Sentry Logs; keep automatic cleanup paused until it does.
+                            </p>
+                        </section>
                     )}
 
                     {exportNotice && (

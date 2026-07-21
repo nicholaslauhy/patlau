@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { serverAdmin } from './server-auth';
 import { scrubSentryLog, scrubSentryText, scrubSentryValue } from './sentry-scrub';
 
@@ -73,7 +74,24 @@ export interface AuditExportResult {
     pruned: number;
     requeued: number;
     batches: number;
+    exportRunId: string;
     status: AuditExportStatus | null;
+}
+
+export interface RawSentryProbeResult {
+    accepted: true;
+    httpStatus: number;
+    rateLimitHeaderPresent: boolean;
+    destination: {
+        host: string;
+        projectId: string;
+        environment: string;
+    };
+}
+
+interface SentryEnvelopeReceipt {
+    httpStatus: number;
+    rateLimitHeaderPresent: boolean;
 }
 
 export class AuditExportConfigurationError extends Error {
@@ -110,6 +128,13 @@ function getSentryDsn() {
     return (process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN || '').trim();
 }
 
+function getSentryEnvironment() {
+    return process.env.SENTRY_ENVIRONMENT
+        || process.env.VERCEL_ENV
+        || process.env.NODE_ENV
+        || 'production';
+}
+
 /**
  * Converts a public Sentry DSN into the envelope ingestion endpoint without
  * exposing the DSN secret (legacy self-hosted DSNs may still contain one).
@@ -140,6 +165,19 @@ function getSentryEnvelopeEndpoint(dsn: string) {
     return endpoint.toString();
 }
 
+function getSentryDestination(dsn: string) {
+    const endpoint = new URL(getSentryEnvelopeEndpoint(dsn));
+    const pathParts = endpoint.pathname.split('/').filter(Boolean);
+    const apiIndex = pathParts.lastIndexOf('api');
+    const projectId = apiIndex >= 0 ? pathParts[apiIndex + 1] : '';
+
+    return {
+        host: endpoint.host,
+        projectId,
+        environment: getSentryEnvironment(),
+    };
+}
+
 function jsonAttribute(value: unknown) {
     if (value === null || value === undefined) return '';
     try {
@@ -149,9 +187,10 @@ function jsonAttribute(value: unknown) {
     }
 }
 
-function compactAttributes(row: ClaimedAuditLog) {
+function compactAttributes(row: ClaimedAuditLog, exportRunId: string) {
     const attributes: Record<string, string | number | boolean> = {
         source: 'supabase_audit',
+        audit_export_run_id: exportRunId,
         audit_log_id: row.audit_log_id,
         audit_stable_id: row.stable_event_id,
         audit_occurred_at: row.occurred_at,
@@ -200,17 +239,18 @@ function typedAttribute(value: string | number | boolean): SentryTypedAttribute 
     return { value, type: Number.isInteger(value) ? 'integer' : 'double' };
 }
 
-function serializedAuditLog(row: ClaimedAuditLog, sequence: number): SerializedSentryLog {
+function serializedAuditLog(
+    row: ClaimedAuditLog,
+    sequence: number,
+    exportRunId: string,
+): SerializedSentryLog {
     const level: AuditLogLevel = row.outcome === 'failure'
         ? 'error'
         : row.outcome === 'denied' || row.outcome === 'warning'
             ? 'warn'
             : 'info';
     const severity = level === 'error' ? 17 : level === 'warn' ? 13 : 9;
-    const environment = process.env.SENTRY_ENVIRONMENT
-        || process.env.VERCEL_ENV
-        || process.env.NODE_ENV
-        || 'production';
+    const environment = getSentryEnvironment();
     const parsedOccurredAt = Date.parse(row.occurred_at);
     const now = Date.now();
     const canUseOccurredAt = Number.isFinite(parsedOccurredAt)
@@ -219,7 +259,7 @@ function serializedAuditLog(row: ClaimedAuditLog, sequence: number): SerializedS
     const scrubbedLog = scrubSentryLog({
         body: row.summary.slice(0, 4_000),
         attributes: {
-            ...compactAttributes(row),
+            ...compactAttributes(row, exportRunId),
             'sentry.environment': environment,
             'sentry.sdk.name': SENTRY_EXPORTER_NAME,
             'sentry.sdk.version': SENTRY_EXPORTER_VERSION,
@@ -259,14 +299,14 @@ function serializeSentryEnvelope(logs: SerializedSentryLog[]) {
     ].join('\n');
 }
 
-function splitSentryEnvelopes(rows: ClaimedAuditLog[]) {
+function splitSentryEnvelopes(rows: ClaimedAuditLog[], exportRunId: string) {
     const encoder = new TextEncoder();
     const envelopes: string[] = [];
     let current: SerializedSentryLog[] = [];
     let currentItemBytes = 0;
 
     rows.forEach((row, index) => {
-        const log = serializedAuditLog(row, index);
+        const log = serializedAuditLog(row, index, exportRunId);
         const logBytes = encoder.encode(JSON.stringify(log)).byteLength;
 
         // Leave several KiB for the envelope headers, container JSON, commas,
@@ -296,50 +336,121 @@ function splitSentryEnvelopes(rows: ClaimedAuditLog[]) {
     return envelopes;
 }
 
-async function sendBatchToSentry(rows: ClaimedAuditLog[], endpoint: string) {
-    for (const envelope of splitSentryEnvelopes(rows)) {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), SENTRY_REQUEST_TIMEOUT_MS);
+async function safeSentryResponseDetail(response: Response) {
+    try {
+        const responseBody = await response.text();
+        return scrubSentryText(responseBody)
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, MAX_SENTRY_ERROR_DETAIL_LENGTH);
+    } catch {
+        return '';
+    }
+}
 
-        try {
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-sentry-envelope' },
-                body: envelope,
-                signal: controller.signal,
-                cache: 'no-store',
-            });
+async function postEnvelopeToSentry(
+    envelope: string,
+    endpoint: string,
+): Promise<SentryEnvelopeReceipt> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), SENTRY_REQUEST_TIMEOUT_MS);
 
-            if (!response.ok) {
-                const retryAfter = response.headers.get('retry-after');
-                const retryDetail = retryAfter ? ` (retry after ${retryAfter})` : '';
-                let rejectionDetail = '';
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-sentry-envelope' },
+            body: envelope,
+            signal: controller.signal,
+            cache: 'no-store',
+        });
+        const sentryError = scrubSentryText(response.headers.get('x-sentry-error') || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, MAX_SENTRY_ERROR_DETAIL_LENGTH);
 
-                try {
-                    const responseBody = await response.text();
-                    const safeBody = scrubSentryText(responseBody)
-                        .replace(/\s+/g, ' ')
-                        .trim()
-                        .slice(0, MAX_SENTRY_ERROR_DETAIL_LENGTH);
-                    if (safeBody) rejectionDetail = `: ${safeBody}`;
-                } catch {
-                    // The status code remains useful when Relay returns no
-                    // readable response body or the body stream cannot be read.
-                }
+        if (!response.ok || sentryError) {
+            const retryAfter = response.headers.get('retry-after');
+            const retryDetail = retryAfter ? ` (retry after ${retryAfter})` : '';
+            const responseDetail = response.ok ? '' : await safeSentryResponseDetail(response);
+            const detail = sentryError || responseDetail;
+            const rejectionDetail = detail ? `: ${detail}` : '';
 
-                throw new Error(
-                    `Sentry rejected the audit batch with HTTP ${response.status}${retryDetail}${rejectionDetail}`,
-                );
-            }
-        } catch (error) {
-            if (error instanceof Error && error.name === 'AbortError') {
-                throw new Error('Sentry audit delivery timed out before an HTTP acknowledgement');
-            }
-            throw error;
-        } finally {
-            clearTimeout(timeout);
+            throw new Error(
+                `Sentry rejected the log envelope with HTTP ${response.status}${retryDetail}${rejectionDetail}`,
+            );
+        }
+
+        return {
+            httpStatus: response.status,
+            rateLimitHeaderPresent: Boolean(response.headers.get('x-sentry-rate-limits')),
+        };
+    } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+            throw new Error('Sentry audit delivery timed out before an HTTP acknowledgement');
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+async function sendBatchToSentry(
+    rows: ClaimedAuditLog[],
+    endpoint: string,
+    exportRunId: string,
+) {
+    for (const envelope of splitSentryEnvelopes(rows, exportRunId)) {
+        const receipt = await postEnvelopeToSentry(envelope, endpoint);
+        if (receipt.rateLimitHeaderPresent) {
+            console.warn('[audit-export] Sentry accepted the envelope and announced a rate-limit window.');
         }
     }
+}
+
+export async function sendRawSentryLogsProbe(probeId: string): Promise<RawSentryProbeResult> {
+    if (!isSentryAuditConfigured()) {
+        throw new AuditExportConfigurationError(
+            'Sentry audit export is not configured. Add SENTRY_DSN before running the probe.',
+        );
+    }
+
+    const dsn = getSentryDsn();
+    const environment = getSentryEnvironment();
+    const scrubbedLog = scrubSentryLog({
+        body: 'PatLau Sentry Logs raw verification probe',
+        attributes: {
+            source: 'patlau_sentry_probe',
+            probe_id: probeId,
+            probe_transport: 'raw',
+            'sentry.environment': environment,
+            'sentry.sdk.name': SENTRY_EXPORTER_NAME,
+            'sentry.sdk.version': SENTRY_EXPORTER_VERSION,
+        },
+    });
+    const attributes = scrubbedLog.attributes || {};
+    const log: SerializedSentryLog = {
+        timestamp: Date.now() / 1_000,
+        level: 'info',
+        body: typeof scrubbedLog.body === 'string' ? scrubbedLog.body : 'Sentry Logs verification probe',
+        severity_number: 9,
+        attributes: Object.fromEntries(
+            Object.entries(attributes)
+                .filter((entry): entry is [string, string | number | boolean] => (
+                    ['string', 'number', 'boolean'].includes(typeof entry[1])
+                ))
+                .map(([key, value]) => [key, typedAttribute(value)]),
+        ),
+    };
+    const receipt = await postEnvelopeToSentry(
+        serializeSentryEnvelope([log]),
+        getSentryEnvelopeEndpoint(dsn),
+    );
+
+    return {
+        accepted: true,
+        ...receipt,
+        destination: getSentryDestination(dsn),
+    };
 }
 
 async function markBatchFailed(rows: ClaimedAuditLog[], error: unknown) {
@@ -394,6 +505,7 @@ export async function exportAuditLogsToSentry(options: {
     }
     // Validate the endpoint before leasing anything from Supabase.
     const sentryEndpoint = getSentryEnvelopeEndpoint(getSentryDsn());
+    const exportRunId = randomUUID();
 
     let requeued = 0;
     if (options.requeueDead) {
@@ -432,7 +544,7 @@ export async function exportAuditLogsToSentry(options: {
         }
 
         try {
-            await sendBatchToSentry(rows, sentryEndpoint);
+            await sendBatchToSentry(rows, sentryEndpoint, exportRunId);
 
             const { data: completed, error: completeError } = await serverAdmin.rpc(
                 'complete_audit_log_export',
@@ -474,6 +586,7 @@ export async function exportAuditLogsToSentry(options: {
         pruned,
         requeued,
         batches,
+        exportRunId,
         status: await getAuditExportStatus(),
     };
 }
