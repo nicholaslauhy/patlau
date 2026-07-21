@@ -1,11 +1,12 @@
 import { serverAdmin } from './server-auth';
-import { scrubSentryLog, scrubSentryValue } from './sentry-scrub';
+import { scrubSentryLog, scrubSentryText, scrubSentryValue } from './sentry-scrub';
 
 const DEFAULT_BATCH_SIZE = 200;
 const DEFAULT_MAX_BATCHES = 20;
 const DEFAULT_RETENTION_DAYS = 7;
 const EXPORT_LEASE_SECONDS = 300;
 const SENTRY_REQUEST_TIMEOUT_MS = 10_000;
+const MAX_SENTRY_ERROR_DETAIL_LENGTH = 500;
 const MAX_SENTRY_ENVELOPE_BYTES = 750_000;
 const MAX_JSON_ATTRIBUTE_LENGTH = 16_000;
 const SENTRY_EXPORTER_NAME = 'patlau.audit-exporter';
@@ -312,7 +313,23 @@ async function sendBatchToSentry(rows: ClaimedAuditLog[], endpoint: string) {
             if (!response.ok) {
                 const retryAfter = response.headers.get('retry-after');
                 const retryDetail = retryAfter ? ` (retry after ${retryAfter})` : '';
-                throw new Error(`Sentry rejected the audit batch with HTTP ${response.status}${retryDetail}`);
+                let rejectionDetail = '';
+
+                try {
+                    const responseBody = await response.text();
+                    const safeBody = scrubSentryText(responseBody)
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                        .slice(0, MAX_SENTRY_ERROR_DETAIL_LENGTH);
+                    if (safeBody) rejectionDetail = `: ${safeBody}`;
+                } catch {
+                    // The status code remains useful when Relay returns no
+                    // readable response body or the body stream cannot be read.
+                }
+
+                throw new Error(
+                    `Sentry rejected the audit batch with HTTP ${response.status}${retryDetail}${rejectionDetail}`,
+                );
             }
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
