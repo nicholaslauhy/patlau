@@ -5,6 +5,13 @@ import {
     recordSupportStatus,
     sendSupportTelegramMessage,
 } from "../../lib/support-server";
+import {
+    COACH_CLOSED_CONVERSATION_MESSAGE,
+    REOPENED_CONVERSATION_MESSAGE,
+    formatCoachReply,
+    formatSystemMessage,
+    reopenConversationKeyboard,
+} from "../../lib/telegram-support-flow";
 
 const validStatuses: SupportStatus[] = [
     "ai_active",
@@ -162,8 +169,46 @@ export async function POST(request: NextRequest) {
                 .eq("id", conversationId)
                 .single();
             if (error || !conversation) throw error || new Error("Conversation not found.");
+            if (["resolved", "closed_parent"].includes(conversation.status)) {
+                return NextResponse.json(
+                    {
+                        error: conversation.status === "closed_parent"
+                            ? "The parent closed this conversation. Wait for a new parent message before replying."
+                            : "Reopen this resolved conversation before replying.",
+                    },
+                    { status: 409 },
+                );
+            }
 
-            const telegramMessage = await sendSupportTelegramMessage(conversation.contact.telegram_chat_id, content);
+            const previousStatus = conversation.status as SupportStatus;
+            const { data: claimedRows, error: claimError } = await auditedAdmin
+                .from("support_conversations")
+                .update({
+                    status: "human_active",
+                    assigned_to: user.id,
+                    escalation_reason: null,
+                })
+                .eq("id", conversationId)
+                .eq("status", previousStatus)
+                .select("id");
+            if (claimError) throw claimError;
+            if (!claimedRows?.length) {
+                return NextResponse.json(
+                    { error: "The conversation changed before the reply was sent. Refresh it and try again." },
+                    { status: 409 },
+                );
+            }
+
+            let telegramMessage;
+            try {
+                telegramMessage = await sendSupportTelegramMessage(
+                    conversation.contact.telegram_chat_id,
+                    formatCoachReply(content),
+                );
+            } catch (deliveryError) {
+                // Keep the AI paused: a parent message may have arrived while Telegram delivery was in flight.
+                throw new Error(`${asError(deliveryError)} The conversation remains assigned to Coach Patrick, so the AI is still paused.`);
+            }
             const { data: message, error: insertError } = await auditedAdmin
                 .from("support_messages")
                 .insert({
@@ -179,16 +224,16 @@ export async function POST(request: NextRequest) {
                 .single();
             if (insertError) throw insertError;
 
-            const previousStatus = conversation.status as SupportStatus;
-            await auditedAdmin.from("support_conversations").update({
-                status: "human_active",
-                assigned_to: user.id,
+            const { error: updateError } = await auditedAdmin.from("support_conversations").update({
                 last_message_at: new Date().toISOString(),
                 last_message_preview: content.slice(0, 180),
-                escalation_reason: null,
-            }).eq("id", conversationId);
+            })
+                .eq("id", conversationId)
+                .eq("status", "human_active")
+                .eq("assigned_to", user.id);
+            if (updateError) throw updateError;
             if (previousStatus !== "human_active") {
-                await recordSupportStatus(conversationId, previousStatus, "human_active", "superuser", "Superuser replied.", user.id);
+                await recordSupportStatus(conversationId, previousStatus, "human_active", "superuser", "Coach Patrick replied.", user.id);
             }
             await writeAuditEvent({
                 request,
@@ -215,10 +260,17 @@ export async function POST(request: NextRequest) {
             }
             const { data: current, error: currentError } = await auditedAdmin
                 .from("support_conversations")
-                .select("status, contact:support_contacts(first_name,last_name,username)")
+                .select("status, contact:support_contacts(first_name,last_name,username,telegram_chat_id,blocked)")
                 .eq("id", conversationId)
                 .single();
             if (currentError) throw currentError;
+            const currentContact = Array.isArray(current.contact) ? current.contact[0] : current.contact;
+            if (current.status === "closed_parent" && status !== "closed_parent") {
+                return NextResponse.json(
+                    { error: "The parent closed this conversation. It will reopen when the parent sends a new message." },
+                    { status: 409 },
+                );
+            }
             const now = new Date().toISOString();
             const updates: Record<string, unknown> = {
                 status,
@@ -227,8 +279,52 @@ export async function POST(request: NextRequest) {
                 resolved_at: status === "resolved" ? now : null,
                 closed_at: status === "closed_parent" ? now : null,
             };
-            const { error } = await auditedAdmin.from("support_conversations").update(updates).eq("id", conversationId);
+            const { data: updatedRows, error } = await auditedAdmin
+                .from("support_conversations")
+                .update(updates)
+                .eq("id", conversationId)
+                .eq("status", current.status)
+                .select("id");
             if (error) throw error;
+            if (!updatedRows?.length) {
+                return NextResponse.json(
+                    { error: "The conversation changed before this action was completed. Refresh it and try again." },
+                    { status: 409 },
+                );
+            }
+            let notificationWarning = "";
+            const parentStateMessage = current.status !== status && status === "resolved"
+                ? {
+                    content: COACH_CLOSED_CONVERSATION_MESSAGE,
+                    keyboard: reopenConversationKeyboard(conversationId),
+                }
+                : current.status === "resolved" && status === "ai_active"
+                    ? { content: REOPENED_CONVERSATION_MESSAGE, keyboard: undefined }
+                    : null;
+            if (parentStateMessage && currentContact?.telegram_chat_id && !currentContact.blocked) {
+                try {
+                    const telegramMessage = await sendSupportTelegramMessage(
+                        currentContact.telegram_chat_id,
+                        formatSystemMessage(parentStateMessage.content),
+                        parentStateMessage.keyboard,
+                    );
+                    const { error: messageError } = await auditedAdmin.from("support_messages").insert({
+                        conversation_id: conversationId,
+                        telegram_message_id: String(telegramMessage.message_id),
+                        direction: "outbound",
+                        sender_type: "system",
+                        content: parentStateMessage.content,
+                        telegram_delivery_status: "sent",
+                    });
+                    if (messageError) {
+                        console.error("Could not save a delivered conversation-state message:", messageError);
+                        notificationWarning = "The parent was notified, but the status message could not be saved in the chat history.";
+                    }
+                } catch (notificationError) {
+                    console.error("Could not notify the parent about the conversation state:", notificationError);
+                    notificationWarning = "The conversation status changed, but Telegram could not deliver the status update.";
+                }
+            }
             await recordSupportStatus(
                 conversationId,
                 current.status as SupportStatus,
@@ -244,16 +340,16 @@ export async function POST(request: NextRequest) {
                 eventType: "support.status.changed",
                 action: "change_status",
                 outcome: "success",
-                summary: `${user.user_metadata?.name || user.email || "Superuser"} changed ${supportContactLabel(current.contact)}'s conversation from ${current.status.replaceAll('_', ' ')} to ${status.replaceAll('_', ' ')}`,
+                summary: `${user.user_metadata?.name || user.email || "Superuser"} changed ${supportContactLabel(currentContact)}'s conversation from ${current.status.replaceAll('_', ' ')} to ${status.replaceAll('_', ' ')}`,
                 actorSource: "support_api",
                 targetTable: "support_conversations",
                 targetRecordId: { id: conversationId },
-                targetLabel: supportContactLabel(current.contact),
+                targetLabel: supportContactLabel(currentContact),
                 changedFields: ["status"],
                 oldValues: { status: current.status },
                 newValues: { status },
             });
-            return NextResponse.json({ success: true });
+            return NextResponse.json({ success: true, ...(notificationWarning ? { warning: notificationWarning } : {}) });
         }
 
         if (action === "save_knowledge") {

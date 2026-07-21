@@ -12,6 +12,7 @@ import type {
     SupportMessage,
     SupportStatus,
 } from "../../types/support";
+import { normaliseCoachReferences } from "../lib/telegram-support-flow";
 import "../styles.css";
 import "../dashboard/dashboard.css";
 import "./chats.css";
@@ -27,9 +28,25 @@ const statusLabels: Record<SupportStatus, string> = {
     ai_active: "AI active",
     waiting_parent: "Waiting for parent",
     escalated: "Escalated",
-    human_active: "Human active",
-    resolved: "Resolved",
+    human_active: "Coach Patrick active",
+    resolved: "Closed",
     closed_parent: "Closed by parent",
+};
+
+const conversationModeCopy: Record<SupportStatus, { title: string; description: string }> = {
+    ai_active: { title: "AI assistant is handling this conversation", description: "Coach Patrick can review the replies at any time. Taking over pauses the AI assistant." },
+    waiting_parent: { title: "Waiting for the parent", description: "The AI assistant has replied and is waiting for the parent to continue the conversation." },
+    escalated: { title: "Coach Patrick's attention is required", description: "The AI assistant has paused so Coach Patrick can review the conversation and reply personally." },
+    human_active: { title: "Coach Patrick is handling this conversation", description: "The AI assistant is paused. Replies sent here are identified to the parent as coming from Coach Patrick." },
+    resolved: { title: "Conversation closed", description: "Replies are paused. The parent can reopen it from Telegram, or you can reopen it here with the AI assistant." },
+    closed_parent: { title: "Conversation closed by the parent", description: "The parent ended this conversation. Only the parent can reopen it from Telegram or by sending a new message." },
+};
+
+const senderDetails: Record<SupportMessage["sender_type"], { label: string; badge: string }> = {
+    parent: { label: "Parent", badge: "Parent message" },
+    ai: { label: "AI assistant", badge: "AI-generated reply" },
+    superuser: { label: "Coach Patrick", badge: "Human reply" },
+    system: { label: "System update", badge: "Status update" },
 };
 
 const todayKey = () => {
@@ -49,6 +66,20 @@ const formatTime = (value: string) => new Date(value).toLocaleString("en-SG", {
     hour: "numeric",
     minute: "2-digit",
 });
+
+const displayMessageContent = (message: SupportMessage) => {
+    if (message.sender_type === "parent") return message.content;
+    return normaliseCoachReferences(message.content);
+};
+
+const previousResponder = (messages: SupportMessage[], index: number) => {
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+        if (messages[cursor].sender_type === "ai" || messages[cursor].sender_type === "superuser") {
+            return messages[cursor].sender_type;
+        }
+    }
+    return null;
+};
 
 function highlightSearchMatch(value: string, query: string): ReactNode {
     const term = query.trim();
@@ -115,6 +146,10 @@ function ChatsNotification({
 export default function ChatsPage() {
     const router = useRouter();
     const messageEndRef = useRef<HTMLDivElement>(null);
+    const selectedIdRef = useRef("");
+    const conversationRequestRef = useRef(0);
+    const foregroundConversationIdRef = useRef("");
+    const loadedConversationIdRef = useRef("");
     const [userName, setUserName] = useState("");
     const [authorized, setAuthorized] = useState(false);
     const [tab, setTab] = useState<ChatsTab>("inbox");
@@ -124,6 +159,8 @@ export default function ChatsPage() {
     const [selectedId, setSelectedId] = useState("");
     const [selectedConversation, setSelectedConversation] = useState<SupportConversation | null>(null);
     const [messages, setMessages] = useState<SupportMessage[]>([]);
+    const [conversationLoadingId, setConversationLoadingId] = useState("");
+    const [conversationLoadFailedId, setConversationLoadFailedId] = useState("");
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [knowledgeSearch, setKnowledgeSearch] = useState("");
@@ -172,6 +209,22 @@ export default function ChatsPage() {
         return data;
     }, [token]);
 
+    const selectConversation = useCallback((conversationId: string) => {
+        if (!conversationId) return;
+        if (conversationId === selectedIdRef.current) return;
+        selectedIdRef.current = conversationId;
+        foregroundConversationIdRef.current = conversationId;
+        loadedConversationIdRef.current = "";
+        conversationRequestRef.current += 1;
+        setSelectedId(conversationId);
+        setSelectedConversation(null);
+        setMessages([]);
+        setReply("");
+        setConversationLoadingId(conversationId);
+        setConversationLoadFailedId("");
+        setError("");
+    }, []);
+
     const loadSummary = useCallback(async (showLoader = false) => {
         if (showLoader) setLoading(true);
         try {
@@ -181,31 +234,59 @@ export default function ChatsPage() {
             setAnnouncements(data.announcements || []);
             setError("");
 
-            if (!selectedId && data.conversations?.length) {
+            if (!selectedIdRef.current && data.conversations?.length) {
                 const requestedId = new URLSearchParams(window.location.search).get("conversation");
                 const nextId = data.conversations.some((item: SupportConversation) => item.id === requestedId)
                     ? requestedId
                     : data.conversations[0].id;
-                setSelectedId(nextId || "");
+                selectConversation(nextId || "");
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : "Could not load Chats.");
         } finally {
             if (showLoader) setLoading(false);
         }
-    }, [selectedId, supportFetch]);
+    }, [selectConversation, supportFetch]);
 
-    const loadConversation = useCallback(async (conversationId: string) => {
-        if (!conversationId) return;
+    const loadConversation = useCallback(async (conversationId: string, showLoader = false) => {
+        if (!conversationId || selectedIdRef.current !== conversationId) return;
+        if (!showLoader && foregroundConversationIdRef.current === conversationId) return;
+        const requestId = ++conversationRequestRef.current;
+        if (showLoader) {
+            foregroundConversationIdRef.current = conversationId;
+            setConversationLoadingId(conversationId);
+            setConversationLoadFailedId("");
+        }
         try {
             const data = await supportFetch(`/api/support?conversation_id=${encodeURIComponent(conversationId)}`);
+            if (requestId !== conversationRequestRef.current || selectedIdRef.current !== conversationId) return;
+            if (data.conversation?.id !== conversationId) throw new Error("The server returned a different conversation.");
+            loadedConversationIdRef.current = conversationId;
             setSelectedConversation(data.conversation);
             setMessages(data.messages || []);
+            if (["resolved", "closed_parent"].includes(data.conversation.status)) setReply("");
+            setConversationLoadFailedId("");
+            setError("");
             setConversations((previous) => previous.map((item) =>
                 item.id === conversationId ? { ...item, ...data.conversation, unread_count: 0 } : item,
             ));
         } catch (err) {
+            if (requestId !== conversationRequestRef.current || selectedIdRef.current !== conversationId) return;
+            if (showLoader || loadedConversationIdRef.current !== conversationId) {
+                setConversationLoadFailedId(conversationId);
+            }
             setError(err instanceof Error ? err.message : "Could not load the conversation.");
+        } finally {
+            if (
+                showLoader
+                && requestId === conversationRequestRef.current
+                && foregroundConversationIdRef.current === conversationId
+            ) {
+                foregroundConversationIdRef.current = "";
+            }
+            if (requestId === conversationRequestRef.current && selectedIdRef.current === conversationId) {
+                setConversationLoadingId((current) => current === conversationId ? "" : current);
+            }
         }
     }, [supportFetch]);
 
@@ -232,17 +313,18 @@ export default function ChatsPage() {
     }, [authorized, loadSummary]);
 
     useEffect(() => {
-        if (selectedId) void loadConversation(selectedId);
+        if (selectedId) void loadConversation(selectedId, true);
     }, [loadConversation, selectedId]);
 
     useEffect(() => {
         if (!authorized) return;
         const interval = window.setInterval(() => {
             void loadSummary(false);
-            if (selectedId && tab === "inbox") void loadConversation(selectedId);
+            const activeConversationId = selectedIdRef.current;
+            if (activeConversationId && tab === "inbox") void loadConversation(activeConversationId, false);
         }, 10000);
         return () => window.clearInterval(interval);
-    }, [authorized, loadConversation, loadSummary, selectedId, tab]);
+    }, [authorized, loadConversation, loadSummary, tab]);
 
     useEffect(() => {
         messageEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -253,10 +335,12 @@ export default function ChatsPage() {
         setError("");
         setSuccess("");
         try {
-            await supportFetch("/api/support", { method: "POST", body: JSON.stringify(payload) });
+            const result = await supportFetch("/api/support", { method: "POST", body: JSON.stringify(payload) });
             if (message) setSuccess(message);
             await loadSummary(false);
-            if (selectedId) await loadConversation(selectedId);
+            const activeConversationId = selectedIdRef.current;
+            if (activeConversationId) await loadConversation(activeConversationId, false);
+            if (result.warning) setError(String(result.warning));
             return true;
         } catch (err) {
             setError(err instanceof Error ? err.message : "The action failed.");
@@ -269,13 +353,29 @@ export default function ChatsPage() {
     const sendReply = async (event: React.FormEvent) => {
         event.preventDefault();
         const content = reply.trim();
-        if (!content || !selectedId) return;
-        const sent = await runAction({ action: "send_message", conversationId: selectedId, content });
+        const conversationId = selectedIdRef.current;
+        if (!content || !conversationId) return;
+        const sent = await runAction({ action: "send_message", conversationId, content });
         if (sent) setReply("");
     };
 
-    const changeStatus = (status: SupportStatus, reason: string) =>
-        runAction({ action: "set_status", conversationId: selectedId, status, reason }, `Conversation marked ${statusLabels[status].toLowerCase()}.`);
+    const changeStatus = (status: SupportStatus, reason: string) => {
+        const conversationId = selectedIdRef.current;
+        if (!conversationId) return Promise.resolve(false);
+        return runAction({ action: "set_status", conversationId, status, reason }, `Conversation marked ${statusLabels[status].toLowerCase()}.`);
+    };
+
+    const confirmResolution = () => {
+        if (!selectedConversation) return;
+        if (!window.confirm("Close this conversation? The full history will remain available, and the parent can reopen it from Telegram.")) return;
+        void changeStatus("resolved", "Conversation closed by Coach Patrick.");
+    };
+
+    const reopenResolvedConversation = () => {
+        if (selectedConversation?.status !== "resolved") return;
+        if (!window.confirm("Reopen this conversation with the AI assistant? The parent will be able to continue messaging.")) return;
+        void changeStatus("ai_active", "Closed conversation reopened with the AI assistant by Coach Patrick.");
+    };
 
     const resetKnowledgeForm = () => setKnowledgeForm({ id: "", title: "", category: "General", content: "", status: "draft" });
     const saveKnowledge = async (event: React.FormEvent) => {
@@ -321,6 +421,18 @@ export default function ChatsPage() {
         unread: conversations.reduce((sum, item) => sum + Number(item.unread_count || 0), 0),
     }), [conversations]);
 
+    const selectedConversationSummary = useMemo(
+        () => conversations.find((item) => item.id === selectedId) || null,
+        [conversations, selectedId],
+    );
+    const selectedConversationName = selectedConversationSummary ? contactName(selectedConversationSummary) : "this parent";
+    const selectedConversationIsLoading = Boolean(
+        selectedId
+        && conversationLoadFailedId !== selectedId
+        && (conversationLoadingId === selectedId || selectedConversation?.id !== selectedId)
+    );
+    const selectedConversationLoadFailed = Boolean(selectedId && conversationLoadFailedId === selectedId);
+
     if (!authorized) return <div className="container"><p className="chats-loading">Checking access…</p></div>;
 
     return (
@@ -335,7 +447,7 @@ export default function ChatsPage() {
                     </div>
                     <div className="chats-metrics" aria-label="Conversation summary">
                         <div><strong>{counts.escalated}</strong><span>Escalated</span></div>
-                        <div><strong>{counts.human}</strong><span>Human active</span></div>
+                        <div><strong>{counts.human}</strong><span>Coach Patrick active</span></div>
                         <div><strong>{counts.unread}</strong><span>Unread</span></div>
                     </div>
                 </section>
@@ -374,7 +486,7 @@ export default function ChatsPage() {
                                         type="button"
                                         key={conversation.id}
                                         className={`chats-conversation${selectedId === conversation.id ? " is-selected" : ""}`}
-                                        onClick={() => setSelectedId(conversation.id)}
+                                        onClick={() => selectConversation(conversation.id)}
                                     >
                                         <span className="chats-parent-avatar">{contactName(conversation).charAt(0).toUpperCase()}</span>
                                         <span className="chats-conversation-copy">
@@ -389,7 +501,23 @@ export default function ChatsPage() {
                         </aside>
 
                         <div className="chats-thread">
-                            {!selectedConversation ? (
+                            {selectedConversationIsLoading ? (
+                                <div className="chats-thread-state" role="status" aria-live="polite" aria-busy="true">
+                                    <span className="chats-thread-spinner" aria-hidden="true" />
+                                    <div>
+                                        <h2>Loading conversation with {selectedConversationName}…</h2>
+                                        <p>Getting the latest messages and conversation status.</p>
+                                    </div>
+                                </div>
+                            ) : selectedConversationLoadFailed ? (
+                                <div className="chats-thread-state chats-thread-state--error" role="alert">
+                                    <div>
+                                        <h2>Could not load the conversation with {selectedConversationName}</h2>
+                                        <p>Select Try again to fetch the latest messages.</p>
+                                        <button type="button" onClick={() => void loadConversation(selectedId, true)}>Try again</button>
+                                    </div>
+                                </div>
+                            ) : !selectedConversation ? (
                                 <div className="chats-thread-empty"><h2>Select a conversation</h2><p>The full Telegram history will appear here.</p></div>
                             ) : (
                                 <>
@@ -403,37 +531,80 @@ export default function ChatsPage() {
                                     {selectedConversation.escalation_reason && (
                                         <div className="chats-escalation"><strong>Escalation reason</strong><span>{selectedConversation.escalation_reason}</span></div>
                                     )}
-                                    <div className="chats-thread-actions">
-                                        {selectedConversation.status !== "human_active" && (
-                                            <button type="button" onClick={() => void changeStatus("human_active", "Superuser took over the conversation.")} disabled={busy}>Take over</button>
-                                        )}
-                                        {selectedConversation.status !== "ai_active" && selectedConversation.status !== "waiting_parent" && (
-                                            <button type="button" onClick={() => void changeStatus("ai_active", "Returned to AI by superuser.")} disabled={busy}>Return to AI</button>
-                                        )}
-                                        {selectedConversation.status !== "resolved" && (
-                                            <button type="button" onClick={() => void changeStatus("resolved", "Resolved by superuser.")} disabled={busy}>Resolve</button>
-                                        )}
+                                    <div className={`chats-mode chats-mode--${selectedConversation.status}`}>
+                                        <span className="chats-mode__icon" aria-hidden="true">
+                                            {selectedConversation.status === "human_active" || selectedConversation.status === "escalated" ? "P" : selectedConversation.status === "resolved" || selectedConversation.status === "closed_parent" ? "✓" : "AI"}
+                                        </span>
+                                        <span>
+                                            <strong>{conversationModeCopy[selectedConversation.status].title}</strong>
+                                            <small>{conversationModeCopy[selectedConversation.status].description}</small>
+                                        </span>
                                     </div>
+                                    {selectedConversation.status !== "closed_parent" && (
+                                        <div className="chats-thread-actions">
+                                            {selectedConversation.status === "resolved" ? (
+                                                <button type="button" className="is-primary" onClick={reopenResolvedConversation} disabled={busy}>Reopen with AI</button>
+                                            ) : (
+                                                <>
+                                                    {selectedConversation.status !== "human_active" && (
+                                                        <button type="button" className="is-primary" onClick={() => void changeStatus("human_active", "Coach Patrick took over the conversation.")} disabled={busy}>Take over as Coach Patrick</button>
+                                                    )}
+                                                    {["escalated", "human_active"].includes(selectedConversation.status) && (
+                                                        <button type="button" onClick={() => void changeStatus("ai_active", "Returned to the AI assistant by Coach Patrick.")} disabled={busy}>Return to AI</button>
+                                                    )}
+                                                    <button type="button" className="is-resolve" onClick={confirmResolution} disabled={busy}>Close conversation</button>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
                                     <div className="chats-messages" aria-live="polite">
-                                        {messages.map((message) => (
-                                            <article key={message.id} className={`chats-bubble chats-bubble--${message.sender_type}`}>
-                                                <div className="chats-bubble-meta">
-                                                    <strong>{message.sender_type === "parent" ? contactName(selectedConversation) : message.sender_type === "superuser" ? "You" : message.sender_type === "ai" ? "AI assistant" : "System"}</strong>
-                                                    <time>{formatTime(message.created_at)}</time>
-                                                </div>
-                                                <p>{message.content}</p>
-                                                {message.source_refs?.length > 0 && <small>Sources: {message.source_refs.join(", ")}</small>}
-                                            </article>
-                                        ))}
+                                        {messages.map((message, index) => {
+                                            const sender = senderDetails[message.sender_type];
+                                            const priorResponder = previousResponder(messages, index);
+                                            const startsHumanTakeover = message.sender_type === "superuser" && priorResponder !== "superuser";
+                                            const resumesAi = message.sender_type === "ai" && priorResponder === "superuser";
+
+                                            return (
+                                                <Fragment key={message.id}>
+                                                    {(startsHumanTakeover || resumesAi) && (
+                                                        <div className={`chats-handoff chats-handoff--${startsHumanTakeover ? "human" : "ai"}`}>
+                                                            <span aria-hidden="true">{startsHumanTakeover ? "P" : "AI"}</span>
+                                                            <strong>{startsHumanTakeover ? "Coach Patrick joined the conversation" : "AI assistant resumed the conversation"}</strong>
+                                                        </div>
+                                                    )}
+                                                    <article className={`chats-bubble chats-bubble--${message.sender_type}`}>
+                                                        <div className="chats-bubble-meta">
+                                                            <span className="chats-sender">
+                                                                <strong>{message.sender_type === "parent" ? contactName(selectedConversation) : sender.label}</strong>
+                                                                <span className={`chats-sender-badge chats-sender-badge--${message.sender_type}`}>{sender.badge}</span>
+                                                            </span>
+                                                            <time>{formatTime(message.created_at)}</time>
+                                                        </div>
+                                                        <p>{displayMessageContent(message)}</p>
+                                                        {message.source_refs?.length > 0 && <small>Sources: {message.source_refs.join(", ")}</small>}
+                                                    </article>
+                                                </Fragment>
+                                            );
+                                        })}
                                         <div ref={messageEndRef} />
                                     </div>
-                                    <form className="chats-reply" onSubmit={sendReply}>
-                                        <textarea value={reply} onChange={(event) => setReply(event.target.value)} placeholder="Reply to this parent through Telegram…" rows={3} maxLength={3900} disabled={busy || selectedConversation.contact?.blocked} />
-                                        <div>
-                                            <span>{selectedConversation.status === "human_active" ? "AI is paused while you handle this chat." : "Sending a reply will automatically take over this chat."}</span>
-                                            <button type="submit" className="submit-btn" disabled={busy || !reply.trim() || selectedConversation.contact?.blocked}>{busy ? "Sending…" : "Send reply"}</button>
+                                    {["resolved", "closed_parent"].includes(selectedConversation.status) ? (
+                                        <div className={`chats-reply-closed chats-reply-closed--${selectedConversation.status}`} role="status" aria-live="polite">
+                                            <span className="chats-reply-closed__icon" aria-hidden="true">Closed</span>
+                                            <span className="chats-reply-closed__copy">
+                                                <strong>{selectedConversation.status === "closed_parent" ? "The parent closed this conversation" : "This conversation is closed"}</strong>
+                                                <span>{selectedConversation.status === "closed_parent" ? "Replies are disabled. The parent can reopen it from Telegram or by sending a new message." : "Replies are disabled until you reopen the conversation above."}</span>
+                                            </span>
                                         </div>
-                                    </form>
+                                    ) : (
+                                        <form className="chats-reply" onSubmit={sendReply}>
+                                            <textarea value={reply} onChange={(event) => setReply(event.target.value)} placeholder="Reply to this parent through Telegram…" rows={3} maxLength={3900} disabled={busy || selectedConversation.contact?.blocked} />
+                                            <div>
+                                                <span>{selectedConversation.status === "human_active" ? "AI is paused. This will be sent as Coach Patrick." : "Sending this reply will pause the AI and identify it as Coach Patrick."}</span>
+                                                <button type="submit" className="submit-btn" disabled={busy || !reply.trim() || selectedConversation.contact?.blocked}>{busy ? "Sending…" : "Send as Coach Patrick"}</button>
+                                            </div>
+                                        </form>
+                                    )}
                                 </>
                             )}
                         </div>

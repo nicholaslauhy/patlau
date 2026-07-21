@@ -3,19 +3,29 @@ import { NextResponse } from "next/server";
 import type { SupportStatus } from "../../../../types/support";
 import {
     answerSupportCallback,
+    clearSupportTelegramKeyboard,
     getSingaporeDateKey,
     notifySupportSuperuser,
     recordSupportStatus,
     sendSupportTelegramMessage,
     supportAdmin,
 } from "../../../lib/support-server";
+import {
+    AI_INTRO_MESSAGE,
+    CLOSED_CONVERSATION_MESSAGE,
+    REOPENED_CONVERSATION_MESSAGE,
+    formatAiReply,
+    formatSystemMessage,
+    normaliseCoachReferences,
+    parentExplicitlyRequestsCoach,
+    parentIsDissatisfied,
+    reopenConversationKeyboard,
+    shouldOfferDelayedFeedback,
+} from "../../../lib/telegram-support-flow";
 
-const feedbackKeyboard = (conversationId: string) => ({
+const delayedFeedbackKeyboard = (conversationId: string) => ({
     inline_keyboard: [
-        [
-            { text: "Helpful", callback_data: `ps|helpful|${conversationId}` },
-            { text: "Talk to a coach", callback_data: `ps|human|${conversationId}` },
-        ],
+        [{ text: "This answered my question", callback_data: `ps|helpful|${conversationId}` }],
         [{ text: "Close conversation", callback_data: `ps|close|${conversationId}` }],
     ],
 });
@@ -23,6 +33,17 @@ const feedbackKeyboard = (conversationId: string) => ({
 const parentName = (from: any) =>
     [from?.first_name, from?.last_name].filter(Boolean).join(" ").trim()
     || (from?.username ? `@${from.username}` : "Parent");
+
+async function clearCallbackKeyboard(callbackQuery: any) {
+    const chatId = callbackQuery.message?.chat?.id;
+    const messageId = callbackQuery.message?.message_id;
+    if (!chatId || !messageId) return;
+    try {
+        await clearSupportTelegramKeyboard(String(chatId), messageId);
+    } catch (error) {
+        console.error("Could not clear an outdated parent-support keyboard:", error);
+    }
+}
 
 async function getOrCreateConversation(chat: any, from: any) {
     const chatId = String(chat.id);
@@ -82,13 +103,17 @@ async function sendAndStore(
     sources: string[] = [],
     keyboard?: Record<string, unknown>,
 ) {
-    const message = await sendSupportTelegramMessage(chatId, content.slice(0, 3900), keyboard);
+    const storedContent = normaliseCoachReferences(content);
+    const deliveredContent = senderType === "ai"
+        ? formatAiReply(storedContent)
+        : formatSystemMessage(storedContent);
+    const message = await sendSupportTelegramMessage(chatId, deliveredContent.slice(0, 3900), keyboard);
     const { error } = await supportAdmin.from("support_messages").insert({
         conversation_id: conversationId,
         telegram_message_id: String(message.message_id),
         direction: "outbound",
         sender_type: senderType,
-        content: content.slice(0, 3900),
+        content: storedContent.slice(0, 3900),
         source_refs: sources,
         telegram_delivery_status: "sent",
     });
@@ -122,7 +147,7 @@ async function escalate(conversation: any, chatId: string, name: string, latestM
     await sendAndStore(
         conversation.id,
         chatId,
-        "I’m sorry I couldn’t fully resolve this. I’ve passed the conversation to Coach Nicholas. You can continue messaging here, and a coach will reply in this chat.",
+        "I’m sorry I couldn’t fully resolve this. I’ve passed the conversation directly to Coach Patrick. You can continue messaging here, and Coach Patrick will reply in this chat.",
         "system",
     );
     try {
@@ -189,8 +214,17 @@ async function generateSupportReply(conversationId: string, telegramUserId: stri
 
     const knowledge = knowledgeResult.data || [];
     const announcements = announcementsResult.data || [];
+    const previousAiReplyCount = (historyResult.data || []).filter((item: any) =>
+        item.sender_type === "ai" && String(item.content || "").trim() !== AI_INTRO_MESSAGE
+    ).length;
     if (knowledge.length === 0 && announcements.length === 0) {
-        return { needsHuman: true, reason: "No published coaching information is available.", reply: "", sources: [] as string[] };
+        return {
+            needsHuman: true,
+            reason: "No published coaching information is available.",
+            reply: "",
+            sources: [] as string[],
+            previousAiReplyCount,
+        };
     }
 
     const announcementText = announcements.map((item) =>
@@ -205,6 +239,9 @@ Answer general coaching questions only, using only the CURRENT ANNOUNCEMENTS and
 Current announcements override general knowledge. Never invent schedules, fees, venues, policies, holiday operations, availability, or personal records.
 Do not provide a parent's personal student attendance, payment, account, or schedule information. Escalate those requests for identity verification.
 Escalate complaints, refund requests, disputes, explicit requests for a human, conflicting information, or anything not fully supported by the supplied information.
+Escalate immediately if the parent sounds frustrated, dissatisfied, agitated, says the answer is not helping, repeats an unanswered question, or asks for Coach Patrick.
+If you cannot answer the question fully and confidently from the supplied information, set needs_human=true instead of offering a guess or asking the parent to choose an escalation button.
+When referring to the person who will take over, always say Coach Patrick. Do not use another name or a generic title.
 Reply in the language used by the parent. Be warm, professional, concise, and transparent.
 Set needs_human=true whenever escalation is required. source_titles must contain only exact titles used below.
 
@@ -258,11 +295,12 @@ ${knowledgeText || "None"}`;
     ]);
     return {
         needsHuman: Boolean(parsed.needs_human),
-        reason: String(parsed.escalation_reason || "A coach should review this question."),
+        reason: String(parsed.escalation_reason || "Coach Patrick should review this question."),
         reply: String(parsed.reply || "").trim(),
         sources: Array.isArray(parsed.source_titles)
             ? parsed.source_titles.map(String).filter((title: string) => allowedSourceTitles.has(title))
             : [],
+        previousAiReplyCount,
     };
 }
 
@@ -291,16 +329,95 @@ async function handleCallback(callbackQuery: any) {
     const name = parentName(callbackQuery.from);
 
     if (action === "helpful") {
+        if (conversation.status !== "waiting_parent") {
+            await clearCallbackKeyboard(callbackQuery);
+            await answerSupportCallback(
+                callbackQuery.id,
+                ["escalated", "human_active"].includes(conversation.status)
+                    ? "Coach Patrick is already handling this conversation."
+                    : "This option is no longer active.",
+            );
+            if (["resolved", "closed_parent"].includes(conversation.status)) {
+                await sendAndStore(
+                    conversation.id,
+                    chatId,
+                    CLOSED_CONVERSATION_MESSAGE,
+                    "system",
+                    [],
+                    reopenConversationKeyboard(conversation.id),
+                );
+            }
+            return;
+        }
         await setConversationStatus(conversation, "resolved", "parent", "Parent marked the answer helpful.");
+        await clearCallbackKeyboard(callbackQuery);
         await answerSupportCallback(callbackQuery.id, "Thank you — marked as resolved.");
-        await sendAndStore(conversation.id, chatId, "Glad I could help. You can send another message anytime.", "system");
+        await sendAndStore(
+            conversation.id,
+            chatId,
+            `Glad I could help. ${CLOSED_CONVERSATION_MESSAGE}`,
+            "system",
+            [],
+            reopenConversationKeyboard(conversation.id),
+        );
+    } else if (action === "reopen") {
+        if (!["resolved", "closed_parent"].includes(conversation.status)) {
+            await clearCallbackKeyboard(callbackQuery);
+            await answerSupportCallback(callbackQuery.id, "This conversation is already open.");
+            if (conversation.status === "ai_active") {
+                await sendAndStore(conversation.id, chatId, REOPENED_CONVERSATION_MESSAGE, "system");
+            }
+            return;
+        }
+        await setConversationStatus(conversation, "ai_active", "parent", "Parent reopened the conversation.");
+        await clearCallbackKeyboard(callbackQuery);
+        await answerSupportCallback(callbackQuery.id, "Conversation reopened.");
+        await sendAndStore(conversation.id, chatId, REOPENED_CONVERSATION_MESSAGE, "system");
     } else if (action === "human") {
-        await answerSupportCallback(callbackQuery.id, "A coach has been notified.");
-        await escalate(conversation, chatId, name, "Parent requested a coach using the chat button.", "Parent requested a human response.");
+        if (["escalated", "human_active"].includes(conversation.status)) {
+            await answerSupportCallback(callbackQuery.id, "Coach Patrick is already handling this conversation.");
+            return;
+        }
+        if (["resolved", "closed_parent"].includes(conversation.status)) {
+            await clearCallbackKeyboard(callbackQuery);
+            await answerSupportCallback(callbackQuery.id, "Please reopen this conversation before requesting Coach Patrick.");
+            await sendAndStore(
+                conversation.id,
+                chatId,
+                CLOSED_CONVERSATION_MESSAGE,
+                "system",
+                [],
+                reopenConversationKeyboard(conversation.id),
+            );
+            return;
+        }
+        await answerSupportCallback(callbackQuery.id, "Coach Patrick has been notified.");
+        await escalate(conversation, chatId, name, "Parent requested Coach Patrick using the chat button.", "Parent requested Coach Patrick.");
     } else if (action === "close") {
+        if (conversation.status === "closed_parent") {
+            await clearCallbackKeyboard(callbackQuery);
+            await answerSupportCallback(callbackQuery.id, "This conversation is already closed.");
+            await sendAndStore(
+                conversation.id,
+                chatId,
+                CLOSED_CONVERSATION_MESSAGE,
+                "system",
+                [],
+                reopenConversationKeyboard(conversation.id),
+            );
+            return;
+        }
         await setConversationStatus(conversation, "closed_parent", "parent", "Parent closed the conversation.");
+        await clearCallbackKeyboard(callbackQuery);
         await answerSupportCallback(callbackQuery.id, "Conversation closed.");
-        await sendAndStore(conversation.id, chatId, "This conversation is now closed. Send a new message anytime to reopen it.", "system");
+        await sendAndStore(
+            conversation.id,
+            chatId,
+            CLOSED_CONVERSATION_MESSAGE,
+            "system",
+            [],
+            reopenConversationKeyboard(conversation.id),
+        );
     }
 }
 
@@ -341,35 +458,85 @@ export async function POST(request: Request) {
         const { contact, conversation } = await getOrCreateConversation(message.chat, message.from);
         const text = String(message.text || "").trim();
         if (!text) {
-            await sendAndStore(conversation.id, chatId, "I can currently help with text messages. Please type your question, or use /human to contact a coach.", "system");
+            if (["resolved", "closed_parent"].includes(conversation.status)) {
+                await sendAndStore(
+                    conversation.id,
+                    chatId,
+                    CLOSED_CONVERSATION_MESSAGE,
+                    "system",
+                    [],
+                    reopenConversationKeyboard(conversation.id),
+                );
+                return NextResponse.json({ ok: true, closed: true });
+            }
+            if (["escalated", "human_active"].includes(conversation.status)) {
+                try {
+                    await notifySupportSuperuser(
+                        conversation.id,
+                        parentName(message.from),
+                        "Parent sent a non-text Telegram message.",
+                        "New non-text message while Coach Patrick is handling the conversation.",
+                    );
+                } catch (error) {
+                    console.error("Support non-text notification failed:", error);
+                }
+                return NextResponse.json({ ok: true, waitingForHuman: true });
+            }
+            await sendAndStore(conversation.id, chatId, "I can currently help with text messages. Please type and send your question below. If you need personal assistance, ask for Coach Patrick.", "system");
             return NextResponse.json({ ok: true });
         }
 
         if (text.startsWith("/start")) {
+            if (["escalated", "human_active"].includes(conversation.status)) {
+                await sendAndStore(conversation.id, chatId, "Coach Patrick is already handling this conversation. You can continue typing your messages here, and the AI assistant will remain paused.", "system");
+                return NextResponse.json({ ok: true, waitingForHuman: true });
+            }
             if (["resolved", "closed_parent"].includes(conversation.status)) {
                 await setConversationStatus(conversation, "ai_active", "parent", "Parent restarted the bot.");
             }
             await sendAndStore(
                 conversation.id,
                 chatId,
-                "Hello! I’m the PatLau badminton coaching assistant. I can help with general coaching information, schedules, locations, fees and current announcements. For personal attendance or payment information, I’ll connect you with a coach.",
-                "system",
-                [],
-                feedbackKeyboard(conversation.id),
+                AI_INTRO_MESSAGE,
+                "ai",
             );
             return NextResponse.json({ ok: true });
         }
         if (text.startsWith("/help")) {
-            await sendAndStore(conversation.id, chatId, "Ask any general PatLau coaching question. Use /human to contact a coach, /status to check the conversation, or /close to close it.", "system");
+            if (["escalated", "human_active"].includes(conversation.status)) {
+                await sendAndStore(conversation.id, chatId, "Coach Patrick is handling this conversation. Continue typing your message here, use /status to check the conversation, or use /close to close it.", "system");
+                return NextResponse.json({ ok: true, waitingForHuman: true });
+            }
+            await sendAndStore(conversation.id, chatId, "Type and send any general PatLau coaching question. You can also ask to speak with Coach Patrick, use /status to check the conversation, or use /close to close it.", "system");
             return NextResponse.json({ ok: true });
         }
         if (text.startsWith("/status")) {
-            await sendAndStore(conversation.id, chatId, `Current conversation status: ${String(conversation.status).replaceAll("_", " ")}.`, "system");
+            if (["resolved", "closed_parent"].includes(conversation.status)) {
+                await sendAndStore(
+                    conversation.id,
+                    chatId,
+                    CLOSED_CONVERSATION_MESSAGE,
+                    "system",
+                    [],
+                    reopenConversationKeyboard(conversation.id),
+                );
+            } else {
+                await sendAndStore(conversation.id, chatId, `Current conversation status: ${String(conversation.status).replaceAll("_", " ")}.`, "system");
+            }
             return NextResponse.json({ ok: true });
         }
         if (text.startsWith("/close")) {
-            await setConversationStatus(conversation, "closed_parent", "parent", "Parent used /close.");
-            await sendAndStore(conversation.id, chatId, "This conversation is closed. Send a new message anytime to reopen it.", "system");
+            if (conversation.status !== "closed_parent") {
+                await setConversationStatus(conversation, "closed_parent", "parent", "Parent used /close.");
+            }
+            await sendAndStore(
+                conversation.id,
+                chatId,
+                CLOSED_CONVERSATION_MESSAGE,
+                "system",
+                [],
+                reopenConversationKeyboard(conversation.id),
+            );
             return NextResponse.json({ ok: true });
         }
 
@@ -382,21 +549,21 @@ export async function POST(request: Request) {
         }).eq("id", conversation.id);
 
         const name = parentName(message.from);
-        if (text.startsWith("/human") || /\b(talk|speak|chat)\s+(to|with)\s+(a\s+)?(human|coach|person)\b/i.test(text)) {
-            await escalate(conversation, chatId, name, text, "Parent requested a human response.");
-            return NextResponse.json({ ok: true });
-        }
-        if (/\b(refund|complaint|complain|dispute|very unhappy|not satisfied)\b/i.test(text)) {
-            await escalate(conversation, chatId, name, text, "Sensitive complaint, refund, or dispute.");
-            return NextResponse.json({ ok: true });
-        }
         if (["escalated", "human_active"].includes(conversation.status)) {
             try {
-                await notifySupportSuperuser(conversation.id, name, text, conversation.status === "human_active" ? "New parent reply in a human-managed chat." : "New message in an escalated chat.");
+                await notifySupportSuperuser(conversation.id, name, text, conversation.status === "human_active" ? "New parent reply in a Coach Patrick-managed chat." : "New message in an escalated chat.");
             } catch (error) {
                 console.error("Support follow-up notification failed:", error);
             }
             return NextResponse.json({ ok: true, waitingForHuman: true });
+        }
+        if (parentExplicitlyRequestsCoach(text)) {
+            await escalate(conversation, chatId, name, text, "Parent requested Coach Patrick.");
+            return NextResponse.json({ ok: true });
+        }
+        if (/\b(refund|complaint|complain|dispute)\b/i.test(text) || parentIsDissatisfied(text)) {
+            await escalate(conversation, chatId, name, text, "Parent expressed dissatisfaction or raised a sensitive complaint, refund, or dispute.");
+            return NextResponse.json({ ok: true });
         }
         if (["resolved", "closed_parent"].includes(conversation.status)) {
             await setConversationStatus(conversation, "ai_active", "parent", "Parent sent a new message.");
@@ -413,7 +580,15 @@ export async function POST(request: Request) {
                 await escalate(conversation, chatId, name, text, result.reason);
                 return NextResponse.json({ ok: true, escalated: true });
             }
-            await sendAndStore(conversation.id, chatId, result.reply, "ai", result.sources, feedbackKeyboard(conversation.id));
+            const includeDelayedFeedback = shouldOfferDelayedFeedback(result.previousAiReplyCount);
+            await sendAndStore(
+                conversation.id,
+                chatId,
+                result.reply,
+                "ai",
+                result.sources,
+                includeDelayedFeedback ? delayedFeedbackKeyboard(conversation.id) : undefined,
+            );
             await setConversationStatus(conversation, "waiting_parent", "ai", "AI response sent.");
             await supportAdmin.from("support_conversations").update({
                 last_message_at: new Date().toISOString(),

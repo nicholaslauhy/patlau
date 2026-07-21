@@ -106,6 +106,14 @@ Payment routes support the relevant combination of monthly filtering, paid/unpai
 
 The coach webhook validates Telegram's `X-Telegram-Bot-Api-Secret-Token` header. `TELEGRAM_COACH_ATTENDANCE_WEBHOOK_SECRET` is recommended; after changing it, register the same value as `secret_token` when calling Telegram's `setWebhook`. Existing installations may instead use the stable fallback derived from `TELEGRAM_PARENT_SUPPORT_WEBHOOK_SECRET`, but changing that parent secret also requires re-registering the coach webhook.
 
+## Parent support chatbot
+
+`/chats` is the superuser workspace for parent-support conversations, published knowledge, and time-sensitive announcements. The Telegram webhook answers general questions from published information and current announcements, while personal records, unsupported questions, complaints, disputes, explicit requests for a person, and dissatisfied or agitated messages are escalated directly to Coach Patrick.
+
+Telegram identifies automated answers as **PatLau AI Assistant (AI-generated)**, human replies as **Coach Patrick (human reply)**, and automated state changes as **PatLau Support Update**. The `/start` response tells parents to type their question and does not show a decision button. Resolution controls are delayed until the third actual AI answer instead of appearing after every response. During an escalation or Coach Patrick takeover, the AI remains paused, including when the parent sends `/start`, `/help`, or a non-text message.
+
+The Chats interface keeps parent, AI, Coach Patrick, and system messages visually and textually distinct. Superusers can take over, return an eligible conversation to the AI, or close it. Closed conversations display a clear locked state and can be reopened with the AI; conversations closed by the parent remain read-only for staff. Telegram receives the same close notification with a **Reopen conversation** button, while sending a new parent message still reopens automatically for compatibility. The full history is retained across these status changes.
+
 ## Audit trail
 
 `audit_logs` is an append-only operational and security timeline. Database triggers cover inserts, updates, and deletes on the current public business tables, including changes made inside RPC functions. Server routes add understandable events for actions outside those tables, such as login attempts, password recovery, Auth user administration, profile photos, support actions, Telegram delivery, and scheduled summaries.
@@ -159,6 +167,7 @@ Sentry is an operational search and alerting service, not a permanent legal arch
 - `/api/telegram-makeup-payment`
 - `/api/telegram-coach-attendance/send`
 - `/api/telegram-coach-attendance/webhook`
+- `/api/telegram-parent-support/webhook`
 
 ### Scheduled summaries
 
@@ -212,7 +221,10 @@ TELEGRAM_COACH_ATTENDANCE_SUNDAY_THREAD_ID=
 # Optional dedicated webhook secret. If omitted, the server derives a stable
 # coach webhook secret from TELEGRAM_PARENT_SUPPORT_WEBHOOK_SECRET.
 TELEGRAM_COACH_ATTENDANCE_WEBHOOK_SECRET=
+TELEGRAM_PARENT_SUPPORT_BOT_TOKEN=
 TELEGRAM_PARENT_SUPPORT_WEBHOOK_SECRET=
+TELEGRAM_PARENT_SUPPORT_ADMIN_CHAT_ID=
+OPENAI_API_KEY=
 
 # Scheduled route protection
 CRON_SECRET=
@@ -290,7 +302,7 @@ npm test
 npm run build
 ```
 
-`npm test` runs the TypeScript check, human-readable audit-display regressions, and an in-memory Sentry transport regression covering official SDK envelopes, multi-envelope batches, row tracking, and non-2xx rejection. `npm run build` performs the optimised Next.js production build.
+`npm test` runs the TypeScript check, parent-support flow regressions, human-readable audit-display regressions, and an in-memory Sentry transport regression covering official SDK envelopes, multi-envelope batches, row tracking, and non-2xx rejection. `npm run build` performs the optimised Next.js production build.
 
 ## Deployment checklist
 

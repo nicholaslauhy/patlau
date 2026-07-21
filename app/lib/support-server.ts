@@ -70,6 +70,24 @@ export async function answerSupportCallback(callbackQueryId: string, text: strin
     });
 }
 
+export async function clearSupportTelegramKeyboard(chatId: string, messageId: string | number) {
+    const token = process.env.TELEGRAM_PARENT_SUPPORT_BOT_TOKEN;
+    if (!token) return;
+    const response = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            chat_id: chatId,
+            message_id: messageId,
+            reply_markup: { inline_keyboard: [] },
+        }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+        throw new Error(data?.description || "Telegram could not update the conversation controls.");
+    }
+}
+
 export async function notifySupportSuperuser(
     conversationId: string,
     parentName: string,
