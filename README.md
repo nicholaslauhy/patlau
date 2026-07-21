@@ -112,7 +112,7 @@ The coach webhook validates Telegram's `X-Telegram-Bot-Api-Secret-Token` header.
 
 Attendance actions from `student_audit`, makeup payment events, and support status/message events are translated into readable semantic entries. Logging starts when the migration is installed; it does not reconstruct actions that happened earlier. Authentication endpoints enforce account and address-based request windows. Every allowed attempt is logged, while repeated notices for requests that are already blocked are grouped briefly to prevent log-flooding.
 
-Supabase acts as the durable delivery buffer rather than the long-term search interface. Every audit insert creates a private export-state row in the same database transaction. A protected daily route leases bounded batches, sends size-limited structured-log envelopes to Sentry, retries failures, and marks a row delivered only after Sentry's ingestion endpoint returns HTTP 2xx. With the default seven-day setting, the additional safety conditions make the effective minimum local age nine days. Pending, retrying, in-flight, and dead-letter rows are never pruned.
+Supabase acts as the durable delivery buffer rather than the long-term search interface. Every audit insert creates a private export-state row in the same database transaction. A protected daily route leases bounded batches, emits them through the official `@sentry/nextjs` Logs SDK, retries failures, and marks a row delivered only after an audit-aware wrapper observes every leased ID and Sentry's native transport explicitly returns HTTP 2xx. With the default seven-day setting, the additional safety conditions make the effective minimum local age nine days. Pending, retrying, in-flight, and dead-letter rows are never pruned.
 
 The audit viewer is available to superusers at `/audit-logs`. It supports search, category, outcome, action, and date filters with expandable change and request details for the recent Supabase buffer. It also shows export health, supports a manual **Export now** action, retries terminal failures only when a superuser deliberately exports, and can link to the longer searchable history in Sentry. Ordinary authenticated users and anonymous clients cannot query or mutate the underlying table or private queue; the viewer reads both through separately authorised server APIs.
 
@@ -244,10 +244,10 @@ Keep `SENTRY_AUTH_TOKEN`, `SENTRY_DSN`, and server Supabase credentials in Verce
 3. Copy the organisation slug and project slug into `SENTRY_ORG` and `SENTRY_PROJECT`.
 4. If production source maps are wanted, create a Sentry organisation auth token with release/source-map permissions and save it as the server-only `SENTRY_AUTH_TOKEN`. Audit export itself does not require this token.
 5. In Sentry security/privacy settings, keep server-side data scrubbing enabled and add sensitive keys such as `password`, `token`, `secret`, `code`, `cookie`, `authorization`, `session`, and `api_key`.
-6. Apply both Sentry audit migrations, leave `AUDIT_PRUNING_ENABLED=false`, and redeploy the application.
-7. Open **Audit Logs → Test Sentry**. This sends one fresh minimal log through the audit transport and one through Sentry's official SDK. Confirm that the page reports raw ingestion accepted, SDK initialized, SDK Logs enabled, and SDK local queue drained.
-8. Copy the exact `source:patlau_sentry_probe probe_id:<id>` query shown by the test into Sentry **Explore → Logs** with the `patlau` project, **All Environments**, and a time range that includes the current time. An HTTP acknowledgement or a drained SDK queue proves transport, but the probe appearing in Logs is the proof that Sentry indexed it.
-9. Use **Audit Logs → Export now**, then search the displayed `audit_export_run_id:<id>` token. Historic audit records retain their original timestamps, so use a 30-day range when checking an older backlog. The official SDK also emits a fresh `source:patlau_audit_export_summary` record for every manual run.
+6. Apply the Sentry audit migrations in filename order, including `20260721210000_cut_over_sentry_sdk_export.sql`, leave `AUDIT_PRUNING_ENABLED=false`, and redeploy the application. The cutover migration safely requeues retained rows that the retired raw sender had marked exported and records the official SDK transport on future acknowledgements.
+7. Open **Audit Logs → Test Sentry**. This sends one fresh log through the same tracked official SDK path used by real audit exports. Confirm that the page reports SDK initialized, SDK Logs enabled, SDK local queue drained, and Sentry transport accepted (2xx).
+8. Copy the exact `source:patlau_sentry_probe probe_id:<id>` query shown by the test into Sentry **Explore → Logs** with the `patlau` project, **All Environments**, and a time range that includes the current time. The 2xx result proves ingestion accepted the SDK envelope; the probe appearing in Logs is the final proof that Sentry indexed it.
+9. Use **Audit Logs → Export now**, then search the displayed `audit_export_run_id:<id>` token. SDK exports are timestamped when they are sent, while each record's original action time remains available in the `audit_occurred_at` attribute.
 10. Save the working Logs view and place its HTTPS URL in `SENTRY_AUDIT_SEARCH_URL` if the website should link directly to it.
 11. Create a Sentry alert for errors tagged `subsystem:audit-export`, and keep Vercel function-failure notifications enabled. This makes a broken exporter visible before the local queue grows substantially.
 12. Only after verifying a probe and an audit export in Sentry Logs, set `AUDIT_PRUNING_ENABLED=true` in Vercel and redeploy. Until this switch is enabled, exports can be tested but no local audit row can be cleaned up.
@@ -266,6 +266,7 @@ The application expects its Supabase tables, RPC functions, and RLS policies to 
 - `migrations/20260720170000_create_comprehensive_audit_logs.sql`
 - `migrations/20260720200000_create_sentry_audit_outbox.sql`
 - `migrations/20260720210000_harden_sentry_audit_export.sql`
+- `migrations/20260721210000_cut_over_sentry_sdk_export.sql`
 - `sql/setup_payment_history_rls.sql`
 
 The running application also references programme, makeup, coach-attendance, reset-code, profile, and payment-state tables. Keep the deployed Supabase schema and RPC definitions in sync with the codebase, and enforce permissions with RLS rather than relying only on hidden interface controls.
@@ -286,7 +287,7 @@ npm test
 npm run build
 ```
 
-`npm test` currently runs TypeScript without emitting files. `npm run build` performs the optimised Next.js production build.
+`npm test` runs the TypeScript check plus an in-memory Sentry transport regression covering official SDK envelopes, multi-envelope batches, row tracking, and non-2xx rejection. `npm run build` performs the optimised Next.js production build.
 
 ## Deployment checklist
 

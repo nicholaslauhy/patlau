@@ -28,23 +28,23 @@ export async function POST(request: NextRequest) {
         category: 'system',
         eventType: 'audit.sentry_probe.requested',
         action: 'test_sentry_logs',
-        outcome: result.raw.accepted && result.sdk.queueDrained ? 'success' : 'warning',
+        outcome: result.sdk.transportAccepted && result.sdk.queueDrained ? 'success' : 'warning',
         summary: `${caller.user.user_metadata?.name || caller.user.email || 'Superuser'} tested Sentry Logs delivery`,
         actorSource: 'audit_viewer',
         targetTable: 'audit_logs',
         targetRecordId: { probe_id: result.probeId },
         targetLabel: 'Sentry Logs',
         metadata: {
-            raw_accepted: result.raw.accepted,
-            raw_http_status: result.raw.httpStatus,
             sdk_initialized: result.sdk.initialized,
             sdk_logs_enabled: result.sdk.logsEnabled,
             sdk_queue_drained: result.sdk.queueDrained,
+            sdk_transport_accepted: result.sdk.transportAccepted,
+            delivery_batch_id: result.sdk.deliveryBatchId,
         },
     });
 
     return jsonNoStore({
-        success: result.raw.accepted || result.sdk.queueDrained,
+        success: result.sdk.transportAccepted && result.sdk.queueDrained,
         result,
     });
 }

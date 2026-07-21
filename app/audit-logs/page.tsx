@@ -29,21 +29,12 @@ interface AuditFilters {
 
 interface SentryLogsProbeResult {
     probeId: string;
-    raw: {
-        accepted: boolean;
-        httpStatus: number | null;
-        rateLimitHeaderPresent: boolean;
-        error: string | null;
-        destination: {
-            host: string;
-            projectId: string;
-            environment: string;
-        } | null;
-    };
     sdk: {
         initialized: boolean;
         logsEnabled: boolean;
         queueDrained: boolean;
+        transportAccepted: boolean;
+        deliveryBatchId: string | null;
         error: string | null;
     };
 }
@@ -437,10 +428,9 @@ export default function AuditLogsPage() {
             const exportRunId = typeof payload.result?.exportRunId === 'string'
                 ? payload.result.exportRunId
                 : '';
-            const sdkSummaryQueueDrained = payload.result?.sdkSummaryQueueDrained === true;
             setLastExportRunId(exportRunId);
             const summary = exported > 0
-                ? `${exported.toLocaleString()} ${exported === 1 ? 'log record was' : 'log records were'} accepted by Sentry ingestion.`
+                ? `${exported.toLocaleString()} ${exported === 1 ? 'log record was' : 'log records were'} accepted through Sentry's official SDK.`
                 : 'All queued audit records are already up to date.';
             const retrySummary = requeued > 0
                 ? ` ${requeued.toLocaleString()} previously failed ${requeued === 1 ? 'event was' : 'events were'} retried.`
@@ -448,10 +438,7 @@ export default function AuditLogsPage() {
             const pruningSummary = pruned > 0
                 ? ` ${pruned.toLocaleString()} safely exported ${pruned === 1 ? 'record was' : 'records were'} removed from the local buffer.`
                 : '';
-            const sdkSummary = sdkSummaryQueueDrained
-                ? ' The official Sentry SDK also drained its verification record from the local queue.'
-                : ' The official Sentry SDK did not confirm that its local queue drained; use Test Sentry for details.';
-            setExportNotice({ type: 'success', message: `${summary}${retrySummary}${pruningSummary}${sdkSummary}` });
+            setExportNotice({ type: 'success', message: `${summary}${retrySummary}${pruningSummary}` });
             await loadLogs();
         } catch (requestError) {
             setExportNotice({
@@ -479,9 +466,9 @@ export default function AuditLogsPage() {
             const probe = payload.result as SentryLogsProbeResult;
             setSentryProbe(probe);
             setExportNotice({
-                type: probe.raw.accepted && probe.sdk.queueDrained ? 'success' : 'error',
-                message: probe.raw.accepted && probe.sdk.queueDrained
-                    ? 'The raw probe was accepted and the official SDK queue drained. Search the exact probe ID shown below in Sentry Logs.'
+                type: probe.sdk.transportAccepted && probe.sdk.queueDrained ? 'success' : 'error',
+                message: probe.sdk.transportAccepted && probe.sdk.queueDrained
+                    ? 'Sentry explicitly accepted the official SDK probe. Search the exact probe ID shown below in Sentry Logs.'
                     : 'The Sentry test found a delivery or SDK configuration problem. Review the checks below.',
             });
         } catch (requestError) {
@@ -585,16 +572,12 @@ export default function AuditLogsPage() {
                             <div className="audit-probe-result-heading">
                                 <div>
                                     <h3 id="audit-probe-title">Sentry Logs delivery test</h3>
-                                    <p>These checks compare the audit exporter with Sentry's official SDK using the same fresh probe ID.</p>
+                                    <p>This uses the same tracked official SDK path as the real audit exporter.</p>
                                 </div>
                                 <button type="button" onClick={() => setSentryProbe(null)} aria-label="Dismiss Sentry test details">Dismiss</button>
                             </div>
 
                             <div className="audit-probe-checks">
-                                <div className={sentryProbe.raw.accepted ? 'is-good' : 'is-bad'}>
-                                    <span>Raw ingestion</span>
-                                    <strong>{sentryProbe.raw.accepted ? `Accepted (HTTP ${sentryProbe.raw.httpStatus})` : 'Not accepted'}</strong>
-                                </div>
                                 <div className={sentryProbe.sdk.initialized ? 'is-good' : 'is-bad'}>
                                     <span>SDK initialized</span>
                                     <strong>{sentryProbe.sdk.initialized ? 'Yes' : 'No'}</strong>
@@ -607,6 +590,10 @@ export default function AuditLogsPage() {
                                     <span>SDK local queue</span>
                                     <strong>{sentryProbe.sdk.queueDrained ? 'Drained' : 'Not confirmed'}</strong>
                                 </div>
+                                <div className={sentryProbe.sdk.transportAccepted ? 'is-good' : 'is-bad'}>
+                                    <span>Sentry transport</span>
+                                    <strong>{sentryProbe.sdk.transportAccepted ? 'Accepted (2xx)' : 'Not confirmed'}</strong>
+                                </div>
                             </div>
 
                             <div className="audit-probe-query">
@@ -614,18 +601,9 @@ export default function AuditLogsPage() {
                                 <code>source:patlau_sentry_probe probe_id:{sentryProbe.probeId}</code>
                             </div>
 
-                            {sentryProbe.raw.destination && (
-                                <p className="audit-probe-destination">
-                                    Destination: <strong>{sentryProbe.raw.destination.host}</strong>, project ID <strong>{sentryProbe.raw.destination.projectId}</strong>, environment <strong>{sentryProbe.raw.destination.environment}</strong>.
-                                </p>
-                            )}
-                            {sentryProbe.raw.rateLimitHeaderPresent && (
-                                <p className="audit-probe-warning">Sentry announced a rate-limit window while accepting the raw probe.</p>
-                            )}
-                            {sentryProbe.raw.error && <p className="audit-probe-error">Raw ingestion: {sentryProbe.raw.error}</p>}
                             {sentryProbe.sdk.error && <p className="audit-probe-error">Official SDK: {sentryProbe.sdk.error}</p>}
                             <p className="audit-probe-note">
-                                Accepted and queue drained confirm transport only. The final proof is that the probe appears in Sentry Logs; keep automatic cleanup paused until it does.
+                                A 2xx confirms Sentry ingestion accepted the SDK envelope. The final proof is that this probe appears in Sentry Logs; keep automatic cleanup paused until it does.
                             </p>
                         </section>
                     )}

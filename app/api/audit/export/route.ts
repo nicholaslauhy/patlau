@@ -5,7 +5,6 @@ import {
     exportAuditLogsToSentry,
 } from '../../../lib/sentry-audit';
 import { writeAuditEvent } from '../../../lib/audit-server';
-import { emitAuditExportSummary } from '../../../lib/sentry-probe';
 import { requireRole } from '../../../lib/server-auth';
 
 export const runtime = 'nodejs';
@@ -43,23 +42,9 @@ export async function POST(request: NextRequest) {
         // Scheduled runs leave dead letters untouched so repeated failures stay
         // visible until an operator chooses to retry them.
         const result = await exportAuditLogsToSentry({ requeueDead: true });
-        let sdkSummaryQueueDrained = false;
-        try {
-            sdkSummaryQueueDrained = await emitAuditExportSummary({
-                exportRunId: result.exportRunId,
-                exported: result.exported,
-                batches: result.batches,
-            });
-        } catch (summaryError) {
-            console.warn(
-                '[audit-export] Raw export succeeded, but the SDK summary log did not flush:',
-                summaryError instanceof Error ? summaryError.message : 'Unknown SDK logging error',
-            );
-        }
-
         return jsonNoStore({
             success: true,
-            result: { ...result, sdkSummaryQueueDrained },
+            result,
         });
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Audit export failed.';
