@@ -6,6 +6,7 @@ import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from '../components/AppHeader';
 import CalendarPicker from '../components/CalendarPicker';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
+import { auditDisplaySummary, auditDisplayTargetLabel } from '../lib/audit-display';
 import type { AuditLogEntry, AuditLogResponse, AuditOutcome } from '../../types/audit';
 import '../styles.css';
 import '../dashboard/dashboard.css';
@@ -142,6 +143,14 @@ function formatDateTime(value: string) {
 
 function actorName(entry: AuditLogEntry) {
     return entry.actor_name || entry.actor_email || humanise(entry.actor_source) || 'System';
+}
+
+function visibleSummary(entry: AuditLogEntry) {
+    return auditDisplaySummary(entry);
+}
+
+function visibleTargetLabel(entry: AuditLogEntry) {
+    return auditDisplayTargetLabel(entry);
 }
 
 function displayValue(value: unknown) {
@@ -742,10 +751,10 @@ export default function AuditLogsPage() {
                                             <span className="audit-category">{categoryLabel(entry.category)}</span>
                                             <time>{formatDateTime(entry.occurred_at)}</time>
                                         </span>
-                                        <strong>{entry.summary}</strong>
+                                        <strong>{visibleSummary(entry)}</strong>
                                         <span className="audit-event-meta">
                                             <span>{actorName(entry)}</span>
-                                            {entry.target_label && <span>{entry.target_label}</span>}
+                                            {visibleTargetLabel(entry) && <span>{visibleTargetLabel(entry)}</span>}
                                         </span>
                                         <OutcomeBadge outcome={entry.outcome} />
                                     </span>
@@ -781,7 +790,7 @@ export default function AuditLogsPage() {
                                         <span className="audit-eyebrow">Event #{selectedEntry.id}</span>
                                         <OutcomeBadge outcome={selectedEntry.outcome} />
                                     </div>
-                                    <h2 id="audit-detail-title">{selectedEntry.summary}</h2>
+                                    <h2 id="audit-detail-title">{visibleSummary(selectedEntry)}</h2>
                                     <div className="audit-detail-timestamp">
                                         <span>Recorded</span>
                                         <time dateTime={selectedEntry.occurred_at}>{formatDateTime(selectedEntry.occurred_at)}</time>
@@ -796,7 +805,7 @@ export default function AuditLogsPage() {
                                         <DetailItem label="Source" value={humanise(selectedEntry.actor_source)} />
                                         <DetailItem label="Category" value={categoryLabel(selectedEntry.category)} />
                                         <DetailItem label="Action" value={humanise(selectedEntry.action)} />
-                                        <DetailItem label="Target" value={selectedEntry.target_label || humanise(selectedEntry.target_table)} />
+                                        <DetailItem label="Target" value={visibleTargetLabel(selectedEntry) || humanise(selectedEntry.target_table)} />
                                     </dl>
                                 </section>
 
@@ -840,6 +849,13 @@ export default function AuditLogsPage() {
                                     <dl>
                                         <DetailItem label="Target table" value={selectedEntry.target_table} mono />
                                         <DetailItem label="Target record" value={selectedEntry.target_record_id} mono />
+                                        {selectedEntry.display_summary && selectedEntry.display_summary !== selectedEntry.summary && (
+                                            <DetailItem label="Original recorded summary" value={selectedEntry.summary} mono />
+                                        )}
+                                        {selectedEntry.display_target_label
+                                            && selectedEntry.display_target_label !== selectedEntry.target_label && (
+                                            <DetailItem label="Original recorded label" value={selectedEntry.target_label} mono />
+                                        )}
                                         <DetailItem label="Metadata" value={selectedEntry.metadata} mono />
                                         <DetailItem label="User agent" value={selectedEntry.user_agent} mono />
                                     </dl>

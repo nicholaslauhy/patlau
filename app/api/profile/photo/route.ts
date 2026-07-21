@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
                 summary: "A profile photo upload failed because no photo was provided.",
                 targetTable: "auth.users",
                 targetRecordId: { user_id: caller.id },
-                targetLabel: caller.user_metadata?.name || caller.email || caller.id,
+                targetLabel: caller.user_metadata?.name || caller.email || "Current account",
                 metadata: { reason: "missing_photo" },
             });
             return NextResponse.json({ error: "A profile photo is required." }, { status: 400 });
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
                 summary: "A profile photo upload used an unsupported file type.",
                 targetTable: "auth.users",
                 targetRecordId: { user_id: caller.id },
-                targetLabel: caller.user_metadata?.name || caller.email || caller.id,
+                targetLabel: caller.user_metadata?.name || caller.email || "Current account",
                 metadata: { reason: "unsupported_file_type", file_type: photo.type },
             });
             return NextResponse.json({ error: "Use a JPG, PNG, or WebP image." }, { status: 415 });
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
                 summary: "A profile photo upload exceeded the file-size limit.",
                 targetTable: "auth.users",
                 targetRecordId: { user_id: caller.id },
-                targetLabel: caller.user_metadata?.name || caller.email || caller.id,
+                targetLabel: caller.user_metadata?.name || caller.email || "Current account",
                 metadata: { reason: "file_too_large", file_size_bytes: photo.size },
             });
             return NextResponse.json({ error: "Profile photos must be 5 MB or smaller." }, { status: 413 });
@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
                 : "Updated the profile photo.",
             targetTable: "auth.users",
             targetRecordId: { user_id: caller.id },
-            targetLabel: caller.user_metadata?.name || caller.email || caller.id,
+            targetLabel: caller.user_metadata?.name || caller.email || "Current account",
             changedFields: ["profile_photo"],
             oldValues: { had_profile_photo: Boolean(previousPath) },
             newValues: {
@@ -237,7 +237,7 @@ export async function DELETE(request: NextRequest) {
                     : "Confirmed that the account has no profile photo.",
             targetTable: "auth.users",
             targetRecordId: { user_id: caller.id },
-            targetLabel: caller.user_metadata?.name || caller.email || caller.id,
+            targetLabel: caller.user_metadata?.name || caller.email || "Current account",
             changedFields: previousPath ? ["profile_photo"] : [],
             oldValues: { had_profile_photo: Boolean(previousPath) },
             newValues: { has_profile_photo: false },

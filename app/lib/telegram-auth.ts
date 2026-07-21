@@ -5,6 +5,12 @@ export type TelegramAuthorization =
     | { authorized: true; actor: AuditActor | null; source: 'authenticated_api' | 'cron' }
     | { authorized: false; status: 401 | 403 };
 
+function programmeLabel(value: string) {
+    return value
+        .replaceAll('_', ' ')
+        .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 export async function authorizeTelegramSender(
     request: Request,
     allowedRoles: readonly UserRole[],
@@ -35,7 +41,7 @@ export async function authorizeTelegramSender(
                 : `An unauthenticated ${programme.replaceAll('_', ' ')} send was denied`,
             actorSource: actor ? 'authenticated_api' : 'anonymous_api',
             targetTable: 'telegram',
-            targetLabel: programme,
+            targetLabel: programmeLabel(programme),
             metadata: { reason: actor ? 'insufficient_role' : 'missing_or_invalid_authentication' },
         });
         return { authorized: false, status: actor ? 403 : 401 };

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { serverAdmin } from './server-auth';
+import { auditDisplaySummary, auditDisplayTargetLabel } from './audit-display';
 import { scrubSentryLog, scrubSentryValue } from './sentry-scrub';
 import {
     requireSentryLogsClient,
@@ -34,6 +35,7 @@ interface ClaimedAuditLog {
     action: string;
     outcome: string;
     summary: string;
+    display_summary?: string | null;
     actor_user_id: string | null;
     actor_email: string | null;
     actor_name: string | null;
@@ -42,6 +44,7 @@ interface ClaimedAuditLog {
     target_table: string | null;
     target_record_id: Record<string, unknown> | null;
     target_label: string | null;
+    display_target_label?: string | null;
     changed_fields: string[] | null;
     old_values: Record<string, unknown> | null;
     new_values: Record<string, unknown> | null;
@@ -123,7 +126,7 @@ function compactAttributes(row: ClaimedAuditLog, exportRunId: string) {
         actor_name: row.actor_name,
         actor_role: row.actor_role,
         target_table: row.target_table,
-        target_label: row.target_label,
+        target_label: auditDisplayTargetLabel(row),
         request_id: row.request_id,
         request_path: row.request_path,
         request_method: row.request_method,
@@ -158,7 +161,7 @@ function auditLogRecord(
             ? 'warn'
             : 'info' as const;
     const scrubbedLog = scrubSentryLog({
-        body: row.summary.slice(0, 4_000),
+        body: auditDisplaySummary(row).slice(0, 4_000),
         attributes: {
             ...compactAttributes(row, exportRunId),
             audit_export_transport: 'sentry_nextjs_sdk',
@@ -180,7 +183,31 @@ async function sendBatchToSentry(
     rows: ClaimedAuditLog[],
     exportRunId: string,
 ) {
-    await sendSentryLogBatch(rows.map((row) => auditLogRecord(row, exportRunId)));
+    // The claim RPC deliberately keeps its stable shape. Hydrate presentation
+    // columns separately when the human-readable logging migration is present,
+    // and safely fall back while website/database deployments overlap.
+    const { data: presentations, error } = await serverAdmin
+        .from('audit_logs')
+        .select('id, display_summary, display_target_label')
+        .in('id', rows.map((row) => row.audit_log_id));
+    const presentationColumnsAreNotDeployed = Boolean(error) && (
+        error?.code === 'PGRST204'
+        || error?.code === '42703'
+    ) && /display_(summary|target_label)/i.test(error?.message || '');
+
+    if (error && !presentationColumnsAreNotDeployed) {
+        throw new Error(`Could not load audit presentation snapshots: ${error.message}`);
+    }
+
+    const presentationById = error
+        ? new Map<number, { display_summary?: string | null; display_target_label?: string | null }>()
+        : new Map((presentations || []).map((entry) => [Number(entry.id), entry]));
+    const presentedRows = rows.map((row) => ({
+        ...row,
+        ...presentationById.get(row.audit_log_id),
+    }));
+
+    await sendSentryLogBatch(presentedRows.map((row) => auditLogRecord(row, exportRunId)));
 }
 
 async function markBatchFailed(rows: ClaimedAuditLog[], error: unknown) {

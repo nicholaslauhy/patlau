@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && tsx --test tests/sentry-logs-sdk.test.mjs"
+    "test": "npm run typecheck && tsx --test tests/*.test.mjs"
   },
   "repository": {
     "type": "git",

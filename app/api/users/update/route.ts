@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
                 summary: 'Denied an attempt to change the caller\'s own role.',
                 targetTable: 'auth.users',
                 targetRecordId: { user_id: userId },
-                targetLabel: caller.user.user_metadata?.name || caller.user.email || userId,
+                targetLabel: caller.user.user_metadata?.name || caller.user.email || 'Current account',
                 newValues: { role },
                 metadata: { reason: 'self_role_change' },
             });
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
         const existingMetadata = targetData.user.user_metadata || {};
         const existingAppMetadata = targetData.user.app_metadata || {};
         const previousRole = getStoredUserRole(targetData.user);
-        const targetLabel = targetData.user.user_metadata?.name || targetData.user.email || userId;
+        const targetLabel = targetData.user.user_metadata?.name || targetData.user.email || 'Unknown account';
 
         const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
             app_metadata: {

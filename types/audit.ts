@@ -10,6 +10,8 @@ export interface AuditLogEntry {
     action: string;
     outcome: AuditOutcome;
     summary: string;
+    /** Human-readable presentation generated without replacing the stored evidence. */
+    display_summary?: string | null;
     actor_user_id: string | null;
     actor_email: string | null;
     actor_name: string | null;
@@ -18,6 +20,8 @@ export interface AuditLogEntry {
     target_table: string | null;
     target_record_id: Record<string, unknown> | null;
     target_label: string | null;
+    /** Resolved student, parent, user, or operational label for the viewer. */
+    display_target_label?: string | null;
     changed_fields: string[] | null;
     old_values: Record<string, unknown> | null;
     new_values: Record<string, unknown> | null;

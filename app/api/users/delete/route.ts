@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
                 summary: 'Denied an attempt to delete the caller\'s own account.',
                 targetTable: 'auth.users',
                 targetRecordId: { user_id: userId },
-                targetLabel: caller.user.user_metadata?.name || caller.user.email || userId,
+                targetLabel: caller.user.user_metadata?.name || caller.user.email || 'Current account',
                 metadata: { reason: 'self_deletion' },
             });
             return NextResponse.json({ error: 'You cannot delete your own account' }, { status: 403 });
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
         }
 
         const targetRole = getStoredUserRole(targetData.user);
-        const targetLabel = targetData.user.user_metadata?.name || targetData.user.email || userId;
+        const targetLabel = targetData.user.user_metadata?.name || targetData.user.email || 'Unknown account';
         if (caller.role === 'admin' && targetRole !== 'member') {
             await writeAuditEvent({
                 request,

@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
         }
 
         const targetRole = getStoredUserRole(targetUser);
-        const targetLabel = targetUser.user_metadata?.name || targetUser.email || targetUser.id;
+        const targetLabel = targetUser.user_metadata?.name || targetUser.email || 'Unknown account';
 
         if (caller.role === 'admin' && targetRole !== 'member') {
             await writeAuditEvent({

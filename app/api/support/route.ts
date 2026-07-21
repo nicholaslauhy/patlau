@@ -17,6 +17,16 @@ const validStatuses: SupportStatus[] = [
 
 const asError = (error: unknown) => error instanceof Error ? error.message : "Unexpected support error.";
 
+function supportContactLabel(contact: any) {
+    const fullName = [contact?.first_name, contact?.last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+    if (fullName) return fullName;
+    if (contact?.username) return `@${contact.username}`;
+    return "Parent";
+}
+
 export async function GET(request: NextRequest) {
     const actor = await getOptionalAuditActor(request);
     if (!actor || actor.role !== "superuser") {
@@ -191,7 +201,7 @@ export async function POST(request: NextRequest) {
                 actorSource: "support_api",
                 targetTable: "support_conversations",
                 targetRecordId: { id: conversationId },
-                targetLabel: conversation.contact?.username || conversation.contact?.first_name || conversationId,
+                targetLabel: supportContactLabel(conversation.contact),
                 metadata: { message_id: message.id, delivery_status: "sent" },
             });
             return NextResponse.json({ message });
@@ -205,7 +215,7 @@ export async function POST(request: NextRequest) {
             }
             const { data: current, error: currentError } = await auditedAdmin
                 .from("support_conversations")
-                .select("status")
+                .select("status, contact:support_contacts(first_name,last_name,username)")
                 .eq("id", conversationId)
                 .single();
             if (currentError) throw currentError;
@@ -234,11 +244,11 @@ export async function POST(request: NextRequest) {
                 eventType: "support.status.changed",
                 action: "change_status",
                 outcome: "success",
-                summary: `${user.user_metadata?.name || user.email || "Superuser"} changed a conversation from ${current.status} to ${status}`,
+                summary: `${user.user_metadata?.name || user.email || "Superuser"} changed ${supportContactLabel(current.contact)}'s conversation from ${current.status.replaceAll('_', ' ')} to ${status.replaceAll('_', ' ')}`,
                 actorSource: "support_api",
                 targetTable: "support_conversations",
                 targetRecordId: { id: conversationId },
-                targetLabel: conversationId,
+                targetLabel: supportContactLabel(current.contact),
                 changedFields: ["status"],
                 oldValues: { status: current.status },
                 newValues: { status },
@@ -290,11 +300,11 @@ export async function POST(request: NextRequest) {
                 eventType: "support.knowledge.deleted",
                 action: "delete",
                 outcome: "success",
-                summary: `${user.user_metadata?.name || user.email || "Superuser"} deleted knowledge “${existing?.title || body.id}”`,
+                summary: `${user.user_metadata?.name || user.email || "Superuser"} deleted knowledge “${existing?.title || "Unknown knowledge item"}”`,
                 actorSource: "support_api",
                 targetTable: "support_knowledge",
                 targetRecordId: { id: body.id },
-                targetLabel: existing?.title || String(body.id),
+                targetLabel: existing?.title || "Unknown knowledge item",
             });
             return NextResponse.json({ success: true });
         }
@@ -354,11 +364,11 @@ export async function POST(request: NextRequest) {
                 eventType: "support.announcement.deleted",
                 action: "delete",
                 outcome: "success",
-                summary: `${user.user_metadata?.name || user.email || "Superuser"} deleted announcement “${existing?.title || body.id}”`,
+                summary: `${user.user_metadata?.name || user.email || "Superuser"} deleted announcement “${existing?.title || "Unknown announcement"}”`,
                 actorSource: "support_api",
                 targetTable: "support_announcements",
                 targetRecordId: { id: body.id },
-                targetLabel: existing?.title || String(body.id),
+                targetLabel: existing?.title || "Unknown announcement",
             });
             return NextResponse.json({ success: true });
         }

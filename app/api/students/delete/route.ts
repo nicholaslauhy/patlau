@@ -75,10 +75,10 @@ export async function POST(request: NextRequest) {
                 eventType: 'student.delete',
                 action: 'delete_student',
                 outcome: 'failure',
-                summary: `Failed to delete student ${student?.student_name || student_id}.`,
+                summary: `Failed to delete student ${student?.student_name || 'Unknown student'}.`,
                 targetTable: 'students',
                 targetRecordId: { student_id },
-                targetLabel: student?.student_name || student_id,
+                targetLabel: student?.student_name || 'Unknown student',
                 metadata: { reason: 'database_delete_failed' },
             });
             return NextResponse.json({ error: 'Failed to delete student' }, { status: 500 });
@@ -91,10 +91,10 @@ export async function POST(request: NextRequest) {
             eventType: 'student.delete',
             action: 'delete_student',
             outcome: 'success',
-            summary: `Deleted student ${student?.student_name || student_id}.`,
+            summary: `Deleted student ${student?.student_name || 'Unknown student'}.`,
             targetTable: 'students',
             targetRecordId: { student_id },
-            targetLabel: student?.student_name || student_id,
+            targetLabel: student?.student_name || 'Unknown student',
         });
 
         return NextResponse.json({ message: 'Student deleted' });

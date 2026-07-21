@@ -40,7 +40,7 @@ const getHandle = (from: any) => {
     if (from?.username) return `@${from.username}`;
 
     const fullName = [from?.first_name, from?.last_name].filter(Boolean).join(' ').trim();
-    return fullName || `user_${from?.id}`;
+    return fullName || 'Unknown coach';
 };
 
 const makeCallbackData = (pollId: string, slotKey: string, response: VoteResponse) => {
