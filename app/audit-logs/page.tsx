@@ -42,6 +42,10 @@ const EMPTY_RESPONSE: AuditLogResponse = {
     page: 1,
     pageSize: PAGE_SIZE,
     metrics: { today: 0, attention: 0, matching: 0 },
+    retentionDays: 7,
+    pruningEnabled: false,
+    sentryLogsUrl: null,
+    exportHealth: null,
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -156,6 +160,35 @@ function DetailItem({ label, value, mono = false }: { label: string; value: unkn
     );
 }
 
+function ExportNotice({
+    notice,
+    onDismiss,
+}: {
+    notice: { type: 'success' | 'error'; message: string };
+    onDismiss: () => void;
+}) {
+    const [exiting, setExiting] = useState(false);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => setExiting(true), 10_000);
+        return () => window.clearTimeout(timer);
+    }, []);
+
+    return (
+        <div
+            className={`audit-export-notice audit-export-notice--${notice.type}${exiting ? ' is-exiting' : ''}`}
+            role={notice.type === 'error' ? 'alert' : 'status'}
+            aria-live="polite"
+            onAnimationEnd={() => {
+                if (exiting) onDismiss();
+            }}
+        >
+            <span>{notice.message}</span>
+            <button type="button" onClick={() => setExiting(true)} aria-label="Dismiss export message">×</button>
+        </div>
+    );
+}
+
 export default function AuditLogsPage() {
     const router = useRouter();
     const [authorized, setAuthorized] = useState(false);
@@ -172,6 +205,8 @@ export default function AuditLogsPage() {
     const [filterError, setFilterError] = useState('');
     const [copied, setCopied] = useState(false);
     const [copyError, setCopyError] = useState('');
+    const [exporting, setExporting] = useState(false);
+    const [exportNotice, setExportNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
     const detailRef = useRef<HTMLElement>(null);
     const detailCloseRef = useRef<HTMLButtonElement>(null);
     const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -360,9 +395,49 @@ export default function AuditLogsPage() {
         }
     };
 
+    const exportNow = async () => {
+        if (exporting) return;
+
+        setExporting(true);
+        setExportNotice(null);
+        try {
+            const result = await authenticatedFetch('/api/audit/export', { method: 'POST' });
+            const payload = await result.json().catch(() => ({}));
+            if (!result.ok || payload.success === false) {
+                throw new Error(payload.error || 'Could not export audit logs to Sentry.');
+            }
+
+            const exported = Number(payload.result?.exported) || 0;
+            const pruned = Number(payload.result?.pruned) || 0;
+            const requeued = Number(payload.result?.requeued) || 0;
+            const summary = exported > 0
+                ? `${exported.toLocaleString()} ${exported === 1 ? 'event was' : 'events were'} sent to Sentry.`
+                : 'All queued events are already up to date.';
+            const retrySummary = requeued > 0
+                ? ` ${requeued.toLocaleString()} previously failed ${requeued === 1 ? 'event was' : 'events were'} retried.`
+                : '';
+            const pruningSummary = pruned > 0
+                ? ` ${pruned.toLocaleString()} safely exported ${pruned === 1 ? 'record was' : 'records were'} removed from the local buffer.`
+                : '';
+            setExportNotice({ type: 'success', message: `${summary}${retrySummary}${pruningSummary}` });
+            await loadLogs();
+        } catch (requestError) {
+            setExportNotice({
+                type: 'error',
+                message: requestError instanceof Error ? requestError.message : 'Could not export audit logs to Sentry.',
+            });
+        } finally {
+            setExporting(false);
+        }
+    };
+
     if (!authorized) {
         return <div className="container"><p className="audit-access-check">Checking access…</p></div>;
     }
+
+    const retentionDays = response.retentionDays || 7;
+    const pruningEnabled = response.pruningEnabled === true;
+    const exportHealth = response.exportHealth;
 
     return (
         <div className="container audit-page">
@@ -371,20 +446,69 @@ export default function AuditLogsPage() {
             <main className="audit-main">
                 <section className="audit-hero">
                     <div>
-                        <span className="audit-eyebrow">System activity</span>
+                        <span className="audit-eyebrow">Recent Supabase activity</span>
                         <h1>Understand every important action</h1>
-                        <p>Trace attendance, payments, account access and operational changes without exposing passwords or reset codes.</p>
+                        <p>Supabase targets a {retentionDays}-day local buffer after successful delivery, with an additional safety grace. Unsent or failed events remain here until resolved.</p>
                     </div>
                     <div className="audit-metrics" aria-label="Audit activity summary">
                         <div><strong>{response.metrics.today.toLocaleString()}</strong><span>Today</span></div>
-                        <div className={response.metrics.attention > 0 ? 'needs-attention' : ''}><strong>{response.metrics.attention.toLocaleString()}</strong><span>Needs attention (30d)</span></div>
+                        <div className={response.metrics.attention > 0 ? 'needs-attention' : ''}><strong>{response.metrics.attention.toLocaleString()}</strong><span>Needs attention ({retentionDays}d)</span></div>
                         <div><strong>{response.metrics.matching.toLocaleString()}</strong><span>Matching</span></div>
                     </div>
                 </section>
 
+                <section className="audit-export-card" aria-labelledby="audit-export-title">
+                    <div className="audit-export-heading">
+                        <div>
+                            <span className="audit-eyebrow">Sentry offload</span>
+                            <h2 id="audit-export-title">Audit export health</h2>
+                            <p>{pruningEnabled
+                                ? 'Successfully handed-off events become eligible for cleanup only after both safety windows.'
+                                : 'Cleanup is paused. Verify an exported event in Sentry, then enable pruning in Vercel.'}</p>
+                        </div>
+                        <div className="audit-export-actions">
+                            {response.sentryLogsUrl && (
+                                <a href={response.sentryLogsUrl} target="_blank" rel="noreferrer" className="audit-sentry-link">
+                                    Open Sentry Logs <span aria-hidden="true">↗</span>
+                                </a>
+                            )}
+                            <button type="button" className="audit-export-button" onClick={() => void exportNow()} disabled={exporting}>
+                                {exporting ? 'Exporting…' : 'Export now'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {exportHealth ? (
+                        <>
+                            <dl className="audit-export-stats">
+                                <div><dt>Pending</dt><dd>{exportHealth.pending.toLocaleString()}</dd><dd className="audit-export-stat-note">Waiting to send</dd></div>
+                                <div className={exportHealth.retry > 0 ? 'has-warning' : ''}><dt>Retry</dt><dd>{exportHealth.retry.toLocaleString()}</dd><dd className="audit-export-stat-note">Scheduled again</dd></div>
+                                <div><dt>In flight</dt><dd>{exportHealth.inFlight.toLocaleString()}</dd><dd className="audit-export-stat-note">Being delivered</dd></div>
+                                <div className={exportHealth.dead > 0 ? 'has-error' : ''}><dt>Failed</dt><dd>{exportHealth.dead.toLocaleString()}</dd><dd className="audit-export-stat-note">Needs attention</dd></div>
+                            </dl>
+                            <div className="audit-export-timeline">
+                                <p><span>Last successful export</span><strong>{exportHealth.lastExportedAt ? formatDateTime(exportHealth.lastExportedAt) : 'Not yet exported'}</strong></p>
+                                <p><span>Oldest waiting event</span><strong>{exportHealth.oldestPendingAt ? formatDateTime(exportHealth.oldestPendingAt) : 'Nothing waiting'}</strong></p>
+                                <p><span>Delivered in local buffer</span><strong>{exportHealth.exportedBuffered.toLocaleString()}</strong></p>
+                                <p><span>Automatic cleanup</span><strong>{pruningEnabled ? 'Enabled after safety windows' : 'Paused until verified'}</strong></p>
+                            </div>
+                        </>
+                    ) : (
+                        <p className="audit-export-unavailable">Export monitoring will appear after the audit offload database migration is installed.</p>
+                    )}
+
+                    {exportNotice && (
+                        <ExportNotice
+                            key={`${exportNotice.type}-${exportNotice.message}`}
+                            notice={exportNotice}
+                            onDismiss={() => setExportNotice(null)}
+                        />
+                    )}
+                </section>
+
                 <form className="audit-filter-card" onSubmit={applyFilters}>
                     <div className="audit-filter-heading">
-                        <div><h2>Find an activity</h2><p>Search names, students, summaries and recorded identifiers.</p></div>
+                        <div><h2>Find recent activity</h2><p>Search names, students, summaries and recorded identifiers from the {retentionDays}-day buffer.</p></div>
                         {Object.values(appliedFilters).some(Boolean) && <span>Filters applied</span>}
                     </div>
 
@@ -477,7 +601,7 @@ export default function AuditLogsPage() {
                 <section className="audit-workspace" aria-busy={loading}>
                     <div className="audit-feed-card">
                         <div className="audit-results-heading">
-                            <div><h2>Activity</h2><p>{response.total.toLocaleString()} matching {response.total === 1 ? 'event' : 'events'}</p></div>
+                            <div><h2>Recent activity</h2><p>{response.total.toLocaleString()} matching {response.total === 1 ? 'event' : 'events'}</p></div>
                             {loading && <span className="audit-loading-dot">Refreshing</span>}
                         </div>
                         <p className="audit-results-status" role="status" aria-live="polite" aria-atomic="true">

@@ -27,6 +27,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Sentry CLI credentials (source-map upload token)
+.sentryclirc
+
 # typescript
 *.tsbuildinfo
 
@@ -41,3 +44,6 @@ yarn-error.log*
 *.un~
 *.bak
 *.tmp
+
+# Sentry Config File
+.env.sentry-build-plugin

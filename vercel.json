@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/makeup-payment-summary",
       "schedule": "10 0 1 * *"
+    },
+    {
+      "path": "/api/cron/audit-log-drain",
+      "schedule": "30 18 * * *"
     }
   ]
 }

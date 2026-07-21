@@ -1,0 +1,83 @@
+const SENSITIVE_KEY = /(^|_)(password|passcode|secret|token|code|api_key|authorization|cookie|session)(_|$)/i;
+const MAX_ATTRIBUTE_STRING_LENGTH = 16_000;
+
+function normalizeKey(key: string) {
+    return key
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .replace(/[^a-z0-9]+/gi, '_')
+        .toLowerCase();
+}
+
+/** Redacts credential-like text even when it was placed in a free-form field. */
+export function scrubSentryText(value: string) {
+    return value
+        .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [FILTERED]')
+        .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[FILTERED_JWT]')
+        // Stop at JSON/string delimiters so re-scrubbing an already serialized
+        // attribute cannot consume its closing quote or braces.
+        .replace(/([?&](?:code|token|key|secret|password)=)[^&#\s"'\\},\]]+/gi, '$1[FILTERED]')
+        .replace(
+            /((?:password|passcode|secret|token|code|api[_ -]?key|authorization|cookie|session)(?:[_ -]?(?:hash|value|header))?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi,
+            '$1[FILTERED]',
+        )
+        .replace(/\b\d{6}\b/g, '[FILTERED_CODE]')
+        .slice(0, MAX_ATTRIBUTE_STRING_LENGTH);
+}
+
+export function scrubSentryValue(value: unknown, depth = 0): unknown {
+    if (depth > 5) return '[TRUNCATED]';
+    if (typeof value === 'string') return scrubSentryText(value);
+    if (Array.isArray(value)) return value.slice(0, 100).map((item) => scrubSentryValue(item, depth + 1));
+    if (!value || typeof value !== 'object') return value;
+
+    return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+            key,
+            SENSITIVE_KEY.test(normalizeKey(key))
+                ? '[FILTERED]'
+                : scrubSentryValue(child, depth + 1),
+        ]),
+    );
+}
+
+function scrubSentryAttributes(attributes: Record<string, unknown>) {
+    return Object.fromEntries(
+        Object.entries(attributes).map(([key, value]) => {
+            if (SENSITIVE_KEY.test(normalizeKey(key))) return [key, '[FILTERED]'];
+
+            // Audit change payloads are stored as JSON strings so they remain
+            // searchable Sentry attributes. Parse and reserialize them instead
+            // of applying free-text regexes that could consume JSON delimiters.
+            if (key.endsWith('_json') && typeof value === 'string') {
+                try {
+                    return [key, JSON.stringify(scrubSentryValue(JSON.parse(value), 1))];
+                } catch {
+                    return [key, scrubSentryText(value)];
+                }
+            }
+
+            return [key, scrubSentryValue(value, 1)];
+        }),
+    ) as Record<string, unknown>;
+}
+
+/**
+ * Final privacy guard before a structured log leaves the application. Audit
+ * rows are already redacted in PostgreSQL; this protects future attributes too.
+ */
+export function scrubSentryLog<T extends {
+    attributes?: Record<string, unknown>;
+    message?: unknown;
+    body?: unknown;
+}>(log: T): T {
+    const scrubbed = {
+        ...log,
+        attributes: log.attributes
+            ? scrubSentryAttributes(log.attributes)
+            : undefined,
+    } as T;
+
+    if (typeof log.message === 'string') scrubbed.message = scrubSentryText(log.message);
+    if (typeof log.body === 'string') scrubbed.body = scrubSentryText(log.body);
+    return scrubbed;
+}

@@ -6,6 +6,7 @@ const PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 const MAX_PAGE = 2_000;
 const LOGOUT_DEDUPE_MS = 120_000;
+const DEFAULT_RETENTION_DAYS = 7;
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -21,6 +22,49 @@ function positiveInteger(value: string | null, fallback: number, maximum?: numbe
     const parsed = Number.parseInt(value || '', 10);
     if (!Number.isFinite(parsed) || parsed < 1) return fallback;
     return maximum ? Math.min(parsed, maximum) : parsed;
+}
+
+function auditRetentionDays() {
+    const parsed = Number.parseInt(process.env.AUDIT_LOCAL_RETENTION_DAYS || '', 10);
+    if (!Number.isFinite(parsed)) return DEFAULT_RETENTION_DAYS;
+    return Math.min(365, Math.max(1, parsed));
+}
+
+function auditPruningEnabled() {
+    return process.env.AUDIT_PRUNING_ENABLED?.trim().toLowerCase() === 'true';
+}
+
+function sentryLogsUrl() {
+    const configured = process.env.SENTRY_AUDIT_SEARCH_URL?.trim();
+    if (!configured) return null;
+
+    try {
+        const url = new URL(configured);
+        return url.protocol === 'https:' ? url.toString() : null;
+    } catch {
+        return null;
+    }
+}
+
+function asNonNegativeNumber(value: unknown) {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function normalizeExportHealth(data: unknown) {
+    const candidate = Array.isArray(data) ? data[0] : data;
+    if (!candidate || typeof candidate !== 'object') return null;
+
+    const row = candidate as Record<string, unknown>;
+    return {
+        pending: asNonNegativeNumber(row.pending_count),
+        retry: asNonNegativeNumber(row.retry_count),
+        inFlight: asNonNegativeNumber(row.in_flight_count),
+        dead: asNonNegativeNumber(row.dead_count),
+        exportedBuffered: asNonNegativeNumber(row.exported_buffer_count),
+        oldestPendingAt: typeof row.oldest_pending_at === 'string' ? row.oldest_pending_at : null,
+        lastExportedAt: typeof row.last_exported_at === 'string' ? row.last_exported_at : null,
+    };
 }
 
 function singaporeBoundary(value: string, endOfDay = false) {
@@ -46,6 +90,7 @@ export async function GET(request: NextRequest) {
     const targetTable = (parameters.get('table') || '').trim().slice(0, 80);
     const from = singaporeBoundary(parameters.get('from') || '');
     const to = singaporeBoundary(parameters.get('to') || '', true);
+    const retentionDays = auditRetentionDays();
 
     let query = serverAdmin
         .from('audit_logs')
@@ -69,7 +114,7 @@ export async function GET(request: NextRequest) {
         day: '2-digit',
     }).format(new Date());
 
-    const [logsResult, todayResult, attentionResult] = await Promise.all([
+    const [logsResult, todayResult, attentionResult, exportStatusResult] = await Promise.all([
         query,
         serverAdmin
             .from('audit_logs')
@@ -79,7 +124,10 @@ export async function GET(request: NextRequest) {
             .from('audit_logs')
             .select('id', { count: 'exact', head: true })
             .in('outcome', ['failure', 'denied', 'warning'])
-            .gte('occurred_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()),
+            .gte('occurred_at', new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString()),
+        // This RPC arrives with the Sentry offload migration. Keep the viewer
+        // functional while the website and database are deployed separately.
+        serverAdmin.rpc('get_audit_export_status'),
     ]);
 
     if (logsResult.error) {
@@ -97,6 +145,10 @@ export async function GET(request: NextRequest) {
             attention: attentionResult.count || 0,
             matching: logsResult.count || 0,
         },
+        retentionDays,
+        pruningEnabled: auditPruningEnabled(),
+        sentryLogsUrl: sentryLogsUrl(),
+        exportHealth: exportStatusResult.error ? null : normalizeExportHealth(exportStatusResult.data),
     });
 }
 

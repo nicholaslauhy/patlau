@@ -19,7 +19,7 @@ PatLau is a role-based training operations system for managing badminton student
 - Responsive data tables with contained horizontal scrolling
 - Telegram payment notifications and scheduled payment summaries
 - Telegram parent-support inbox, knowledge base, announcements, and escalation workflow
-- Comprehensive Supabase audit trail with actor attribution, safe before/after values, and a superuser activity viewer
+- Comprehensive audit trail with a durable Supabase delivery buffer, searchable Sentry Logs, actor attribution, safe before/after values, and a superuser activity viewer
 
 ## Technology
 
@@ -112,11 +112,15 @@ The coach webhook validates Telegram's `X-Telegram-Bot-Api-Secret-Token` header.
 
 Attendance actions from `student_audit`, makeup payment events, and support status/message events are translated into readable semantic entries. Logging starts when the migration is installed; it does not reconstruct actions that happened earlier. Authentication endpoints enforce account and address-based request windows. Every allowed attempt is logged, while repeated notices for requests that are already blocked are grouped briefly to prevent log-flooding.
 
-The audit viewer is available to superusers at `/audit-logs`. It supports search, category, outcome, action, and date filters with expandable change and request details. Ordinary authenticated users and anonymous clients cannot query or mutate the underlying table; the viewer reads it through a separately authorised server API.
+Supabase acts as the durable delivery buffer rather than the long-term search interface. Every audit insert creates a private export-state row in the same database transaction. A protected daily route leases bounded batches, sends size-limited structured-log envelopes to Sentry, retries failures, and marks a row delivered only after Sentry's ingestion endpoint returns HTTP 2xx. With the default seven-day setting, the additional safety conditions make the effective minimum local age nine days. Pending, retrying, in-flight, and dead-letter rows are never pruned.
 
-Passwords, reset codes, tokens, cookies, authorisation values, photo contents, and full parent-chat messages are never copied into the audit payload. Database-side redaction provides an additional safeguard for sensitive field names.
+The audit viewer is available to superusers at `/audit-logs`. It supports search, category, outcome, action, and date filters with expandable change and request details for the recent Supabase buffer. It also shows export health, supports a manual **Export now** action, retries terminal failures only when a superuser deliberately exports, and can link to the longer searchable history in Sentry. Ordinary authenticated users and anonymous clients cannot query or mutate the underlying table or private queue; the viewer reads both through separately authorised server APIs.
 
-The service role can only insert and read audit entries, not update, delete, or truncate them. When a future migration adds another mutable public table, rerun `public.refresh_audit_triggers()` as the database owner during that migration, then revoke runtime execution again.
+Passwords, reset codes, tokens, cookies, authorisation values, photo contents, and full parent-chat messages are never copied into the audit payload. Free-form text and nested values receive another redaction pass before Sentry delivery. Actor email, request IP address, and a bounded user-agent string are retained because they are needed to investigate account and request activity; restrict the Sentry project to authorised operators and apply the organisation's retention/privacy policy.
+
+The service role can only insert and read audit entries directly, not update, delete, or truncate them. Cleanup is possible only through a constrained security-definer function that deletes successfully exported rows after the safety windows. When a future migration adds another mutable public table, rerun `public.refresh_audit_triggers()` as the database owner during that migration, then revoke runtime execution again.
+
+Sentry is an operational search and alerting service, not a permanent legal archive. Its searchable retention depends on the selected Sentry plan. If multi-year immutable history becomes necessary, add encrypted object storage as the durable archive and retain Sentry for investigation and alerts.
 
 ## Important API route groups
 
@@ -140,6 +144,7 @@ The service role can only insert and read audit entries, not update, delete, or 
 - `/api/payment-search`
 - `/api/audit/log-attendance`
 - `/api/audit/events`
+- `/api/audit/export`
 - `/api/students/delete`
 
 ### Telegram delivery
@@ -157,6 +162,7 @@ The service role can only insert and read audit entries, not update, delete, or 
 
 - `/api/cron/monthly-payment-summaries`
 - `/api/cron/makeup-payment-summary`
+- `/api/cron/audit-log-drain`
 
 Scheduled routes fail closed unless `CRON_SECRET` is configured and supplied as a bearer token.
 
@@ -208,7 +214,42 @@ TELEGRAM_PARENT_SUPPORT_WEBHOOK_SECRET=
 
 # Scheduled route protection
 CRON_SECRET=
+
+# Sentry audit offload and error reporting
+# Use the DSN from Sentry Project Settings > Client Keys (DSN).
+SENTRY_DSN=
+NEXT_PUBLIC_SENTRY_DSN=
+SENTRY_ENVIRONMENT=production
+NEXT_PUBLIC_SENTRY_ENVIRONMENT=production
+SENTRY_ORG=
+SENTRY_PROJECT=
+# Optional: required only for readable production source-map uploads.
+SENTRY_AUTH_TOKEN=
+# Optional: paste the HTTPS URL of a saved Sentry Logs view.
+SENTRY_AUDIT_SEARCH_URL=
+# Optional tuning; defaults shown.
+AUDIT_LOCAL_RETENTION_DAYS=7
+AUDIT_EXPORT_BATCH_SIZE=200
+AUDIT_EXPORT_MAX_BATCHES=20
+# Leave false until an exported event has been confirmed in Sentry.
+AUDIT_PRUNING_ENABLED=false
 ```
+
+Keep `SENTRY_AUTH_TOKEN`, `SENTRY_DSN`, and server Supabase credentials in Vercel environment variables. Never prefix the auth token with `NEXT_PUBLIC_` or commit it. The browser DSN is intentionally public, but it does not grant access to read Sentry data.
+
+### Sentry setup
+
+1. Create a **Next.js** project in Sentry, or open the one already created.
+2. In **Project Settings → Client Keys (DSN)**, copy the DSN into both `SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_DSN` in Vercel.
+3. Copy the organisation slug and project slug into `SENTRY_ORG` and `SENTRY_PROJECT`.
+4. If production source maps are wanted, create a Sentry organisation auth token with release/source-map permissions and save it as the server-only `SENTRY_AUTH_TOKEN`. Audit export itself does not require this token.
+5. In Sentry security/privacy settings, keep server-side data scrubbing enabled and add sensitive keys such as `password`, `token`, `secret`, `code`, `cookie`, `authorization`, `session`, and `api_key`.
+6. Apply both Sentry audit migrations, leave `AUDIT_PRUNING_ENABLED=false`, redeploy the application, then use **Audit Logs → Export now**.
+7. In Sentry **Explore → Logs**, verify a row by searching for `source:supabase_audit` or its `audit_stable_id`. Save that Logs view and place its HTTPS URL in `SENTRY_AUDIT_SEARCH_URL` if the website should link directly to it.
+8. Create a Sentry alert for errors tagged `subsystem:audit-export`, and keep Vercel function-failure notifications enabled. This makes a broken exporter visible before the local queue grows substantially.
+9. Only after verifying delivery and alerts, set `AUDIT_PRUNING_ENABLED=true` in Vercel and redeploy. Until this switch is enabled, exports can be tested but no local audit row can be cleaned up.
+
+The export route fails closed when the DSN is absent. In that state it does not acknowledge or prune any audit row, so configuring the website and Supabase in separate deployments does not lose history.
 
 ## Database setup
 
@@ -220,6 +261,8 @@ The application expects its Supabase tables, RPC functions, and RLS policies to 
 - `migrations/20260719110000_create_parent_support_chat.sql`
 - `migrations/20260720133000_harden_database_security.sql`
 - `migrations/20260720170000_create_comprehensive_audit_logs.sql`
+- `migrations/20260720200000_create_sentry_audit_outbox.sql`
+- `migrations/20260720210000_harden_sentry_audit_export.sql`
 - `sql/setup_payment_history_rls.sql`
 
 The running application also references programme, makeup, coach-attendance, reset-code, profile, and payment-state tables. Keep the deployed Supabase schema and RPC definitions in sync with the codebase, and enforce permissions with RLS rather than relying only on hidden interface controls.
@@ -244,8 +287,9 @@ npm run build
 
 ## Deployment checklist
 
-- Configure all required Supabase, Brevo, Telegram, and cron variables.
+- Configure all required Supabase, Brevo, Telegram, Sentry, and cron variables.
 - Apply the required database tables, RPC functions, and RLS policies.
+- Confirm the audit export queue has no dead-letter rows, use **Export now**, and find the same stable event ID in Sentry before relying on automatic pruning.
 - Configure the coach-attendance Telegram webhook.
 - Test login and recovery for each role.
 - Test attendance, makeup, payment, undo, and reset workflows for every enabled programme.

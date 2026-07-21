@@ -29,6 +29,16 @@ export interface AuditLogEntry {
     user_agent: string | null;
 }
 
+export interface AuditExportHealth {
+    pending: number;
+    retry: number;
+    inFlight: number;
+    dead: number;
+    exportedBuffered: number;
+    oldestPendingAt: string | null;
+    lastExportedAt: string | null;
+}
+
 export interface AuditLogResponse {
     logs: AuditLogEntry[];
     total: number;
@@ -39,4 +49,12 @@ export interface AuditLogResponse {
         attention: number;
         matching: number;
     };
+    /** Number of recent days kept in Supabase for this viewer. */
+    retentionDays?: number;
+    /** False during rollout so a verified Sentry export is required before cleanup. */
+    pruningEnabled?: boolean;
+    /** Present only when the Sentry Logs destination has been configured. */
+    sentryLogsUrl?: string | null;
+    /** Absent until the audit export migration is installed. */
+    exportHealth?: AuditExportHealth | null;
 }
