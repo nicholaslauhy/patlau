@@ -84,6 +84,8 @@ Weekend attendance is stored against the `students` records. Programme-specific 
 
 Each programme menu links to a responsive attendance report backed by the same Supabase tables used by the iOS app. Report and operational tables include a scoped refresh control that refetches only the relevant data, preserving the current route, filters, and selected date instead of reloading the entire page.
 
+Weekend attendance can be marked either for the current scheduled lesson or for another selected lesson date. Alternate dates must match the student's Saturday or Sunday schedule, cannot be in the future, and cannot duplicate an existing attendance-history date. Website and iOS attended, missed, and undo actions use the same authenticated endpoint so concurrent phone and web updates are checked before the student counter and history are changed.
+
 The cross-programme makeup dialog uses Supabase RPC functions to find the latest available credit and complete its usage. It records:
 
 - the source programme and missed lesson;
@@ -119,6 +121,10 @@ The coach webhook validates Telegram's `X-Telegram-Bot-Api-Secret-Token` header.
 Telegram messages begin directly with their useful content instead of a sender header. AI replies end with **This is an automated AI-generated message based on the information provided.**, Coach Patrick replies end with **Sent personally by Coach Patrick.**, and automated state changes use only their clear status text. The `/start` response tells parents to type their question and does not show a decision button. Resolution controls are delayed until the third actual AI answer instead of appearing after every response. During an escalation or Coach Patrick takeover, the AI remains paused, including when the parent sends `/start`, `/help`, or a non-text message.
 
 The Chats interface keeps parent, AI, Coach Patrick, and system messages visually and textually distinct. Superusers can take over, return an eligible conversation to the AI, or close it. Closed conversations display a clear locked state and can be reopened with the AI; conversations closed by the parent remain read-only for staff. Telegram receives the same close notification with a **Reopen conversation** button, while sending a new parent message still reopens automatically for compatibility. The full history is retained across these status changes.
+
+Website superusers can manage additional Telegram notification administrators from Settings. A prospective administrator sends `/myid` to the parent-support bot, the superuser adds the returned private numeric user ID, and the administrator then sends `/start` before using **Send test**. The older `/id` command remains supported as a backwards-compatible alias. Every active database administrator receives escalation and managed-chat follow-up alerts independently, so one blocked account does not stop delivery to the others. Group and channel IDs are rejected to keep parent messages private. Telegram alert access does not grant website access to `/chats`; that still requires a Superuser website account. `TELEGRAM_PARENT_SUPPORT_ADMIN_CHAT_ID` remains an always-active deployment fallback during rollout and is added alongside the database-managed administrators. Remove that Vercel environment variable before pausing or deleting the matching account from Settings.
+
+Escalation notifications include two distinct HTTPS links: `/open-in-app/chats?conversation=...` is the iOS Universal Link, while `/chats?conversation=...` always targets the website. If the app is not installed or Universal Links are not configured yet, the app link safely redirects to the same website conversation. The Apple association file is served directly from `/.well-known/apple-app-site-association` using `APPLE_APP_IDENTIFIER_PREFIX` and `APPLE_APP_BUNDLE_ID`; the iOS target must include `applinks:patlaubmt.vercel.app` and route the incoming conversation UUID to its Chats screen.
 
 ## Audit trail
 
@@ -229,7 +235,13 @@ TELEGRAM_COACH_ATTENDANCE_SUNDAY_THREAD_ID=
 TELEGRAM_COACH_ATTENDANCE_WEBHOOK_SECRET=
 TELEGRAM_PARENT_SUPPORT_BOT_TOKEN=
 TELEGRAM_PARENT_SUPPORT_WEBHOOK_SECRET=
+# Optional legacy/deployment fallback. Additional recipients are managed from
+# Settings and stored privately in telegram_support_admins.
 TELEGRAM_PARENT_SUPPORT_ADMIN_CHAT_ID=
+# iOS Universal Links. Verify the App ID prefix in Apple Developer; the current
+# Xcode signing team is QLA6QNFQT9 and the app bundle identifier is com.patlau.app.
+APPLE_APP_IDENTIFIER_PREFIX=QLA6QNFQT9
+APPLE_APP_BUNDLE_ID=com.patlau.app
 OPENAI_API_KEY=
 
 # Scheduled route protection
@@ -289,6 +301,7 @@ The application expects its Supabase tables, RPC functions, and RLS policies to 
 - `migrations/20260721210000_cut_over_sentry_sdk_export.sql`
 - `migrations/20260721220000_make_audit_logs_human_readable.sql`
 - `sql/setup_payment_history_rls.sql`
+- `sql/setup_telegram_support_admins.sql`
 
 The running application also references programme, makeup, coach-attendance, reset-code, profile, and payment-state tables. Keep the deployed Supabase schema and RPC definitions in sync with the codebase, and enforce permissions with RLS rather than relying only on hidden interface controls.
 

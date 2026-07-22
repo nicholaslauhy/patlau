@@ -8,6 +8,12 @@ node_modules/
 # production
 /build/
 
+# iOS app exports belong outside this website repository
+/ios-work/
+/PatLau-iOS-*.zip
+DerivedData/
+*.xcarchive
+
 # misc
 .DS_Store
 *.pem
