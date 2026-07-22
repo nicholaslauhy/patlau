@@ -30,7 +30,7 @@ export interface AuditEventInput {
 }
 
 const requestIds = new WeakMap<Request, string>();
-const sensitiveKey = /(^|_)(password|passcode|secret|token|code|api_key|authorization|cookie|session)(_|$)/i;
+const sensitiveKey = /(^|_)(password|passcode|secret|token|code|api_key|authorization|cookie|session|telegram_chat_id)(_|$)/i;
 const RATE_LIMIT_NOTICE_WINDOW_MS = 10 * 60_000;
 
 interface AuditRateLimitInput {
