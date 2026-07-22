@@ -7,6 +7,7 @@ import AppHeader from "./../components/AppHeader";
 import PasswordField from "./../components/PasswordField";
 import ProfilePhotoEditor from "./../components/ProfilePhotoEditor";
 import ProfileCameraCapture from "./../components/ProfileCameraCapture";
+import TelegramSupportAdminsManager from "./../components/TelegramSupportAdminsManager";
 import { authenticatedFetch } from "./../lib/authenticated-fetch";
 import "./../styles.css";
 import "./../dashboard/dashboard.css";
@@ -97,7 +98,11 @@ export default function SettingsPage() {
             if (user) {
                 setCurrentUserId(user.id);
                 setUserName(user.user_metadata?.name || user.email || "User");
-                setUserRole((user.user_metadata?.role as UserRole) || "member");
+                setUserRole(
+                    (user.app_metadata?.role as UserRole)
+                    || (user.user_metadata?.role as UserRole)
+                    || "member",
+                );
                 setAvatarUrl(user.user_metadata?.avatar_url || null);
             } else {
                 router.push("/");
@@ -645,6 +650,8 @@ export default function SettingsPage() {
                         {photoError && !pendingPhoto && <div className="error-message settings-account-message">{photoError}</div>}
                         {photoSuccess && <div className="success-message settings-account-message">{photoSuccess}</div>}
                     </section>
+
+                    {userRole === "superuser" && <TelegramSupportAdminsManager />}
 
                     {/* Add New User */}
                     {/* Admins and superusers can add new users. Admins can only create 'member' accounts. */}
