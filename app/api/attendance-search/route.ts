@@ -32,9 +32,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Reports only need these five fields. Keep the full projection restricted
-    // to the superuser attendance-management search so member/admin report
-    // access cannot bypass RLS and expose unrelated student or payment data.
+    // Reports and the native Weekend attendance screen only need these fields.
+    // Keep the full projection restricted to the superuser management search so
+    // member/admin access cannot expose unrelated student or payment data.
     const pageSize = 500;
     const results: Record<string, unknown>[] = [];
 
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       let query = isReportRequest
         ? serverAdmin
             .from('students')
-            .select('student_id,student_name,student_day,student_timeslot,attendance_records')
+            .select('student_id,student_name,student_day,student_timeslot,attended,missed,total_weeks,attendance_records,updated_at')
         : serverAdmin.from('students').select('*');
 
       // The native app uses "%" as its authenticated request for all Weekend
