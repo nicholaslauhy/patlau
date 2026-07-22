@@ -1,6 +1,12 @@
 import { createClient, type User } from "@supabase/supabase-js";
 import type { SupportStatus } from "../../types/support";
 import { getStoredUserRole } from "./server-auth";
+import {
+    fanOutTelegramSupportNotification,
+    normalizeTelegramSupportChatId,
+    resolveTelegramSupportAdminChatIds,
+} from "./telegram-support-admin-policy";
+import { formatSupportConversationLinks } from "./support-links";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -47,6 +53,7 @@ export async function sendSupportTelegramMessage(
     const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(10_000),
         body: JSON.stringify({
             chat_id: chatId,
             text,
@@ -88,20 +95,53 @@ export async function clearSupportTelegramKeyboard(chatId: string, messageId: st
     }
 }
 
-export async function notifySupportSuperuser(
+export async function getTelegramSupportAdminChatIds() {
+    const fallbackChatId = process.env.TELEGRAM_PARENT_SUPPORT_ADMIN_CHAT_ID;
+    const { data, error } = await supportAdmin
+        .from("telegram_support_admins")
+        .select("telegram_chat_id,active");
+
+    if (error) {
+        console.error("Could not load the Telegram support administrator list; using the deployment fallback.");
+        return resolveTelegramSupportAdminChatIds([], fallbackChatId);
+    }
+
+    return resolveTelegramSupportAdminChatIds(data || [], fallbackChatId);
+}
+
+export async function isTelegramSupportAdmin(chatId: string) {
+    const normalized = normalizeTelegramSupportChatId(chatId);
+    if (!normalized) return false;
+    const adminChatIds = await getTelegramSupportAdminChatIds();
+    return adminChatIds.includes(normalized);
+}
+
+export async function notifySupportAdmins(
     conversationId: string,
     parentName: string,
     message: string,
     reason: string,
 ) {
-    const chatId = process.env.TELEGRAM_PARENT_SUPPORT_ADMIN_CHAT_ID;
-    if (!chatId) return;
-    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || "").replace(/\/$/, "");
-    const link = siteUrl ? `\n\nOpen conversation: ${siteUrl}/chats?conversation=${conversationId}` : "";
-    await sendSupportTelegramMessage(
-        chatId,
-        `Parent chat needs attention\n\nParent: ${parentName}\nReason: ${reason}\n\nLatest message:\n${message.slice(0, 700)}${link}`,
+    const chatIds = await getTelegramSupportAdminChatIds();
+    if (chatIds.length === 0) {
+        throw new Error("No active Telegram support notification administrator is configured.");
+    }
+    const links = formatSupportConversationLinks(
+        conversationId,
+        process.env.NEXT_PUBLIC_SITE_URL,
     );
+    const notification = `Parent chat needs attention\n\nParent: ${parentName}\nReason: ${reason}\n\nLatest message:\n${message.slice(0, 700)}${links}`;
+    const result = await fanOutTelegramSupportNotification(
+        chatIds,
+        (chatId) => sendSupportTelegramMessage(chatId, notification),
+    );
+
+    if (result.failed > 0) {
+        console.error(`Telegram support notification delivery failed for ${result.failed} administrator(s).`);
+    }
+    if (result.attempted > 0 && result.delivered === 0) {
+        throw new Error("Telegram could not deliver the support notification to any administrator.");
+    }
 }
 
 export async function recordSupportStatus(
