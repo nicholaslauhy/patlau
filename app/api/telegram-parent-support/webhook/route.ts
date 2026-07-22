@@ -5,7 +5,8 @@ import {
     answerSupportCallback,
     clearSupportTelegramKeyboard,
     getSingaporeDateKey,
-    notifySupportSuperuser,
+    isTelegramSupportAdmin,
+    notifySupportAdmins,
     recordSupportStatus,
     sendSupportTelegramMessage,
     supportAdmin,
@@ -151,7 +152,7 @@ async function escalate(conversation: any, chatId: string, name: string, latestM
         "system",
     );
     try {
-        await notifySupportSuperuser(conversation.id, name, latestMessage, reason);
+        await notifySupportAdmins(conversation.id, name, latestMessage, reason);
     } catch (error) {
         console.error("Support escalation notification failed:", error);
     }
@@ -431,6 +432,15 @@ export async function POST(request: Request) {
     try {
         const update = await request.json();
         if (update.callback_query) {
+            const callbackChatId = String(update.callback_query.message?.chat?.id || "");
+            if (callbackChatId && await isTelegramSupportAdmin(callbackChatId)) {
+                await clearCallbackKeyboard(update.callback_query);
+                await answerSupportCallback(
+                    String(update.callback_query.id),
+                    "This account now receives PatLau support notifications.",
+                );
+                return NextResponse.json({ ok: true, admin: true });
+            }
             await handleCallback(update.callback_query);
             return NextResponse.json({ ok: true });
         }
@@ -447,16 +457,25 @@ export async function POST(request: Request) {
             return NextResponse.json({ ok: true, ignored: true });
         }
         const chatId = String(message.chat.id);
-        const adminChatId = process.env.TELEGRAM_PARENT_SUPPORT_ADMIN_CHAT_ID;
-        if (adminChatId && chatId === String(adminChatId)) {
-            if (String(message.text || "").startsWith("/start")) {
+        const text = String(message.text || "").trim();
+        const command = text.split(/\s+/, 1)[0]?.split("@", 1)[0]?.toLowerCase();
+
+        if (command === "/id" || command === "/myid") {
+            await sendSupportTelegramMessage(
+                chatId,
+                `Your Telegram chat ID is ${chatId}. Only share it with the PatLau superuser who manages support notifications.`,
+            );
+            return NextResponse.json({ ok: true, chatIdProvided: true });
+        }
+
+        if (await isTelegramSupportAdmin(chatId)) {
+            if (command === "/start") {
                 await sendSupportTelegramMessage(chatId, "PatLau support notifications are enabled for this Telegram account.");
             }
             return NextResponse.json({ ok: true, admin: true });
         }
 
         const { contact, conversation } = await getOrCreateConversation(message.chat, message.from);
-        const text = String(message.text || "").trim();
         if (!text) {
             if (["resolved", "closed_parent"].includes(conversation.status)) {
                 await sendAndStore(
@@ -471,7 +490,7 @@ export async function POST(request: Request) {
             }
             if (["escalated", "human_active"].includes(conversation.status)) {
                 try {
-                    await notifySupportSuperuser(
+                    await notifySupportAdmins(
                         conversation.id,
                         parentName(message.from),
                         "Parent sent a non-text Telegram message.",
@@ -551,7 +570,7 @@ export async function POST(request: Request) {
         const name = parentName(message.from);
         if (["escalated", "human_active"].includes(conversation.status)) {
             try {
-                await notifySupportSuperuser(conversation.id, name, text, conversation.status === "human_active" ? "New parent reply in a Coach Patrick-managed chat." : "New message in an escalated chat.");
+                await notifySupportAdmins(conversation.id, name, text, conversation.status === "human_active" ? "New parent reply in a Coach Patrick-managed chat." : "New message in an escalated chat.");
             } catch (error) {
                 console.error("Support follow-up notification failed:", error);
             }
