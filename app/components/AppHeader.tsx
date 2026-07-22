@@ -21,6 +21,10 @@ interface NavItem {
 }
 
 const SECTION_COLORS: Record<string, string> = {
+    '/app/weekend': '#1677c8',
+    '/app/weekday': '#1677c8',
+    '/app/matchplay': '#7950b3',
+    '/app/training': '#168765',
     '/weekday': '#1677c8',
     '/matchplay': '#7950b3',
     '/training': '#168765',
@@ -41,18 +45,21 @@ const supabase = createBrowserClient(
 const weekdayItems: NavItem[] = [
     { label: 'Add Weekday Student', href: '/weekday/add', allowedRoles: ['superuser'] },
     { label: 'Weekday Attendance', href: '/weekday/attendance', allowedRoles: ['superuser'] },
+    { label: 'Attendance Report', href: '/app/weekday/session-reports', allowedRoles: ['superuser'] },
     { label: 'Weekday Payment', href: '/weekday/payment', allowedRoles: ['superuser'] },
 ];
 
 const matchPlayItems: NavItem[] = [
     { label: 'Add MatchPlay Student', href: '/matchplay/add', allowedRoles: ['superuser'] },
     { label: 'MatchPlay Attendance', href: '/matchplay/attendance', allowedRoles: ['superuser'] },
+    { label: 'Attendance Report', href: '/app/matchplay/session-reports', allowedRoles: ['superuser'] },
     { label: 'MatchPlay Payment', href: '/matchplay/payment', allowedRoles: ['superuser'] },
 ];
 
 const oneToOneItems: NavItem[] = [
     { label: 'Add 1-1 Student', href: '/training/add', allowedRoles: ['superuser', 'admin'] },
     { label: '1-1 Training', href: '/training', allowedRoles: ['superuser', 'admin'] },
+    { label: 'Attendance Report', href: '/app/training/session-reports', allowedRoles: ['superuser', 'admin'] },
     { label: '1-1 Payment', href: '/trngpayment', allowedRoles: ['superuser'] },
 ];
 
@@ -65,6 +72,7 @@ const weekendItems: NavItem[] = [
     { label: 'Dashboard', href: '/dashboard', allowedRoles: ['superuser', 'admin', 'member'] },
     { label: 'Add Student', href: '/add', allowedRoles: ['superuser', 'admin'] },
     { label: 'Attendance', href: '/attendance', allowedRoles: ['superuser'] },
+    { label: 'Attendance Report', href: '/app/weekend/session-reports', allowedRoles: ['superuser', 'admin', 'member'] },
     { label: 'Payment', href: '/payment', allowedRoles: ['superuser'] },
     { label: 'Coach Attendance', href: '/coachattendance', allowedRoles: ['superuser', 'admin'] },
 ];
@@ -349,9 +357,19 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
                             <NavMenu label="1-1" items={oneToOneItems} userRole={userRole} />
                         )}
                         {userRole === 'member' ? (
-                            pathname !== '/dashboard' && (
-                                <Link href="/dashboard" className="app-header__nav-button">Dashboard</Link>
-                            )
+                            <>
+                                {pathname !== '/dashboard' && (
+                                    <Link href="/dashboard" className="app-header__nav-button">Dashboard</Link>
+                                )}
+                                {pathname !== '/app/weekend/session-reports' && (
+                                    <Link
+                                        href="/app/weekend/session-reports"
+                                        className="app-header__nav-button"
+                                    >
+                                        Attendance Report
+                                    </Link>
+                                )}
+                            </>
                         ) : (
                             <NavMenu label="Weekend" items={weekendItems} userRole={userRole} />
                         )}

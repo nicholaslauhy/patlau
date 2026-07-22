@@ -6,6 +6,8 @@ import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
 import AppHeader from './../components/AppHeader';
 import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../components/CrossProgrammeMakeupModal';
+import TableRefreshButton from './../components/TableRefreshButton';
+import { authenticatedFetch } from './../lib/authenticated-fetch';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 import { Student } from '../../types/supabase';
@@ -59,6 +61,7 @@ export default function AttendancePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<Student[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [makeupStudent, setMakeupStudent] = useState<Student | null>(null);
 
   const [selectedDay, setSelectedDay] = useState('all');
@@ -196,26 +199,61 @@ export default function AttendancePage() {
     return readableDate;
   };
 
-  const fetchData = async () => {
+  const fetchData = async (filters?: { day: string; timeslot: string; level: string }) => {
     setIsLoading(true);
-    setSearchResults([]);
 
     try {
+      const day = filters?.day ?? selectedDay;
+      const timeslot = filters?.timeslot ?? selectedTimeslot;
+      const level = filters?.level ?? selectedLevel;
       let query = supabase.from('students').select('*');
-      if (selectedDay !== 'all') query = query.eq('student_day', selectedDay);
-      if (selectedTimeslot !== 'all') query = query.eq('student_timeslot', selectedTimeslot);
-      if (selectedLevel !== 'all') query = query.eq('student_levelofplay', selectedLevel);
+      if (day !== 'all') query = query.eq('student_day', day);
+      if (timeslot !== 'all') query = query.eq('student_timeslot', timeslot);
+      if (level !== 'all') query = query.eq('student_levelofplay', level);
 
       const { data, error } = await query;
       if (error) throw error;
       if (data) { setSearchResults(data); setMessage(null); } else { setSearchResults([]); setMessage("No student records found."); }
     } catch (error: any) {
       console.error("Error fetching data:", error);
-      setSearchResults([]);
       setMessage("Failed to load student records. Please try again later.");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const searchStudents = async (term: string) => {
+    setIsLoading(true);
+    setMessage(null);
+
+    try {
+      const response = await authenticatedFetch('/api/attendance-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ searchTerm: term }),
+      });
+      if (!response.ok) throw new Error('Search failed');
+      const data = await response.json();
+      const results = (data.results || []).filter((student: Student) => (
+        (selectedDay === 'all' || student.student_day === selectedDay)
+        && (selectedTimeslot === 'all' || student.student_timeslot === selectedTimeslot)
+        && (selectedLevel === 'all' || student.student_levelofplay === selectedLevel)
+      ));
+      setSearchResults(results);
+      setMessage(results.length === 0 ? 'No student records found.' : null);
+    } catch (error) {
+      console.error('Search error:', error);
+      setSearchResults([]);
+      setMessage('Search failed.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const refreshAttendance = async () => {
+    const term = searchTerm.trim();
+    if (term) await searchStudents(term);
+    else await fetchData();
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -595,20 +633,18 @@ export default function AttendancePage() {
 
         <main>
           <div className="search-box">
-            <input type="text" placeholder="Search students..." onChange={async (e) => {
-              const searchTerm = e.target.value.trim();
-              if (searchTerm) {
-                try {
-                  const response = await fetch('/api/attendance-search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ searchTerm }) });
-                  if (!response.ok) throw new Error('Search failed');
-                  const data = await response.json();
-                  setSearchResults(data.results || []);
-                } catch (err) {
-                  console.error('Search error:', err);
-                  setSearchResults([]);
-                }
-              } else fetchData();
-            }} />
+            <input
+                type="text"
+                placeholder="Search students..."
+                value={searchTerm}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setSearchTerm(value);
+                  const term = value.trim();
+                  if (term) void searchStudents(term);
+                  else void fetchData();
+                }}
+            />
           </div>
 
           <div className="filter-box">
@@ -654,16 +690,29 @@ export default function AttendancePage() {
             </div>
 
             <div className="filter-buttons">
-              <button type="button" onClick={() => { setSelectedDay('all'); setSelectedTimeslot('all'); setSelectedLevel('all'); fetchData(); }} className="filter-button secondary">Clear Filters</button>
-              <button type="button" onClick={fetchData} className="filter-button">Apply Filters</button>
+              <button type="button" onClick={() => {
+                setSelectedDay('all');
+                setSelectedTimeslot('all');
+                setSelectedLevel('all');
+                setSearchTerm('');
+                void fetchData({ day: 'all', timeslot: 'all', level: 'all' });
+              }} className="filter-button secondary">Clear Filters</button>
+              <button type="button" onClick={() => void refreshAttendance()} className="filter-button">Apply Filters</button>
             </div>
           </div>
 
           <div className="search-results-display">
-            {isLoading && <p>Loading student records...</p>}
+            <div className="table-refresh-bar">
+              <TableRefreshButton
+                  onRefresh={refreshAttendance}
+                  refreshing={isLoading}
+                  label="Refresh weekend attendance table"
+              />
+            </div>
+            {isLoading && searchResults.length === 0 && <p>Loading student records...</p>}
             {!isLoading && message && <p className="dashboard-error-message">{message}</p>}
-            {!isLoading && Array.isArray(searchResults) && searchResults.length > 0 && (
-                <div className="table-container">
+            {Array.isArray(searchResults) && searchResults.length > 0 && (
+                <div className="table-container" aria-busy={isLoading}>
                   <div className="table-scroll">
                     <table>
                       <thead>

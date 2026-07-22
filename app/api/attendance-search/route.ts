@@ -1,15 +1,22 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+import { requireRole, serverAdmin } from '../../lib/server-auth'
 
 export async function POST(request: Request) {
   try {
+    const caller = await requireRole(request, ['member', 'admin', 'superuser']);
+    if (!caller) {
+      return NextResponse.json(
+        { message: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
-    const { searchTerm } = body;
+    const searchTerm = typeof body.searchTerm === 'string'
+      ? body.searchTerm.trim().slice(0, 120)
+      : '';
+    const isWildcardReport = searchTerm === '%' || searchTerm === '*';
+    const isReportRequest = body.report === true || isWildcardReport;
     
     if (!searchTerm) {
       return NextResponse.json(
@@ -18,27 +25,58 @@ export async function POST(request: Request) {
       );
     }
 
-    let query = supabase
-      .from('students')
-      .select()
-      .or([
-        `student_name.ilike.%${searchTerm}%`,
-        `student_day.ilike.%${searchTerm}%`, 
-        `student_timeslot.ilike.%${searchTerm}%`,
-        `student_levelofplay.ilike.%${searchTerm}%`
-      ].join(','));
-
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchTerm)) {
-      query = query.or(`student_id.eq.${searchTerm}`);
+    if (!isReportRequest && caller.role !== 'superuser') {
+      return NextResponse.json(
+        { message: 'Forbidden' },
+        { status: 403 }
+      );
     }
 
-    const { data, error } = await query
-      .order('student_name', { ascending: true });
+    // Reports only need these five fields. Keep the full projection restricted
+    // to the superuser attendance-management search so member/admin report
+    // access cannot bypass RLS and expose unrelated student or payment data.
+    const pageSize = 500;
+    const results: Record<string, unknown>[] = [];
 
-    if (error) throw error;
+    for (let from = 0; ; from += pageSize) {
+      let query = isReportRequest
+        ? serverAdmin
+            .from('students')
+            .select('student_id,student_name,student_day,student_timeslot,attendance_records')
+        : serverAdmin.from('students').select('*');
+
+      // The native app uses "%" as its authenticated request for all Weekend
+      // report records. Other searches are escaped before entering PostgREST's
+      // filter grammar so punctuation cannot add an unintended filter.
+      if (!isWildcardReport) {
+        const safeTerm = searchTerm.replace(/[(),]/g, ' ');
+        const filters = [
+          `student_name.ilike.%${safeTerm}%`,
+          `student_day.ilike.%${safeTerm}%`,
+          `student_timeslot.ilike.%${safeTerm}%`,
+          `student_levelofplay.ilike.%${safeTerm}%`
+        ];
+
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchTerm)) {
+          filters.push(`student_id.eq.${searchTerm}`);
+        }
+
+        query = query.or(filters.join(','));
+      }
+
+      const { data, error } = await query
+        .order('student_name', { ascending: true })
+        .order('student_id', { ascending: true })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+      const page = (data || []) as Record<string, unknown>[];
+      results.push(...page);
+      if (page.length < pageSize) break;
+    }
 
     return NextResponse.json({ 
-      results: data || [] 
+      results
     }, { 
       status: 200 
     });

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../../components/AppHeader';
 import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../../components/CrossProgrammeMakeupModal';
+import TableRefreshButton from './../../components/TableRefreshButton';
 import './../../styles.css';
 import './../../dashboard/dashboard.css';
 
@@ -486,21 +487,25 @@ export default function WeekdayAttendancePage() {
                     </div>
 
                     <div className="filter-buttons">
-                        <button type="button" className="filter-button" onClick={loadData}>Refresh</button>
+                        <TableRefreshButton
+                            onRefresh={loadData}
+                            refreshing={loading}
+                            label="Refresh weekday attendance tables"
+                        />
                     </div>
                 </div>
 
                 {message && <p className="dashboard-error-message">{message}</p>}
-                {loading && <p className="muted">Loading weekday attendance...</p>}
+                {loading && students.length === 0 && <p className="muted">Loading weekday attendance...</p>}
 
-                {!loading && groupedRows.map((group) => (
+                {(!loading || students.length > 0) && groupedRows.map((group) => (
                     <section key={group.day} style={{ marginTop: 22 }}>
                         <h2 style={{ marginBottom: 10 }}>{group.day}</h2>
 
                         {group.rows.length === 0 ? (
                             <p className="muted">No students found for {group.day}.</p>
                         ) : (
-                            <div className="table-container">
+                            <div className="table-container" aria-busy={loading}>
                                 <div className="table-scroll">
                                     <table>
                                         <thead>

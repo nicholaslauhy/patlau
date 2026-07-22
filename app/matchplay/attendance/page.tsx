@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../../components/AppHeader';
 import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../../components/CrossProgrammeMakeupModal';
+import TableRefreshButton from './../../components/TableRefreshButton';
 import './../../styles.css';
 import './../../dashboard/dashboard.css';
 
@@ -435,16 +436,25 @@ export default function MatchPlayAttendancePage() {
                     />
                 </div>
 
+                <div className="table-refresh-bar">
+                    <TableRefreshButton
+                        onRefresh={loadData}
+                        refreshing={loading}
+                        label="Refresh MatchPlay attendance table"
+                    />
+                </div>
+
                 {message && <p className="dashboard-error-message">{message}</p>}
-                {loading && <p className="muted">Loading MatchPlay attendance...</p>}
+                {loading && students.length === 0 && <p className="muted">Loading MatchPlay attendance...</p>}
 
                 {!loading && filteredStudents.length === 0 && (
                     <p className="muted">No MatchPlay students found.</p>
                 )}
 
-                {!loading && filteredStudents.length > 0 && (
+                {filteredStudents.length > 0 && (
                     <div
                         className="table-container"
+                        aria-busy={loading}
                         style={{
                             width: '100%',
                             maxWidth: 1180,

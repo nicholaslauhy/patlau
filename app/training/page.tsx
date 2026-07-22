@@ -8,6 +8,7 @@ import AppHeader from './../components/AppHeader';
 import CalendarPicker from './../components/CalendarPicker';
 import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../components/CrossProgrammeMakeupModal';
 import { authenticatedFetch } from './../lib/authenticated-fetch';
+import TableRefreshButton from './../components/TableRefreshButton';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 
@@ -613,6 +614,13 @@ export default function TrainingPage() {
                                 onChange={setSelectedMonth}
                             />
                         </div>
+                    </div>
+                    <div className="filter-buttons">
+                        <TableRefreshButton
+                            onRefresh={loadData}
+                            refreshing={loading}
+                            label="Refresh 1-on-1 training tables"
+                        />
                     </div>
                 </div>
 

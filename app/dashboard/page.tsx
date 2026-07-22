@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import AppHeader from "./../components/AppHeader";
 import CrossProgrammeMakeupModal, { MakeupSelectionResult } from "./../components/CrossProgrammeMakeupModal";
+import TableRefreshButton from "./../components/TableRefreshButton";
 import "./../styles.css";
 import "./dashboard.css";
 import { Student } from "../../types/supabase";
@@ -265,7 +266,6 @@ export default function DashboardPage() {
 
       if (error) {
         console.error("Failed to load student records:", error);
-        setSearchResults([]);
         setMessage("Failed to load student records.");
         return;
       }
@@ -276,12 +276,54 @@ export default function DashboardPage() {
       setMessage(visibleData.length === 0 ? "No student records found." : null);
     } catch (err) {
       console.error("Failed to load student records:", err);
-      setSearchResults([]);
       setMessage("Failed to load student records.");
     } finally {
       setIsLoading(false);
     }
   }, [selectedDay, selectedTimeslot, selectedLevel, userRole]);
+
+  const refreshDashboard = useCallback(async () => {
+    if (userRole === null) return;
+
+    const term = searchTerm.trim();
+    if (!term) {
+      await fetchData();
+      return;
+    }
+
+    setIsLoading(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch("/api/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ searchTerm: term }),
+      });
+
+      if (!response.ok) {
+        setSearchResults([]);
+        setMessage("Search failed.");
+        return;
+      }
+
+      const data = await response.json();
+      const results = getVisibleStudents(data.results || []).filter((student) => (
+        (selectedDay === "all" || student.student_day === selectedDay)
+        && (selectedTimeslot === "all" || student.student_timeslot === selectedTimeslot)
+        && (selectedLevel === "all" || student.student_levelofplay === selectedLevel)
+      ));
+
+      setSearchResults(results);
+      setMessage(results.length === 0 ? "No student records found." : null);
+    } catch (err) {
+      console.error("Search failed:", err);
+      setSearchResults([]);
+      setMessage("Search failed.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fetchData, searchTerm, selectedDay, selectedLevel, selectedTimeslot, userRole]);
 
   const deleteStudent = async (studentId: string, studentName?: string) => {
     if (userRole !== "superuser") {
@@ -732,49 +774,12 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    const handler = setTimeout(async () => {
-      if (userRole === null) return;
-
-      const term = searchTerm.trim();
-
-      if (term.length === 0) {
-        await fetchData();
-        return;
-      }
-
-      try {
-        const response = await fetch("/api/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ searchTerm: term }),
-        });
-
-        if (!response.ok) {
-          setSearchResults([]);
-          setMessage("Search failed.");
-          return;
-        }
-
-        const data = await response.json();
-        const results = getVisibleStudents(data.results || []);
-
-        setSearchResults(results);
-        setMessage(results.length === 0 ? "No student records found." : null);
-      } catch (err) {
-        console.error("Search failed:", err);
-        setSearchResults([]);
-        setMessage("Search failed.");
-      }
+    const handler = setTimeout(() => {
+      void refreshDashboard();
     }, 300);
 
     return () => clearTimeout(handler);
-  }, [searchTerm, userRole, fetchData]);
-
-  useEffect(() => {
-    if (userRole !== null) {
-      fetchData();
-    }
-  }, [fetchData, userRole]);
+  }, [refreshDashboard]);
 
   return (
       <div className="container">
@@ -862,18 +867,25 @@ export default function DashboardPage() {
               >
                 Reset
               </button>
-              <button onClick={() => fetchData()} className="filter-button">
+              <button onClick={() => void refreshDashboard()} className="filter-button">
                 Apply
               </button>
             </div>
           </div>
 
           <div className="search-results-display">
-            {isLoading && <p className="muted">Loading…</p>}
+            <div className="table-refresh-bar">
+              <TableRefreshButton
+                  onRefresh={refreshDashboard}
+                  refreshing={isLoading}
+                  label="Refresh dashboard student table"
+              />
+            </div>
+            {isLoading && searchResults.length === 0 && <p className="muted">Loading...</p>}
             {!isLoading && message && <p className="muted">{message}</p>}
 
-            {!isLoading && Array.isArray(searchResults) && searchResults.length > 0 && (
-                <div className="table-container">
+            {Array.isArray(searchResults) && searchResults.length > 0 && (
+                <div className="table-container" aria-busy={isLoading}>
                   <div className="table-scroll">
                     <table>
                       <thead>

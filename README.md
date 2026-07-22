@@ -54,16 +54,20 @@ Members receive the limited navigation and data access intended for coaches or r
 | `/dashboard` | Search and filter weekend students, manage attendance, edit permitted student fields, and access programme navigation. |
 | `/add` | Add a weekend student. |
 | `/attendance` | Detailed weekend attendance and student-management view. |
+| `/app/weekend/session-reports` | Searchable weekend session-attendance report with date and status summaries. |
 | `/payment` | Weekend payment status, history, counters, undo, and Telegram notifications. |
 | `/weekday/add` | Register a weekday student and one or more weekly sessions. |
 | `/weekday/attendance` | Manage Monday, Wednesday, and Thursday attendance and makeup balances. |
+| `/app/weekday/session-reports` | Searchable weekday session-attendance report grouped by date and scheduled day. |
 | `/weekday/payment` | Calculate and track month-specific weekday payments. |
 | `/matchplay` | MatchPlay programme overview. |
 | `/matchplay/add` | Register a MatchPlay student with weeks and per-session pricing. |
 | `/matchplay/attendance` | Track MatchPlay attendance and makeup activity. |
+| `/app/matchplay/session-reports` | Searchable MatchPlay session-attendance report grouped by date and session. |
 | `/matchplay/payment` | Track MatchPlay payments and monthly totals. |
 | `/training/add` | Register and maintain 1-1 students and their payment amounts. |
 | `/training` | Schedule monthly 1-1 coach-student pairings and record attendance. |
+| `/app/training/session-reports` | Searchable 1-1 session-attendance report with student and coach details. |
 | `/trngpayment` | Track payment for scheduled 1-1 sessions. |
 | `/makeup` | Review makeup credits and usages across programmes. |
 | `/makeup/payment` | Track makeup top-up payments and payment events. |
@@ -77,6 +81,8 @@ Members receive the limited navigation and data access intended for coaches or r
 ## Attendance and makeup behaviour
 
 Weekend attendance is stored against the `students` records. Programme-specific attendance uses separate tables for weekday, MatchPlay, and 1-1 sessions. The legacy `student_audit` history remains available, while the comprehensive `audit_logs` trail captures successful row changes across every current programme with actor and before/after context.
+
+Each programme menu links to a responsive attendance report backed by the same Supabase tables used by the iOS app. Report and operational tables include a scoped refresh control that refetches only the relevant data, preserving the current route, filters, and selected date instead of reloading the entire page.
 
 The cross-programme makeup dialog uses Supabase RPC functions to find the latest available credit and complete its usage. It records:
 
