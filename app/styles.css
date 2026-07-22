@@ -423,6 +423,7 @@ tbody tr:last-child td { border-bottom: none; }
 .actions-cell { vertical-align: middle; }
 
 .attendance-btn,
+.alternate-date-btn,
 .missed-btn,
 .makeup-btn,
 .undo-btn,
@@ -442,6 +443,14 @@ tbody tr:last-child td { border-bottom: none; }
 /* Mark = green */
 .attendance-btn { background: #22c55e; color: #fff; }
 .attendance-btn:hover { background: #16a34a; }
+
+/* Alternate date = blue outline */
+.alternate-date-btn {
+  border: 1px solid #a9cbe5;
+  background: #eef6fc;
+  color: #155f99;
+}
+.alternate-date-btn:hover { border-color: #6ba7d2; background: #dceefb; }
 
 /* Missed = red */
 .missed-btn { background: #ef4444; color: #fff; }
@@ -464,6 +473,7 @@ tbody tr:last-child td { border-bottom: none; }
 .delete-btn:hover { background: #dc2626; }
 
 .attendance-btn:disabled,
+.alternate-date-btn:disabled,
 .missed-btn:disabled,
 .makeup-btn:disabled,
 .undo-btn:disabled,

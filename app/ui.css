@@ -1705,6 +1705,18 @@ td.attendance-history ul li.ah-makeup { background: #e8f1fd; color: #245f9d; }
   color: var(--primary-hover);
 }
 
+.calendar-grid button:disabled,
+.calendar-grid button:disabled:hover {
+  background: transparent;
+  color: #c5cdd5;
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.calendar-grid button:disabled::after {
+  display: none;
+}
+
 .calendar-grid button.is-outside {
   color: #aeb9c4;
   font-weight: 500;
@@ -1840,6 +1852,13 @@ td.attendance-history ul li.ah-makeup { background: #e8f1fd; color: #245f9d; }
 
 .calendar-popover__footer button:hover {
   background: #eaf2f8;
+}
+
+.calendar-popover__footer button:disabled,
+.calendar-popover__footer button:disabled:hover {
+  background: transparent;
+  color: #aab4bf;
+  cursor: not-allowed;
 }
 
 .estimate-panel {
