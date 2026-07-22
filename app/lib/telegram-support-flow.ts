@@ -1,6 +1,5 @@
-export const AI_MESSAGE_LABEL = "PatLau AI Assistant (AI-generated)";
-export const SYSTEM_MESSAGE_LABEL = "PatLau Support Update";
-export const COACH_MESSAGE_LABEL = "Coach Patrick (human reply)";
+export const AI_MESSAGE_DISCLAIMER = "This is an automated AI-generated message based on the information provided.";
+export const COACH_MESSAGE_DISCLAIMER = "Sent personally by Coach Patrick.";
 export const AI_INTRO_MESSAGE = "Hello! I can help with general coaching information, schedules, locations, fees and current announcements. Simply type and send your question below—there is no need to select an option first. If your question needs personal assistance, I’ll connect you directly with Coach Patrick.";
 export const CLOSED_CONVERSATION_MESSAGE = "This conversation is closed. Select Reopen conversation below or simply send a new message whenever you need more help.";
 export const COACH_CLOSED_CONVERSATION_MESSAGE = "Coach Patrick has closed this conversation. Select Reopen conversation below or simply send a new message whenever you need more help.";
@@ -40,16 +39,23 @@ export function normaliseCoachReferences(content: string) {
         );
 }
 
+function formatWithDisclaimer(content: string, disclaimer: string) {
+    const footer = `\n\n${disclaimer}`;
+    const maximumContentLength = 3900 - footer.length;
+    const message = normaliseCoachReferences(content).trim().slice(0, maximumContentLength).trimEnd();
+    return `${message}${footer}`;
+}
+
 export function formatAiReply(content: string) {
-    return `${AI_MESSAGE_LABEL}\n\n${normaliseCoachReferences(content).trim()}`;
+    return formatWithDisclaimer(content, AI_MESSAGE_DISCLAIMER);
 }
 
 export function formatSystemMessage(content: string) {
-    return `${SYSTEM_MESSAGE_LABEL}\n\n${normaliseCoachReferences(content).trim()}`;
+    return normaliseCoachReferences(content).trim().slice(0, 3900).trimEnd();
 }
 
 export function formatCoachReply(content: string) {
-    return `${COACH_MESSAGE_LABEL}\n\n${normaliseCoachReferences(content).trim()}`;
+    return formatWithDisclaimer(content, COACH_MESSAGE_DISCLAIMER);
 }
 
 export function parentExplicitlyRequestsCoach(text: string) {

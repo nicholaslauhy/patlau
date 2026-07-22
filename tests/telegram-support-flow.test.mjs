@@ -13,10 +13,10 @@ import {
     shouldOfferDelayedFeedback,
 } from "../app/lib/telegram-support-flow.ts";
 
-test("AI replies are clearly labelled and coach references are consistently Coach Patrick", () => {
+test("Telegram messages put clear attribution in footers and keep Coach Patrick references consistent", () => {
     assert.equal(
         formatAiReply("I will connect you with a coach."),
-        "PatLau AI Assistant (AI-generated)\n\nI will connect you with Coach Patrick.",
+        "I will connect you with Coach Patrick.\n\nThis is an automated AI-generated message based on the information provided.",
     );
     assert.equal(
         normaliseCoachReferences("Your coach will reply."),
@@ -27,12 +27,15 @@ test("AI replies are clearly labelled and coach references are consistently Coac
     assert.equal(normaliseCoachReferences("What is the coach-to-player ratio?"), "What is the coach-to-player ratio?");
     assert.equal(
         formatSystemMessage("This conversation is closed."),
-        "PatLau Support Update\n\nThis conversation is closed.",
+        "This conversation is closed.",
     );
     assert.equal(
         formatCoachReply("I have checked this for you."),
-        "Coach Patrick (human reply)\n\nI have checked this for you.",
+        "I have checked this for you.\n\nSent personally by Coach Patrick.",
     );
+    const longReply = formatAiReply("a".repeat(5000));
+    assert.equal(longReply.length, 3900);
+    assert.match(longReply, /This is an automated AI-generated message based on the information provided\.$/);
 });
 
 test("explicit requests for a person or Coach Patrick are detected", () => {
