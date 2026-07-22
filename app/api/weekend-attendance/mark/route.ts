@@ -10,6 +10,7 @@ import {
     parseWeekendAttendanceRecord,
     singaporeDateKey,
     validateAlternateAttendanceDate,
+    validateCurrentWeekendAttendanceDate,
 } from '../../../lib/weekend-attendance-date';
 
 const ALLOWED_ROLES = new Set(['member', 'admin', 'superuser']);
@@ -197,11 +198,19 @@ export async function POST(request: NextRequest) {
                     nextRecords.splice(latestIndex, 1);
                 }
             } else if (requestedAction === 'mark') {
-                const validationError = validateAlternateAttendanceDate({
-                    dateKey: attendanceDate,
-                    studentDay: String(student.student_day || ''),
-                    attendanceRecords: records,
-                });
+                const todayDateKey = singaporeDateKey();
+                const validationError = attendanceDate === todayDateKey
+                    ? validateCurrentWeekendAttendanceDate({
+                        dateKey: attendanceDate,
+                        studentDay: String(student.student_day || ''),
+                        attendanceRecords: records,
+                        todayDateKey,
+                    })
+                    : validateAlternateAttendanceDate({
+                        dateKey: attendanceDate,
+                        attendanceRecords: records,
+                        todayDateKey,
+                    });
 
                 if (validationError) {
                     return NextResponse.json(

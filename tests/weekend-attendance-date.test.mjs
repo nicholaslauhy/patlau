@@ -2,26 +2,56 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     attendanceRecordDateKey,
+    attendanceRecordOccupiedDateKeys,
     findLatestAvailableLessonDate,
     isLessonDateForDay,
     parseWeekendAttendanceRecord,
     singaporeDateKey,
     validateAlternateAttendanceDate,
+    validateCurrentWeekendAttendanceDate,
 } from '../app/lib/weekend-attendance-date.ts';
 
-test('alternate Weekend attendance only accepts the student scheduled day', () => {
+test('alternate Weekend attendance accepts any unused date strictly before today', () => {
     assert.equal(isLessonDateForDay('2026-07-25', 'Saturday'), true);
     assert.equal(isLessonDateForDay('2026-07-26', 'Saturday'), false);
     assert.equal(isLessonDateForDay('2026-07-26', 'Sunday'), true);
 
+    assert.equal(
+        validateAlternateAttendanceDate({
+            dateKey: '2026-07-23',
+            attendanceRecords: [],
+            todayDateKey: '2026-07-27',
+        }),
+        null,
+    );
     assert.match(
         validateAlternateAttendanceDate({
-            dateKey: '2026-07-26',
-            studentDay: 'Saturday',
+            dateKey: '2026-07-27',
             attendanceRecords: [],
             todayDateKey: '2026-07-27',
         }) || '',
-        /Choose a Saturday/,
+        /before today/,
+    );
+});
+
+test('current-day Weekend attendance still requires the scheduled lesson day', () => {
+    assert.equal(
+        validateCurrentWeekendAttendanceDate({
+            dateKey: '2026-07-25',
+            studentDay: 'Saturday',
+            attendanceRecords: [],
+            todayDateKey: '2026-07-25',
+        }),
+        null,
+    );
+    assert.match(
+        validateCurrentWeekendAttendanceDate({
+            dateKey: '2026-07-25',
+            studentDay: 'Sunday',
+            attendanceRecords: [],
+            todayDateKey: '2026-07-25',
+        }) || '',
+        /scheduled Sunday/,
     );
 });
 
@@ -39,7 +69,6 @@ test('future and duplicate lesson dates are rejected across record formats', () 
     assert.match(
         validateAlternateAttendanceDate({
             dateKey: '2026-08-01',
-            studentDay: 'Saturday',
             attendanceRecords: records,
             todayDateKey: '2026-07-25',
         }) || '',
@@ -48,7 +77,6 @@ test('future and duplicate lesson dates are rejected across record formats', () 
     assert.match(
         validateAlternateAttendanceDate({
             dateKey: '2026-07-18',
-            studentDay: 'Saturday',
             attendanceRecords: records,
             todayDateKey: '2026-07-25',
         }) || '',
@@ -56,22 +84,36 @@ test('future and duplicate lesson dates are rejected across record formats', () 
     );
 });
 
-test('the default selection finds the latest unused lesson across a year boundary', () => {
+test('a Weekend makeup reserves both its attendance date and original missed date', () => {
+    const makeupRecord = '2026-07-18|makeup|2026-07-11|weekday|usage-123';
+    assert.deepEqual(
+        attendanceRecordOccupiedDateKeys(makeupRecord),
+        ['2026-07-18', '2026-07-11'],
+    );
+    assert.match(
+        validateAlternateAttendanceDate({
+            dateKey: '2026-07-11',
+            attendanceRecords: [makeupRecord],
+            todayDateKey: '2026-07-22',
+        }) || '',
+        /already exists/,
+    );
+});
+
+test('the default selection finds the latest unused past date across a year boundary', () => {
     assert.equal(
         findLatestAvailableLessonDate({
-            studentDay: 'Saturday',
             attendanceRecords: ['2027-01-02'],
             todayDateKey: '2027-01-03',
         }),
-        '2026-12-26',
+        '2027-01-01',
     );
     assert.equal(
         findLatestAvailableLessonDate({
-            studentDay: 'Sunday',
             attendanceRecords: [],
             todayDateKey: '2024-03-01',
         }),
-        '2024-02-25',
+        '2024-02-29',
     );
 });
 

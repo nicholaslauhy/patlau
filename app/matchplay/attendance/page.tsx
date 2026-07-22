@@ -7,6 +7,9 @@ import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../../components/AppHeader';
 import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../../components/CrossProgrammeMakeupModal';
 import TableRefreshButton from './../../components/TableRefreshButton';
+import AlternateAttendanceDateModal from './../../components/AlternateAttendanceDateModal';
+import { authenticatedFetch } from './../../lib/authenticated-fetch';
+import { singaporeDateKey } from './../../lib/weekend-attendance-date';
 import './../../styles.css';
 import './../../dashboard/dashboard.css';
 
@@ -88,6 +91,7 @@ export default function MatchPlayAttendancePage() {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
     const [makeupStudent, setMakeupStudent] = useState<MatchPlayStudent | null>(null);
+    const [alternateDateStudent, setAlternateDateStudent] = useState<MatchPlayStudent | null>(null);
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -191,7 +195,7 @@ export default function MatchPlayAttendancePage() {
 
     const addAttendance = async (studentId: string, status: AttendanceStatus) => {
         try {
-            const today = new Date().toISOString().slice(0, 10);
+            const today = singaporeDateKey();
 
             const { data, error } = await supabase
                 .from('matchplay_attendance')
@@ -211,6 +215,36 @@ export default function MatchPlayAttendancePage() {
             alert(err?.message || 'Failed to record MatchPlay attendance.');
             await loadData();
         }
+    };
+
+    const addAlternateDateAttendance = async (attendanceDate: string) => {
+        if (!alternateDateStudent) {
+            throw new Error('Student not found.');
+        }
+
+        const response = await authenticatedFetch('/api/programme-attendance/backdate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                programme: 'matchplay',
+                student_id: alternateDateStudent.id,
+                attendance_date: attendanceDate,
+            }),
+        });
+        const body = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+            throw new Error(body?.error || 'Failed to record MatchPlay attendance.');
+        }
+        if (!body?.attendance) {
+            throw new Error('The saved attendance record was not returned. Refresh the table and try again.');
+        }
+
+        const attendance = body.attendance as MatchPlayAttendance;
+        setAttendanceRows((previous) => [attendance, ...previous].sort((left, right) => {
+            const dateOrder = right.attendance_date.localeCompare(left.attendance_date);
+            return dateOrder || Number(right.id) - Number(left.id);
+        }));
     };
 
     const completeMatchPlayMakeup = async (
@@ -251,7 +285,12 @@ export default function MatchPlayAttendancePage() {
     };
 
     const undoLatest = async (studentId: string) => {
-        const latest = getAttendanceForStudent(studentId)[0];
+        const latest = [...getAttendanceForStudent(studentId)].sort((left, right) => {
+            const leftUpdatedAt = left.updated_at || left.created_at || '';
+            const rightUpdatedAt = right.updated_at || right.created_at || '';
+            const timestampOrder = rightUpdatedAt.localeCompare(leftUpdatedAt);
+            return timestampOrder || Number(right.id) - Number(left.id);
+        })[0];
 
         if (!latest) {
             alert('Nothing to undo for this student.');
@@ -585,6 +624,20 @@ export default function MatchPlayAttendancePage() {
                                                     >
                                                         <button
                                                             type="button"
+                                                            className="alternate-date-btn"
+                                                            onClick={() => setAlternateDateStudent(student)}
+                                                            style={{
+                                                                flex: '0 0 auto',
+                                                                width: 'auto',
+                                                                minWidth: 0,
+                                                                padding: '6px 12px',
+                                                            }}
+                                                        >
+                                                            Another date
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
                                                             className="reset-btn"
                                                             onClick={() => resetAttendance(student.id, student.student_name)}
                                                             disabled={history.length === 0}
@@ -643,6 +696,22 @@ export default function MatchPlayAttendancePage() {
                     studentName={makeupStudent?.student_name || ''}
                     onClose={() => setMakeupStudent(null)}
                     onCompleted={completeMatchPlayMakeup}
+                />
+
+                <AlternateAttendanceDateModal
+                    student={alternateDateStudent ? {
+                        student_id: alternateDateStudent.id,
+                        student_name: alternateDateStudent.student_name,
+                        student_day: '',
+                        attendance_records: getAttendanceForStudent(alternateDateStudent.id).flatMap((row) => [
+                            row.attendance_date,
+                            row.original_missed_date,
+                        ].filter((date): date is string => Boolean(date))),
+                    } : null}
+                    programmeLabel="MatchPlay"
+                    contextLabel="MatchPlay session"
+                    onClose={() => setAlternateDateStudent(null)}
+                    onConfirm={addAlternateDateAttendance}
                 />
             </main>
         </div>

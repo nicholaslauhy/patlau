@@ -3,9 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import CalendarPicker from './CalendarPicker';
 import {
-    attendanceRecordDateKey,
+    attendanceRecordOccupiedDateKeys,
     findLatestAvailableLessonDate,
-    isLessonDateForDay,
     localDateKey,
     singaporeDateKey,
     validateAlternateAttendanceDate,
@@ -22,10 +21,14 @@ interface AlternateAttendanceStudent {
 
 export default function AlternateAttendanceDateModal({
     student,
+    programmeLabel = 'Weekend',
+    contextLabel,
     onClose,
     onConfirm,
 }: {
     student: AlternateAttendanceStudent | null;
+    programmeLabel?: string;
+    contextLabel?: string;
     onClose: () => void;
     onConfirm: (dateKey: string) => Promise<void>;
 }) {
@@ -54,7 +57,6 @@ export default function AlternateAttendanceDateModal({
     useEffect(() => {
         if (!student) return;
         setSelectedDate(findLatestAvailableLessonDate({
-            studentDay: student.student_day,
             attendanceRecords: records,
         }));
         setAttempted(false);
@@ -113,10 +115,9 @@ export default function AlternateAttendanceDateModal({
 
     const validationError = validateAlternateAttendanceDate({
         dateKey: selectedDate,
-        studentDay: student.student_day,
         attendanceRecords: records,
     });
-    const usedDates = new Set(records.map(attendanceRecordDateKey).filter(Boolean));
+    const usedDates = new Set(records.flatMap(attendanceRecordOccupiedDateKeys));
     const today = singaporeDateKey();
     const dateLabel = selectedDate
         ? new Date(`${selectedDate}T12:00:00`).toLocaleDateString('en-SG', {
@@ -157,12 +158,12 @@ export default function AlternateAttendanceDateModal({
             <section ref={dialogRef} className="alternate-attendance-modal">
                 <header className="alternate-attendance-modal__header">
                     <div>
-                        <span className="settings-eyebrow">Weekend attendance</span>
+                        <span className="settings-eyebrow">{programmeLabel} attendance</span>
                         <h2 id="alternate-attendance-title">Mark attendance for another date</h2>
                         <p>
                             <strong>{student.student_name}</strong>
-                            {' · '}{student.student_day}
-                            {student.student_timeslot ? `, ${student.student_timeslot}` : ''}
+                            {' · '}{contextLabel || student.student_day}
+                            {!contextLabel && student.student_timeslot ? `, ${student.student_timeslot}` : ''}
                         </p>
                     </div>
                     <button
@@ -181,8 +182,8 @@ export default function AlternateAttendanceDateModal({
 
                 <div className="alternate-attendance-modal__body">
                     <p id="alternate-attendance-description" className="alternate-attendance-modal__intro">
-                        Choose the {student.student_day} when this student actually attended. Future dates,
-                        other weekdays and dates already in the attendance history are unavailable.
+                        Choose any date before today when this student actually attended. Today, future dates
+                        and dates already in the attendance history are unavailable.
                     </p>
 
                     <label className="alternate-attendance-modal__field">
@@ -196,11 +197,10 @@ export default function AlternateAttendanceDateModal({
                                 setSubmitError('');
                             }}
                             disabled={submitting}
-                            ariaLabel={`Actual ${student.student_day} lesson date`}
+                            ariaLabel="Actual past lesson date"
                             isDateDisabled={(date) => {
                                 const key = localDateKey(date);
-                                return key > today
-                                    || !isLessonDateForDay(key, student.student_day)
+                                return key >= today
                                     || usedDates.has(key);
                             }}
                         />

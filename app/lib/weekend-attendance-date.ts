@@ -70,6 +70,16 @@ export const parseWeekendAttendanceRecord = (record: unknown) => {
     return { dateIso: raw, status: 'mark' as const };
 };
 
+export const attendanceRecordOccupiedDateKeys = (record: unknown) => {
+    const primaryDate = attendanceRecordDateKey(record);
+    const parsed = parseWeekendAttendanceRecord(record);
+    const originalMissedDate = parsed.status === 'makeup' && parsed.originalMissedDate
+        ? attendanceRecordDateKey(parsed.originalMissedDate)
+        : null;
+
+    return Array.from(new Set([primaryDate, originalMissedDate].filter(Boolean))) as string[];
+};
+
 export const isLessonDateForDay = (dateKey: string, studentDay: string) => {
     const date = parseDateKey(dateKey);
     if (!date) return false;
@@ -79,6 +89,26 @@ export const isLessonDateForDay = (dateKey: string, studentDay: string) => {
 };
 
 export function validateAlternateAttendanceDate({
+    dateKey,
+    attendanceRecords,
+    todayDateKey = singaporeDateKey(),
+}: {
+    dateKey: string;
+    attendanceRecords: unknown[];
+    todayDateKey?: string;
+}) {
+    if (!dateKey || !parseDateKey(dateKey)) return 'Choose the lesson date.';
+    if (dateKey > todayDateKey) return 'Attendance cannot be recorded for a future date.';
+    if (dateKey === todayDateKey) return 'Choose a date before today.';
+
+    if (attendanceRecords.some((record) => attendanceRecordOccupiedDateKeys(record).includes(dateKey))) {
+        return 'Attendance already exists for this date. Review the attendance history before adding another entry.';
+    }
+
+    return null;
+}
+
+export function validateCurrentWeekendAttendanceDate({
     dateKey,
     studentDay,
     attendanceRecords,
@@ -90,19 +120,16 @@ export function validateAlternateAttendanceDate({
     todayDateKey?: string;
 }) {
     if (!dateKey || !parseDateKey(dateKey)) return 'Choose the lesson date.';
+    if (dateKey !== todayDateKey) return 'Current attendance must be recorded for today.';
 
     const expectedDay = studentDay === 'Saturday' || studentDay === 'Sunday'
         ? studentDay
         : null;
     if (!expectedDay) return 'This student does not have a valid Weekend lesson day.';
-
-    if (dateKey > todayDateKey) return 'Attendance cannot be recorded for a future date.';
-
     if (!isLessonDateForDay(dateKey, expectedDay)) {
-        return `Choose a ${expectedDay}, which is this student's scheduled lesson day.`;
+        return `Today is not this student's scheduled ${expectedDay} lesson day.`;
     }
-
-    if (attendanceRecords.some((record) => attendanceRecordDateKey(record) === dateKey)) {
+    if (attendanceRecords.some((record) => attendanceRecordOccupiedDateKeys(record).includes(dateKey))) {
         return 'Attendance already exists for this date. Review the attendance history before adding another entry.';
     }
 
@@ -110,21 +137,20 @@ export function validateAlternateAttendanceDate({
 }
 
 export function findLatestAvailableLessonDate({
-    studentDay,
     attendanceRecords,
     todayDateKey = singaporeDateKey(),
 }: {
-    studentDay: string;
     attendanceRecords: unknown[];
     todayDateKey?: string;
 }) {
-    const usedDates = new Set(attendanceRecords.map(attendanceRecordDateKey).filter(Boolean));
+    const usedDates = new Set(attendanceRecords.flatMap(attendanceRecordOccupiedDateKeys));
     const candidate = parseDateKey(todayDateKey);
     if (!candidate) return '';
+    candidate.setDate(candidate.getDate() - 1);
 
     for (let offset = 0; offset < 370; offset += 1) {
         const key = localDateKey(candidate);
-        if (isLessonDateForDay(key, studentDay) && !usedDates.has(key)) return key;
+        if (!usedDates.has(key)) return key;
         candidate.setDate(candidate.getDate() - 1);
     }
 

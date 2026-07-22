@@ -787,7 +787,7 @@ export default function AttendancePage() {
                                         title={
                                           finished
                                               ? 'Subscription lessons completed'
-                                              : `Mark attendance for another ${student.student_day}`
+                                              : 'Mark attendance for an earlier date'
                                         }
                                     >
                                       Another date

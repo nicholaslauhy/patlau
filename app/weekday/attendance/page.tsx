@@ -5,8 +5,11 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../../components/AppHeader';
+import AlternateAttendanceDateModal from './../../components/AlternateAttendanceDateModal';
 import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../../components/CrossProgrammeMakeupModal';
 import TableRefreshButton from './../../components/TableRefreshButton';
+import { authenticatedFetch } from './../../lib/authenticated-fetch';
+import { singaporeDateKey } from './../../lib/weekend-attendance-date';
 import './../../styles.css';
 import './../../dashboard/dashboard.css';
 
@@ -59,13 +62,6 @@ const getUserRole = (user: any): UserRole => {
     return (user?.app_metadata?.role || user?.user_metadata?.role || 'member') as UserRole;
 };
 
-const formatDateLocal = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
-
 const readableDate = (dateKey: string) => {
     const [year, month, day] = dateKey.slice(0, 10).split('-').map(Number);
     return new Date(year, month - 1, day).toLocaleDateString(undefined, {
@@ -113,11 +109,17 @@ export default function WeekdayAttendancePage() {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
     const [makeupContext, setMakeupContext] = useState<{ student: WeekdayStudent; day: WeekdayName; hours: number } | null>(null);
+    const [alternateDateContext, setAlternateDateContext] = useState<{
+        student: WeekdayStudent;
+        day: WeekdayName;
+        hours: number;
+        records: WeekdayAttendance[];
+    } | null>(null);
     const [rowHours, setRowHours] = useState<Record<string, number>>({});
 
-    const today = new Date();
-    const todayKey = formatDateLocal(today);
-    const todayDayName = DAY_OPTIONS.find((day) => DAY_INDEX[day] === today.getDay());
+    const todayKey = singaporeDateKey();
+    const todayWeekdayIndex = new Date(`${todayKey}T12:00:00`).getDay();
+    const todayDayName = DAY_OPTIONS.find((day) => DAY_INDEX[day] === todayWeekdayIndex);
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -287,6 +289,36 @@ export default function WeekdayAttendancePage() {
             alert(err?.message || 'Failed to update weekday attendance.');
             await loadData();
         }
+    };
+
+    const recordAlternateDateAttendance = async (attendanceDate: string) => {
+        if (!alternateDateContext) {
+            throw new Error('Student session not found.');
+        }
+
+        const response = await authenticatedFetch('/api/programme-attendance/backdate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                programme: 'weekday',
+                student_id: alternateDateContext.student.id,
+                attendance_date: attendanceDate,
+                day_name: alternateDateContext.day,
+                duration_hours: alternateDateContext.hours,
+            }),
+        });
+        const body = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+            throw new Error(body.error || 'Failed to record Weekday attendance.');
+        }
+        if (!body.attendance?.id) {
+            throw new Error('The updated attendance record was not returned.');
+        }
+
+        // Refetch so every row retains the database's canonical date ordering and
+        // changes made from another device are included at the same time.
+        await loadData();
     };
 
     const completeWeekdayMakeup = async (
@@ -542,41 +574,61 @@ export default function WeekdayAttendancePage() {
                                                     </td>
                                                     <td>{makeupBalance.toFixed(2)} hours</td>
                                                     <td className="actions-cell">
-                                                        <div className="actions-row" style={{ flexWrap: 'nowrap' }}>
-                                                            <button
-                                                                type="button"
-                                                                className="attendance-btn"
-                                                                disabled={!canMarkScheduled}
-                                                                title={canMarkScheduled ? 'Mark attended' : `Can only mark on ${schedule.day}`}
-                                                                onClick={() => insertAttendance(student.id, schedule.day, 'attended', hours)}
-                                                            >
-                                                                Mark
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="missed-btn"
-                                                                title={`Mark ${schedule.day} session as missed`}
-                                                                onClick={() => insertAttendance(student.id, schedule.day, 'missed', hours)}
-                                                            >
-                                                                Missed
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="makeup-btn"
-                                                                disabled={makeupBalance <= 0}
-                                                                title={makeupBalance <= 0 ? 'No missed hours to makeup' : 'Record makeup hours'}
-                                                                onClick={() => insertAttendance(student.id, schedule.day, 'makeup', Math.min(hours, makeupBalance))}
-                                                            >
-                                                                Makeup
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="undo-btn"
-                                                                disabled={!hasRecords}
-                                                                onClick={() => undoLatest(student.id, schedule.day)}
-                                                            >
-                                                                Undo
-                                                            </button>
+                                                        <div className="actions-stack">
+                                                            <div className="actions-row">
+                                                                <button
+                                                                    type="button"
+                                                                    className="attendance-btn"
+                                                                    disabled={!canMarkScheduled}
+                                                                    title={canMarkScheduled ? 'Mark attended' : `Can only mark on ${schedule.day}`}
+                                                                    onClick={() => insertAttendance(student.id, schedule.day, 'attended', hours)}
+                                                                >
+                                                                    Mark
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className="missed-btn"
+                                                                    title={`Mark ${schedule.day} session as missed`}
+                                                                    onClick={() => insertAttendance(student.id, schedule.day, 'missed', hours)}
+                                                                >
+                                                                    Missed
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className="makeup-btn"
+                                                                    disabled={makeupBalance <= 0}
+                                                                    title={makeupBalance <= 0 ? 'No missed hours to makeup' : 'Record makeup hours'}
+                                                                    onClick={() => insertAttendance(student.id, schedule.day, 'makeup', Math.min(hours, makeupBalance))}
+                                                                >
+                                                                    Makeup
+                                                                </button>
+                                                            </div>
+                                                            <div className="actions-row">
+                                                                <button
+                                                                    type="button"
+                                                                    className="alternate-date-btn"
+                                                                    disabled={hours <= 0}
+                                                                    title={hours <= 0 ? 'Enter valid session hours first' : 'Mark attendance for an earlier date'}
+                                                                    onClick={() => setAlternateDateContext({
+                                                                        student,
+                                                                        day: schedule.day,
+                                                                        hours,
+                                                                        records: attendance.filter((record) => (
+                                                                            record.weekday_student_id === student.id
+                                                                        )),
+                                                                    })}
+                                                                >
+                                                                    Another date
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className="undo-btn"
+                                                                    disabled={!hasRecords}
+                                                                    onClick={() => undoLatest(student.id, schedule.day)}
+                                                                >
+                                                                    Undo
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                     </td>
                                                     <td className="attendance-history">
@@ -620,6 +672,24 @@ export default function WeekdayAttendancePage() {
                     studentName={makeupContext?.student.student_name || ''}
                     onClose={() => setMakeupContext(null)}
                     onCompleted={completeWeekdayMakeup}
+                />
+
+                <AlternateAttendanceDateModal
+                    student={alternateDateContext ? {
+                        student_id: alternateDateContext.student.id,
+                        student_name: alternateDateContext.student.student_name,
+                        student_day: alternateDateContext.day,
+                        attendance_records: alternateDateContext.records.flatMap((record) => [
+                            record.attendance_date,
+                            ...(record.original_missed_date ? [record.original_missed_date] : []),
+                        ]),
+                    } : null}
+                    programmeLabel="Weekday"
+                    contextLabel={alternateDateContext
+                        ? `${alternateDateContext.day} session · ${alternateDateContext.hours.toFixed(2).replace(/\.00$/, '')} hours`
+                        : undefined}
+                    onClose={() => setAlternateDateContext(null)}
+                    onConfirm={recordAlternateDateAttendance}
                 />
             </main>
         </div>
