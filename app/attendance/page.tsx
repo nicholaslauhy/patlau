@@ -7,7 +7,9 @@ import Link from 'next/link';
 import AppHeader from './../components/AppHeader';
 import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../components/CrossProgrammeMakeupModal';
 import TableRefreshButton from './../components/TableRefreshButton';
+import AlternateAttendanceDateModal from './../components/AlternateAttendanceDateModal';
 import { authenticatedFetch } from './../lib/authenticated-fetch';
+import { singaporeDateKey } from './../lib/weekend-attendance-date';
 import './../styles.css';
 import './../dashboard/dashboard.css';
 import { Student } from '../../types/supabase';
@@ -63,6 +65,7 @@ export default function AttendancePage() {
   const [searchResults, setSearchResults] = useState<Student[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [makeupStudent, setMakeupStudent] = useState<Student | null>(null);
+  const [alternateDateStudent, setAlternateDateStudent] = useState<Student | null>(null);
 
   const [selectedDay, setSelectedDay] = useState('all');
   const [selectedTimeslot, setSelectedTimeslot] = useState('all');
@@ -74,22 +77,6 @@ export default function AttendancePage() {
 
 
   type AttendanceStatus = 'mark' | 'missed' | 'makeup';
-
-  const makeAttendanceRecord = (
-      dateIso: string,
-      status: AttendanceStatus = 'mark',
-      originalMissedDate?: string
-  ) => {
-    if (status === 'mark') {
-      return dateIso;
-    }
-
-    if (status === 'makeup' && originalMissedDate) {
-      return `${dateIso}|makeup|${originalMissedDate}`;
-    }
-
-    return `${dateIso}|${status}`;
-  };
 
   const parseAttendanceRecord = (record: unknown) => {
     const raw = String(record || '');
@@ -299,152 +286,66 @@ export default function AttendancePage() {
     }
   };
 
+  const updateWeekendAttendance = async (
+      studentId: string,
+      action: 'mark' | 'missed' | 'undo',
+      attendanceDate?: string,
+  ) => {
+    const currentStudent = searchResults.find((student) => student.student_id === studentId);
+    const response = await authenticatedFetch('/api/weekend-attendance/mark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        student_id: studentId,
+        action,
+        ...(attendanceDate ? { attendance_date: attendanceDate } : {}),
+        ...(action === 'undo' ? {
+          expected_last_record: currentStudent?.attendance_records?.length
+              ? String(currentStudent.attendance_records[currentStudent.attendance_records.length - 1])
+              : null,
+        } : {}),
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || 'Failed to record attendance.');
+
+    const updatedFields = body.student as (Partial<Student> & { student_id: string }) | undefined;
+    if (!updatedFields?.student_id) {
+      throw new Error('The updated student record was not returned.');
+    }
+
+    setSearchResults((current) => current.map((student) => (
+      student.student_id === updatedFields.student_id
+          ? { ...student, ...updatedFields }
+          : student
+    )));
+  };
+
   const handleDeleteLastAttendance = async (studentId: string) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!user) throw new Error('Not authenticated');
-
-      const { data: studentData, error: fetchError } = await supabase
-          .from('students')
-          .select('*')
-          .eq('student_id', studentId)
-          .single();
-
-      if (fetchError || !studentData) {
-        throw fetchError || new Error('Student not found');
-      }
-
-      let newAttended = studentData.attended ?? 0;
-      let newMissed = studentData.missed ?? 0;
-      const newRecords = Array.isArray(studentData.attendance_records)
-          ? [...studentData.attendance_records]
-          : [];
-
-      if (newRecords.length === 0) {
-        alert('Nothing to undo.');
-        return;
-      }
-
-      const latestIndex = newRecords.length - 1;
-      const latestRecord = parseAttendanceRecord(newRecords[latestIndex]);
-
-      if (latestRecord.status === 'makeup') {
-        // First Undo after makeup:
-        // attended 1 -> 0
-        // missed 0 -> 1
-        // history: makeup -> missed
-        if (latestRecord.usageId) {
-          const { error: undoMakeupError } = await supabase.rpc(
-              'undo_cross_programme_makeup',
-              { input_usage_id: latestRecord.usageId }
-          );
-
-          if (undoMakeupError) throw undoMakeupError;
-        }
-
-        newAttended = Math.max(0, newAttended - 1);
-        newMissed += 1;
-
-        const missedDate =
-            latestRecord.originalMissedDate || latestRecord.dateIso;
-
-        newRecords[latestIndex] = makeAttendanceRecord(
-            missedDate,
-            'missed'
-        );
-      } else if (latestRecord.status === 'missed') {
-        // Second Undo:
-        // attended stays 0
-        // missed 1 -> 0
-        // remove missed history
-        // void the matching available Weekend makeup credit
-        const { error: creditUndoError } = await supabase.rpc(
-            'cancel_weekend_missed_credit',
-            {
-              input_student_id: studentId,
-              input_missed_date: latestRecord.dateIso,
-            }
-        );
-
-        if (creditUndoError) throw creditUndoError;
-
-        newMissed = Math.max(0, newMissed - 1);
-        newRecords.splice(latestIndex, 1);
-      } else {
-        // Undo ordinary attended mark.
-        newAttended = Math.max(0, newAttended - 1);
-        newRecords.splice(latestIndex, 1);
-      }
-
-      const { data: updatedStudent, error: updateError } = await supabase
-          .from('students')
-          .update({
-            attended: newAttended,
-            missed: newMissed,
-            attendance_records: newRecords,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('student_id', studentId)
-          .select()
-          .single();
-
-      if (updateError || !updatedStudent) {
-        throw updateError || new Error('Update failed');
-      }
-
-      setSearchResults((prev) =>
-          prev.map((student) =>
-              student.student_id === studentId ? updatedStudent : student
-          )
-      );
-
-      await logAudit(studentId, 'undo');
-    } catch (err: any) {
-      alert(
-          `Failed to undo attendance: ${err?.message ?? 'Unknown error'}`
-      );
+      await updateWeekendAttendance(studentId, 'undo');
+    } catch (error) {
+      alert(`Failed to undo attendance: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
+  const recordWeekendAttendance = async (studentId: string, attendanceDate: string) => {
+    await updateWeekendAttendance(studentId, 'mark', attendanceDate);
+  };
 
   const handleAttendanceClick = async (studentId: string) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      const { data: studentData, error: fetchError } = await supabase.from('students').select('*').eq('student_id', studentId).single();
-      if (fetchError || !studentData) throw fetchError || new Error('Student not found');
-
-      const today = new Date().getDay();
-      const isStudentDay = (today === 6 && studentData.student_day === 'Saturday') || (today === 0 && studentData.student_day === 'Sunday');
-      if (!isStudentDay) { alert(`Can only mark attendance on ${studentData.student_day}`); return; }
-
-      const attended = (studentData.attended ?? 0);
-      const missed = (studentData.missed ?? 0);
-      const totalWeeks = studentData.total_weeks ?? 0;
-      if ((attended + missed) >= totalWeeks) { alert('Subscription lessons already used.'); return; }
-
-      const nowIso = new Date().toISOString();
-      const newAttended = attended + 1;
-      const currentRecords = Array.isArray(studentData.attendance_records)
-          ? [...studentData.attendance_records]
-          : [];
-      const newRecords = [...currentRecords, makeAttendanceRecord(nowIso, 'mark')];
-
-      const { data: updatedStudent, error } = await supabase.from('students').update({
-        attended: newAttended,
-        attendance_records: newRecords,
-        updated_at: nowIso
-      }).eq('student_id', studentId).select().single();
-
-      if (error || !updatedStudent) throw error || new Error('Update failed');
-      setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
-      await logAudit(studentId, 'mark');
-    } catch (err: any) {
-      console.error('Attendance error:', err);
-      alert(`Failed to record attendance: ${err?.message ?? 'Unknown error'}`);
+      await recordWeekendAttendance(studentId, singaporeDateKey());
+    } catch (error) {
+      console.error('Attendance error:', error);
+      alert(`Failed to record attendance: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  };
+
+  const handleAlternateDateAttendance = async (attendanceDate: string) => {
+    if (!alternateDateStudent) throw new Error('Student not found.');
+
+    await recordWeekendAttendance(alternateDateStudent.student_id, attendanceDate);
   };
 
   const handleMakeup = async (studentId: string) => {
@@ -504,34 +405,7 @@ export default function AttendancePage() {
 
   const handleMissed = async (studentId: string) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      const { data: studentData, error: fetchError } = await supabase.from('students').select('*').eq('student_id', studentId).single();
-      if (fetchError || !studentData) throw fetchError || new Error('Student not found');
-
-      const attended = (studentData.attended ?? 0);
-      const missed = (studentData.missed ?? 0);
-      const totalWeeks = studentData.total_weeks ?? 0;
-
-      if ((attended + missed) >= totalWeeks) { alert('Subscription lessons already used.'); return; }
-
-      const nowIso = new Date().toISOString();
-      const newMissed = missed + 1;
-      const currentRecords = Array.isArray(studentData.attendance_records)
-          ? [...studentData.attendance_records]
-          : [];
-      const newRecords = [...currentRecords, makeAttendanceRecord(nowIso, 'missed')];
-
-      const { data: updatedStudent, error } = await supabase.from('students').update({
-        missed: newMissed,
-        attendance_records: newRecords,
-        updated_at: nowIso
-      }).eq('student_id', studentId).select().single();
-
-      if (error || !updatedStudent) throw error || new Error('Update failed');
-      setSearchResults(prev => prev.map(s => s.student_id === studentId ? updatedStudent : s));
-      await logAudit(studentId, 'missed');
+      await updateWeekendAttendance(studentId, 'missed');
     } catch (err: any) {
       console.error('Missed error:', err);
       alert(`Failed to mark missed: ${err?.message ?? 'Unknown error'}`);
@@ -907,6 +781,20 @@ export default function AttendancePage() {
                                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                     <button
                                         type="button"
+                                        className="alternate-date-btn"
+                                        onClick={() => setAlternateDateStudent(student)}
+                                        disabled={finished}
+                                        title={
+                                          finished
+                                              ? 'Subscription lessons completed'
+                                              : `Mark attendance for another ${student.student_day}`
+                                        }
+                                    >
+                                      Another date
+                                    </button>
+
+                                    <button
+                                        type="button"
                                         className="undo-btn"
                                         onClick={() => handleDeleteLastAttendance(student.student_id)}
                                         disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
@@ -964,6 +852,12 @@ export default function AttendancePage() {
                 </div>
             )}
           </div>
+
+          <AlternateAttendanceDateModal
+              student={alternateDateStudent}
+              onClose={() => setAlternateDateStudent(null)}
+              onConfirm={handleAlternateDateAttendance}
+          />
 
           <CrossProgrammeMakeupModal
               open={Boolean(makeupStudent)}

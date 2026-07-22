@@ -20,6 +20,7 @@ interface CalendarPickerProps {
     style?: CSSProperties;
     disabled?: boolean;
     ariaLabel?: string;
+    isDateDisabled?: (date: Date) => boolean;
 }
 
 const MONTHS = [
@@ -85,6 +86,7 @@ export default function CalendarPicker({
     style,
     disabled = false,
     ariaLabel,
+    isDateDisabled,
 }: CalendarPickerProps) {
     const selectedDate = useMemo(() => parseValue(value, mode), [value, mode]);
     const [open, setOpen] = useState(false);
@@ -183,6 +185,7 @@ export default function CalendarPicker({
     };
 
     const chooseDate = (date: Date) => {
+        if (isDateDisabled?.(date)) return;
         onChange(dateKey(date));
         setOpen(false);
         triggerRef.current?.focus();
@@ -196,6 +199,7 @@ export default function CalendarPicker({
 
     const chooseToday = () => {
         const today = new Date();
+        if (mode === 'date' && isDateDisabled?.(today)) return;
         onChange(mode === 'date' ? dateKey(today) : monthKey(today));
         setOpen(false);
         triggerRef.current?.focus();
@@ -272,6 +276,7 @@ export default function CalendarPicker({
                         const key = dateKey(date);
                         const selected = key === value;
                         const today = key === dateKey(new Date());
+                        const dateDisabled = Boolean(isDateDisabled?.(date));
                         return (
                             <button
                                 type="button"
@@ -280,6 +285,8 @@ export default function CalendarPicker({
                                 className={`${inCurrentMonth ? '' : 'is-outside'}${selected ? ' is-selected' : ''}${today ? ' is-today' : ''}`}
                                 aria-label={date.toLocaleDateString('en-SG', { day: 'numeric', month: 'long', year: 'numeric' })}
                                 aria-selected={selected}
+                                aria-disabled={dateDisabled}
+                                disabled={dateDisabled}
                                 onClick={() => chooseDate(date)}
                             >
                                 {date.getDate()}
@@ -311,7 +318,13 @@ export default function CalendarPicker({
             )}
 
             <div className="calendar-popover__footer">
-                <button type="button" onClick={chooseToday}>{mode === 'date' ? 'Today' : 'This month'}</button>
+                <button
+                    type="button"
+                    onClick={chooseToday}
+                    disabled={mode === 'date' && Boolean(isDateDisabled?.(new Date()))}
+                >
+                    {mode === 'date' ? 'Today' : 'This month'}
+                </button>
                 <button type="button" onClick={() => setOpen(false)}>Close</button>
             </div>
         </div>,
