@@ -7,11 +7,7 @@ import Link from 'next/link';
 import AppHeader from './../components/AppHeader';
 import CalendarPicker from './../components/CalendarPicker';
 import CrossProgrammeMakeupModal, { MakeupSelectionResult } from './../components/CrossProgrammeMakeupModal';
-import EarlierOneToOneAttendanceModal, {
-    type EarlierOneToOneSessionOption,
-} from './../components/EarlierOneToOneAttendanceModal';
 import { authenticatedFetch } from './../lib/authenticated-fetch';
-import { singaporeDateKey } from './../lib/weekend-attendance-date';
 import TableRefreshButton from './../components/TableRefreshButton';
 import './../styles.css';
 import './../dashboard/dashboard.css';
@@ -138,10 +134,6 @@ export default function TrainingPage() {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
     const [makeupSession, setMakeupSession] = useState<OneToOneSession | null>(null);
-    const [showEarlierAttendance, setShowEarlierAttendance] = useState(false);
-    const [earlierAttendanceLoading, setEarlierAttendanceLoading] = useState(false);
-    const [earlierAttendanceError, setEarlierAttendanceError] = useState('');
-    const [earlierAttendanceSessions, setEarlierAttendanceSessions] = useState<EarlierOneToOneSessionOption[]>([]);
     const [selectedMonth, setSelectedMonth] = useState(() => {
         const d = new Date();
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -593,74 +585,6 @@ export default function TrainingPage() {
         }
     };
 
-    const openEarlierAttendance = async () => {
-        setShowEarlierAttendance(true);
-        setEarlierAttendanceLoading(true);
-        setEarlierAttendanceError('');
-        setEarlierAttendanceSessions([]);
-
-        try {
-            const { data, error } = await supabase
-                .from('one_to_one_sessions')
-                .select('id, session_date, student_id, coach_id, removed_from_training, attendance_status, makeup_target_type, makeup_usage_id')
-                .or('removed_from_training.is.null,removed_from_training.eq.false')
-                .lt('session_date', singaporeDateKey())
-                .order('session_date', { ascending: false })
-                .order('id', { ascending: false });
-
-            if (error) throw error;
-
-            const options = ((data || []) as OneToOneSession[])
-                .filter((session) => (
-                    (session.attendance_status || 'scheduled') === 'scheduled'
-                    && !session.makeup_target_type
-                    && !session.makeup_usage_id
-                ))
-                .map((session) => ({
-                    id: session.id,
-                    sessionDate: normalizeDateKey(session.session_date),
-                    studentName: studentName(session.student_id),
-                    coachName: coachName(session.coach_id),
-                }));
-
-            setEarlierAttendanceSessions(options);
-        } catch (error: any) {
-            console.error(error);
-            setEarlierAttendanceError(error?.message || 'Failed to load earlier 1-1 sessions.');
-        } finally {
-            setEarlierAttendanceLoading(false);
-        }
-    };
-
-    const markEarlierAttendance = async (sessionId: number) => {
-        const response = await authenticatedFetch('/api/one-to-one-attendance/earlier', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session_id: sessionId }),
-        });
-        const payload = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-            throw new Error(payload.error || 'Failed to mark the earlier 1-1 session.');
-        }
-
-        const updated = payload.session as OneToOneSession | undefined;
-        if (!updated) throw new Error('The updated 1-1 session was not returned.');
-
-        const normalized: OneToOneSession = {
-            ...updated,
-            session_date: normalizeDateKey(updated.session_date),
-        };
-        const updatedMonth = normalized.session_date.slice(0, 7);
-
-        setEarlierAttendanceSessions((current) => current.filter((item) => item.id !== normalized.id));
-        if (updatedMonth === selectedMonth) {
-            setSessions((current) => current.map((item) => item.id === normalized.id ? normalized : item));
-        } else {
-            setSelectedMonth(updatedMonth);
-        }
-    };
-
     const studentName = (id: string) => students.find(s => s.id === id)?.student_name || 'Missing 1-1 student';
     const coachName = (id: string) => coaches.find(c => c.id === id) ? getDisplayName(coaches.find(c => c.id === id)!) : 'Unassigned coach';
 
@@ -689,21 +613,9 @@ export default function TrainingPage() {
                                 value={selectedMonth}
                                 onChange={setSelectedMonth}
                             />
-                            <p className="muted" style={{ margin: '0.45rem 0 0', fontSize: '0.76rem', lineHeight: 1.45 }}>
-                                Use Another date to find an earlier booked lesson that has not been marked yet.
-                            </p>
                         </div>
                     </div>
                     <div className="filter-buttons">
-                        <button
-                            type="button"
-                            className="btn share-btn"
-                            style={{ flex: '1 1 140px' }}
-                            onClick={() => void openEarlierAttendance()}
-                            disabled={earlierAttendanceLoading}
-                        >
-                            Another date
-                        </button>
                         <TableRefreshButton
                             onRefresh={loadData}
                             refreshing={loading}
@@ -909,14 +821,6 @@ export default function TrainingPage() {
                     studentName={students.find((student) => student.id === makeupSession?.student_id)?.student_name || ''}
                     onClose={() => setMakeupSession(null)}
                     onCompleted={completeOneToOneMakeup}
-                />
-                <EarlierOneToOneAttendanceModal
-                    open={showEarlierAttendance}
-                    loading={earlierAttendanceLoading}
-                    loadError={earlierAttendanceError}
-                    sessions={earlierAttendanceSessions}
-                    onClose={() => setShowEarlierAttendance(false)}
-                    onConfirm={markEarlierAttendance}
                 />
             </main>
         </div>

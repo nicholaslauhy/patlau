@@ -141,64 +141,6 @@
     font-size: 0.76rem;
 }
 
-.earlier-one-to-one-list {
-    display: grid;
-    gap: 0.65rem;
-    max-height: min(46vh, 420px);
-    overflow-y: auto;
-    padding-right: 0.15rem;
-}
-
-.earlier-one-to-one-option {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.85rem 0.95rem;
-    border: 1px solid var(--border-solid);
-    border-radius: 12px;
-    background: #fff;
-    cursor: pointer;
-}
-
-.earlier-one-to-one-option.is-selected {
-    border-color: #78b5df;
-    background: #eef7fd;
-    box-shadow: 0 0 0 3px rgba(22, 119, 200, 0.1);
-}
-
-.earlier-one-to-one-option input {
-    width: 18px;
-    height: 18px;
-    accent-color: var(--primary);
-}
-
-.earlier-one-to-one-option > span {
-    min-width: 0;
-    display: grid;
-    gap: 0.2rem;
-}
-
-.earlier-one-to-one-option strong {
-    color: var(--foreground);
-    font-size: 0.88rem;
-}
-
-.earlier-one-to-one-option span span {
-    color: var(--muted-foreground);
-    font-size: 0.75rem;
-    line-height: 1.4;
-}
-
-.earlier-one-to-one-empty {
-    padding: 1.2rem;
-    border: 1px dashed #cad8e5;
-    border-radius: 12px;
-    background: #fff;
-    color: var(--muted-foreground);
-    text-align: center;
-}
-
 .alternate-attendance-modal__actions {
     flex: 0 0 auto;
     display: grid;

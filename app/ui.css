@@ -2120,16 +2120,6 @@ td.attendance-history ul li.ah-makeup { background: #e8f1fd; color: #245f9d; }
     width: 100%;
   }
 
-  .training-toolbar .filter-buttons {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .training-toolbar .filter-buttons > .btn,
-  .training-toolbar .filter-buttons > .table-refresh-button {
-    width: 100%;
-    min-width: 0;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

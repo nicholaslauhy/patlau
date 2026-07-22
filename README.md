@@ -86,8 +86,6 @@ Each programme menu links to a responsive attendance report backed by the same S
 
 Weekend, Weekday, and MatchPlay attendance can be marked either through their normal current-session action or for any selected date before today. Alternate dates can fall on any weekday, but cannot be today, be in the future, or duplicate an existing attendance-history date. Weekday backdating retains the selected schedule row and session hours. The authenticated endpoints validate these rules again on the server and record a readable audit event.
 
-Each 1-1 attendance status already belongs to a dated booked session. The 1-1 `Another date` button lists earlier unmarked bookings and marks the selected session as Attended. It does not create an extra lesson or change the booking date, coach assignment, or payment record.
-
 The cross-programme makeup dialog uses Supabase RPC functions to find the latest available credit and complete its usage. It records:
 
 - the source programme and missed lesson;
