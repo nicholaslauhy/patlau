@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     CLOSED_CONVERSATION_MESSAGE,
+    DELETE_CONVERSATION_CANCELLED_MESSAGE,
+    DELETE_CONVERSATION_CONFIRMATION_MESSAGE,
+    DELETED_CONVERSATION_MESSAGE,
     REOPENED_CONVERSATION_MESSAGE,
     coachHandoffKeyboard,
     coachReplyCloseKeyboard,
+    deleteConversationConfirmationKeyboard,
     formatCoachReply,
     formatAiReply,
     formatSystemMessage,
+    isAuthorizedParentDeleteCallback,
     normaliseCoachReferences,
     parentExplicitlyRequestsCoach,
     parentConversationStatusMessage,
@@ -16,6 +21,7 @@ import {
     reopenConversationKeyboard,
     shouldDeliverSupportAiResponse,
     shouldOfferDelayedFeedback,
+    supportHelpKeyboard,
 } from "../app/lib/telegram-support-flow.ts";
 
 test("AI messages use a disclaimer while Coach replies avoid personal attribution", () => {
@@ -130,9 +136,67 @@ test("closed conversations provide a safe, explicit Telegram reopen action", () 
     assert.match(CLOSED_CONVERSATION_MESSAGE, /send a new message/i);
     assert.match(REOPENED_CONVERSATION_MESSAGE, /conversation reopened/i);
     assert.deepEqual(reopenConversationKeyboard(conversationId), {
+        inline_keyboard: [
+            [{
+                text: "Reopen conversation",
+                callback_data: `ps|reopen|${conversationId}`,
+            }],
+            [{
+                text: "Delete stored conversation",
+                callback_data: `ps|delete_request|${conversationId}`,
+            }],
+        ],
+    });
+});
+
+test("stored-conversation deletion is explicit, confirmed, and within Telegram callback limits", () => {
+    const conversationId = "3de79fc3-7fbd-4f58-bf4b-a26f757595b1";
+    const helpKeyboard = supportHelpKeyboard(conversationId);
+    const confirmationKeyboard = deleteConversationConfirmationKeyboard(conversationId);
+
+    assert.match(DELETE_CONVERSATION_CONFIRMATION_MESSAGE, /permanently delete/i);
+    assert.match(DELETE_CONVERSATION_CONFIRMATION_MESSAGE, /cannot be undone/i);
+    assert.match(DELETE_CONVERSATION_CONFIRMATION_MESSAGE, /does not delete messages already visible in Telegram/i);
+    assert.match(DELETE_CONVERSATION_CANCELLED_MESSAGE, /still available/i);
+    assert.match(DELETED_CONVERSATION_MESSAGE, /permanently deleted/i);
+    assert.deepEqual(helpKeyboard, {
         inline_keyboard: [[{
-            text: "Reopen conversation",
-            callback_data: `ps|reopen|${conversationId}`,
+            text: "Delete stored conversation",
+            callback_data: `ps|delete_request|${conversationId}`,
         }]],
     });
+    assert.deepEqual(confirmationKeyboard, {
+        inline_keyboard: [[
+            {
+                text: "Yes, delete permanently",
+                callback_data: `ps|delete_confirm|${conversationId}`,
+            },
+            {
+                text: "Cancel",
+                callback_data: `ps|delete_cancel|${conversationId}`,
+            },
+        ]],
+    });
+
+    for (const keyboard of [helpKeyboard, confirmationKeyboard, reopenConversationKeyboard(conversationId)]) {
+        for (const button of keyboard.inline_keyboard.flat()) {
+            assert.ok(Buffer.byteLength(button.callback_data, "utf8") <= 64);
+        }
+    }
+});
+
+test("conversation deletion callbacks belong only to the matching parent in a private chat", () => {
+    const valid = {
+        action: "delete_confirm",
+        callbackUserId: "1199887714",
+        callbackChatId: "1199887714",
+        callbackChatType: "private",
+        contactUserId: "1199887714",
+        contactChatId: "1199887714",
+    };
+    assert.equal(isAuthorizedParentDeleteCallback(valid), true);
+    assert.equal(isAuthorizedParentDeleteCallback({ ...valid, callbackUserId: "99887766" }), false);
+    assert.equal(isAuthorizedParentDeleteCallback({ ...valid, callbackChatId: "99887766" }), false);
+    assert.equal(isAuthorizedParentDeleteCallback({ ...valid, callbackChatType: "group" }), false);
+    assert.equal(isAuthorizedParentDeleteCallback({ ...valid, action: "reopen" }), false);
 });
