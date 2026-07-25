@@ -1,5 +1,4 @@
 export const AI_MESSAGE_DISCLAIMER = "This is an automated AI-generated message based on the information provided.";
-export const COACH_REPLY_GUIDANCE = "You can continue typing your message here. Use /status to check the conversation, or /close to close it.";
 export const AI_INTRO_MESSAGE = "Hello! I can help with general coaching information, schedules, locations, fees and current announcements. Simply type and send your question below—there is no need to select an option first. You may also send a photo; it is automatically checked only to route the query, and possible injury, safety or complaint photos go directly to Coach Patrick. If your question needs personal assistance, I’ll connect you directly with Coach Patrick.";
 export const CLOSED_CONVERSATION_MESSAGE = "This conversation is closed. Select Reopen conversation below or simply send a new message whenever you need more help.";
 export const COACH_CLOSED_CONVERSATION_MESSAGE = "Coach Patrick has closed this conversation. Select Reopen conversation below or simply send a new message whenever you need more help.";
@@ -71,11 +70,8 @@ export function formatSystemMessage(content: string) {
     return normaliseCoachReferences(content).trim().slice(0, 3900).trimEnd();
 }
 
-export function formatCoachReply(content: string, includeConversationGuidance = false) {
-    if (includeConversationGuidance) {
-        return formatWithDisclaimer(content, COACH_REPLY_GUIDANCE);
-    }
-    return normaliseCoachReferences(content).trim().slice(0, 3900).trimEnd();
+export function formatCoachReply(content: string) {
+    return content.trim().slice(0, 3900).trimEnd();
 }
 
 export function parentConversationStatusMessage(status: string) {
@@ -108,6 +104,24 @@ export function parentIsDissatisfied(text: string) {
     return /\b(?:i(?:'m|\s+am|\s+feel)|this\s+is\s+making\s+me|you(?:'ve|\s+have)\s+made\s+me)\s+(?:very\s+)?(?:dissatisfied|frustrated|annoyed|upset|angry)\b/i.test(text)
         || /\b(?:i(?:'m|\s+am)\s+not\s+(?:happy|satisfied)|this\s+is\s+not\s+helpful|your\s+(?:answer|reply|response)\s+is\s+(?:unacceptable|ridiculous|useless))\b/i.test(text)
         || /\b(?:you(?:'re|\s+are)?\s+not\s+helping|(?:that|this)\s+(?:does(?:n't|\s+not)|did(?:n't|\s+not))\s+answer|(?:that|this)\s+does(?:n't|\s+not)\s+make\s+sense|wrong\s+answer|not\s+what\s+i\s+asked|stop\s+repeating|i\s+already\s+asked|you\s+keep\s+repeating)\b/i.test(text);
+}
+
+export function parentRaisesComplaint(text: string) {
+    return /\b(?:complaint|complain(?:ed|ing|s)?|refund|dispute|unacceptable|misconduct)\b/i.test(text)
+        || parentIsDissatisfied(text);
+}
+
+export function parentRaisesInjuryOrSafetyConcern(text: string) {
+    return /\b(?:injur(?:y|ies|ed)|hurt|bleed(?:ing)?|faint(?:ed|ing)?|unconscious|collaps(?:e|ed|ing)|accident|sprain(?:ed)?|fractur(?:e|ed)|concussion|seizure|allergic\s+reaction|can(?:not|'t)\s+breathe|chest\s+pain|hospital|ambulance|medical\s+emergency|unsafe|safety\s+(?:concern|issue|risk)|abuse|abused|harass(?:ed|ment)|assault(?:ed)?|immediate\s+danger)\b/i.test(text);
+}
+
+export function shouldDeliverSupportAiResponse(
+    status: string,
+    inboundMessageId: string | number,
+    latestInboundMessageId: string | number | null | undefined,
+) {
+    return ["ai_active", "waiting_parent"].includes(status)
+        && String(inboundMessageId) === String(latestInboundMessageId || "");
 }
 
 export function shouldOfferDelayedFeedback(previousAiReplyCount: number) {

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "crypto";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import type { SupportStatus } from "../../../../types/support";
 import {
     answerSupportCallback,
@@ -21,10 +21,13 @@ import {
     normaliseCoachReferences,
     parentConversationStatusMessage,
     parentExplicitlyRequestsCoach,
-    parentIsDissatisfied,
+    parentRaisesComplaint,
+    parentRaisesInjuryOrSafetyConcern,
     reopenConversationKeyboard,
+    shouldDeliverSupportAiResponse,
     shouldOfferDelayedFeedback,
 } from "../../../lib/telegram-support-flow";
+import { ensureTelegramSupportCommands } from "../../../lib/telegram-support-commands";
 import {
     canCloseAfterCoachReply,
     isSubstantiveCoachReply,
@@ -106,23 +109,27 @@ async function saveInbound(
     content: string,
     sourceRefs: string[] = [],
 ) {
-    const { error } = await supportAdmin.from("support_messages").insert({
-        conversation_id: conversationId,
-        telegram_message_id: telegramMessageId,
-        direction: "inbound",
-        sender_type: "parent",
-        content,
-        source_refs: sourceRefs,
-        telegram_delivery_status: "received",
-    });
+    const { data, error } = await supportAdmin
+        .from("support_messages")
+        .insert({
+            conversation_id: conversationId,
+            telegram_message_id: telegramMessageId,
+            direction: "inbound",
+            sender_type: "parent",
+            content,
+            source_refs: sourceRefs,
+            telegram_delivery_status: "received",
+        })
+        .select("id")
+        .single();
     if (error?.code === "23505") return false;
     if (error) throw error;
-    return true;
+    return String(data.id);
 }
 
 const IMAGE_PROCESSING_LEASE_MS = 120_000;
 const MAX_AI_IMAGES_PER_TEN_MINUTES = 5;
-const IMAGE_AI_OWNED_STATUSES: SupportStatus[] = [
+const AI_OWNED_STATUSES: SupportStatus[] = [
     "ai_active",
     "waiting_parent",
     "resolved",
@@ -398,6 +405,7 @@ async function setConversationStatus(
     status: SupportStatus,
     actor: "parent" | "ai" | "system",
     reason?: string,
+    onlyIfStatusIn?: SupportStatus[],
 ) {
     const now = new Date().toISOString();
     const updates: Record<string, unknown> = {
@@ -407,12 +415,21 @@ async function setConversationStatus(
         resolved_at: status === "resolved" ? now : null,
         closed_at: status === "closed_parent" ? now : null,
     };
-    const { error } = await supportAdmin.from("support_conversations").update(updates).eq("id", conversation.id);
+    let query = supportAdmin
+        .from("support_conversations")
+        .update(updates)
+        .eq("id", conversation.id);
+    if (onlyIfStatusIn?.length) {
+        query = query.in("status", onlyIfStatusIn);
+    }
+    const { data, error } = await query.select("id");
     if (error) throw error;
+    if (!data?.length) return false;
     if (conversation.status !== status) {
         await recordSupportStatus(conversation.id, conversation.status, status, actor, reason || null);
     }
     conversation.status = status;
+    return true;
 }
 
 async function reopenConversationFromTelegram(
@@ -1042,7 +1059,7 @@ async function offerCoachHandoff(
     prompt: string,
     reason: string,
 ) {
-    await sendAndStore(
+    const telegramMessage = await sendAndStore(
         conversation.id,
         chatId,
         prompt,
@@ -1050,7 +1067,21 @@ async function offerCoachHandoff(
         [],
         coachHandoffKeyboard(conversation.id),
     );
-    await setConversationStatus(conversation, "waiting_parent", "ai", `Waiting for parent handoff confirmation: ${reason}`);
+    const statusChanged = await setConversationStatus(
+        conversation,
+        "waiting_parent",
+        "ai",
+        `Waiting for parent handoff confirmation: ${reason}`,
+        AI_OWNED_STATUSES,
+    );
+    if (!statusChanged) {
+        try {
+            await clearSupportTelegramKeyboard(chatId, telegramMessage.message_id);
+        } catch {
+            console.error("Could not clear a superseded Coach handoff control.");
+        }
+    }
+    return statusChanged;
 }
 
 async function latestInboundMessage(conversationId: string) {
@@ -1064,6 +1095,38 @@ async function latestInboundMessage(conversationId: string) {
         .maybeSingle();
     if (error) throw error;
     return String(data?.content || "Parent requested Coach Patrick.");
+}
+
+async function aiTextTurnIsCurrent(
+    conversation: any,
+    inboundMessageId: string,
+) {
+    const [conversationResult, latestInboundResult] = await Promise.all([
+        supportAdmin
+            .from("support_conversations")
+            .select("status")
+            .eq("id", conversation.id)
+            .maybeSingle(),
+        supportAdmin
+            .from("support_messages")
+            .select("id")
+            .eq("conversation_id", conversation.id)
+            .eq("sender_type", "parent")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+    ]);
+    if (conversationResult.error) throw conversationResult.error;
+    if (latestInboundResult.error) throw latestInboundResult.error;
+
+    const currentStatus = String(conversationResult.data?.status || "");
+    const isCurrent = shouldDeliverSupportAiResponse(
+        currentStatus,
+        inboundMessageId,
+        latestInboundResult.data?.id,
+    );
+    if (isCurrent) conversation.status = currentStatus;
+    return isCurrent;
 }
 
 async function isLatestConversationMessage(conversationId: string, telegramMessageId: string) {
@@ -1168,7 +1231,7 @@ async function handleTelegramSupportImage(
             "Parent sent several photos. Open the secured conversation to review them.",
             "The automated image limit was reached and Coach Patrick's review is required.",
             "I've received several photos in a short period, so I've paused the AI image checks and escalated the conversation to Coach Patrick. You can continue messaging here.",
-            IMAGE_AI_OWNED_STATUSES,
+            AI_OWNED_STATUSES,
         );
         if (!escalated) {
             const changed = await imageProcessingInterruption(
@@ -1220,7 +1283,7 @@ async function handleTelegramSupportImage(
             "Parent sent a photo. Open the secured conversation to review it.",
             reason,
             supportImageEscalationMessage(triage, analysisFailed),
-            IMAGE_AI_OWNED_STATUSES,
+            AI_OWNED_STATUSES,
         );
         if (!escalated) {
             const changed = await imageProcessingInterruption(
@@ -1334,7 +1397,7 @@ async function handleTelegramSupportImage(
             "Parent sent a photo. Open the secured conversation to review it.",
             "The routine image enquiry could not be answered safely by the AI.",
             "I'm unable to complete that answer right now, so I've escalated the conversation to Coach Patrick. You can continue messaging here.",
-            IMAGE_AI_OWNED_STATUSES,
+            AI_OWNED_STATUSES,
         );
         if (!escalated) {
             const changed = await imageProcessingInterruption(
@@ -1358,6 +1421,16 @@ export async function POST(request: Request) {
     }
 
     try {
+        after(async () => {
+            try {
+                await ensureTelegramSupportCommands();
+            } catch {
+                // Command-menu synchronization is best effort and must never
+                // stop a parent message from being processed.
+                console.error("Could not synchronize the Telegram parent-support command menu.");
+            }
+        });
+
         const update = await request.json();
         if (update.callback_query) {
             const callbackChatId = String(update.callback_query.message?.chat?.id || "");
@@ -1481,6 +1554,61 @@ export async function POST(request: Request) {
             return NextResponse.json({ ok: true });
         }
 
+        const commandArguments = text.startsWith("/")
+            ? text.replace(/^\S+\s*/, "").trim()
+            : "";
+        if (
+            commandArguments
+            && !["escalated", "human_active"].includes(conversation.status)
+            && (
+                parentRaisesInjuryOrSafetyConcern(commandArguments)
+                || parentRaisesComplaint(commandArguments)
+            )
+        ) {
+            const inboundMessageId = await saveInbound(
+                conversation.id,
+                String(message.message_id),
+                text,
+            );
+            if (!inboundMessageId) {
+                return NextResponse.json({ ok: true, duplicate: true });
+            }
+            await supportAdmin.from("support_conversations").update({
+                last_message_at: new Date().toISOString(),
+                last_message_preview: text.slice(0, 180),
+                unread_count: Number(conversation.unread_count || 0) + 1,
+            }).eq("id", conversation.id);
+
+            if (parentRaisesInjuryOrSafetyConcern(commandArguments)) {
+                const escalated = await escalate(
+                    conversation,
+                    chatId,
+                    parentName(message.from),
+                    text,
+                    "Parent raised an injury or safety concern that requires Coach Patrick's immediate review.",
+                    "I’m sorry to hear that. I’ve escalated this immediately to Coach Patrick. If anyone may need urgent medical attention or is in immediate danger, please seek appropriate emergency or medical help now. You can continue messaging here.",
+                    AI_OWNED_STATUSES,
+                );
+                if (!escalated) {
+                    return NextResponse.json({ ok: true, superseded: true });
+                }
+            } else {
+                const escalated = await escalate(
+                    conversation,
+                    chatId,
+                    parentName(message.from),
+                    text,
+                    "Parent raised a complaint, dispute, refund request, or clear dissatisfaction.",
+                    "Thank you for raising this. I’ve escalated it directly to Coach Patrick, who will review it and reply in this chat. You can continue messaging here.",
+                    AI_OWNED_STATUSES,
+                );
+                if (!escalated) {
+                    return NextResponse.json({ ok: true, superseded: true });
+                }
+            }
+            return NextResponse.json({ ok: true, escalated: true });
+        }
+
         if (command === "/start") {
             if (["escalated", "human_active"].includes(conversation.status)) {
                 await sendAndStore(conversation.id, chatId, "Coach Patrick is already handling this conversation. You can continue typing your messages here, and the AI assistant will remain paused.", "system");
@@ -1582,8 +1710,8 @@ export async function POST(request: Request) {
             return NextResponse.json({ ok: true });
         }
 
-        const inserted = await saveInbound(conversation.id, String(message.message_id), text);
-        if (!inserted) return NextResponse.json({ ok: true, duplicate: true });
+        const inboundMessageId = await saveInbound(conversation.id, String(message.message_id), text);
+        if (!inboundMessageId) return NextResponse.json({ ok: true, duplicate: true });
         await supportAdmin.from("support_conversations").update({
             last_message_at: new Date().toISOString(),
             last_message_preview: text.slice(0, 180),
@@ -1606,6 +1734,38 @@ export async function POST(request: Request) {
             }
             return NextResponse.json({ ok: true, waitingForHuman: true });
         }
+        if (parentRaisesInjuryOrSafetyConcern(text)) {
+            const escalated = await escalate(
+                conversation,
+                chatId,
+                name,
+                text,
+                "Parent raised an injury or safety concern that requires Coach Patrick's immediate review.",
+                "I’m sorry to hear that. I’ve escalated this immediately to Coach Patrick. If anyone may need urgent medical attention or is in immediate danger, please seek appropriate emergency or medical help now. You can continue messaging here.",
+                AI_OWNED_STATUSES,
+            );
+            return NextResponse.json(
+                escalated
+                    ? { ok: true, escalated: true }
+                    : { ok: true, superseded: true },
+            );
+        }
+        if (parentRaisesComplaint(text)) {
+            const escalated = await escalate(
+                conversation,
+                chatId,
+                name,
+                text,
+                "Parent raised a complaint, dispute, refund request, or clear dissatisfaction.",
+                "Thank you for raising this. I’ve escalated it directly to Coach Patrick, who will review it and reply in this chat. You can continue messaging here.",
+                AI_OWNED_STATUSES,
+            );
+            return NextResponse.json(
+                escalated
+                    ? { ok: true, escalated: true }
+                    : { ok: true, superseded: true },
+            );
+        }
         if (parentExplicitlyRequestsCoach(text)) {
             await offerCoachHandoff(
                 conversation,
@@ -1615,42 +1775,50 @@ export async function POST(request: Request) {
             );
             return NextResponse.json({ ok: true });
         }
-        if (/\b(refund|complaint|complain|dispute)\b/i.test(text) || parentIsDissatisfied(text)) {
-            await offerCoachHandoff(
-                conversation,
-                chatId,
-                "I’m sorry this has been frustrating. Would you like me to connect you with Coach Patrick?",
-                "Parent expressed dissatisfaction or raised a sensitive complaint, refund, or dispute.",
-            );
-            return NextResponse.json({ ok: true });
-        }
         if (["resolved", "closed_parent"].includes(conversation.status)) {
             await setConversationStatus(conversation, "ai_active", "parent", "Parent sent a new message.");
         }
 
         if (await moderateText(text)) {
-            await offerCoachHandoff(
+            if (!await aiTextTurnIsCurrent(conversation, inboundMessageId)) {
+                return NextResponse.json({ ok: true, superseded: true });
+            }
+            const escalated = await escalate(
                 conversation,
                 chatId,
-                "I’m not able to help with that confidently here. Would you like me to connect you with Coach Patrick?",
-                "Message requires human review.",
+                name,
+                text,
+                "Message requires immediate safety review by Coach Patrick.",
+                "I’m not able to handle that safely here, so I’ve escalated the conversation directly to Coach Patrick. You can continue messaging in this chat.",
+                AI_OWNED_STATUSES,
             );
-            return NextResponse.json({ ok: true });
+            return NextResponse.json(
+                escalated
+                    ? { ok: true, escalated: true }
+                    : { ok: true, superseded: true },
+            );
         }
 
         try {
             const result = await generateSupportReply(conversation.id, contact.telegram_user_id || chatId);
+            if (!await aiTextTurnIsCurrent(conversation, inboundMessageId)) {
+                return NextResponse.json({ ok: true, superseded: true });
+            }
             if (result.needsHuman || !result.reply) {
-                await offerCoachHandoff(
+                const offered = await offerCoachHandoff(
                     conversation,
                     chatId,
                     "I’m not able to answer that confidently from the current information. Would you like me to connect you with Coach Patrick?",
                     result.reason,
                 );
-                return NextResponse.json({ ok: true, handoffOffered: true });
+                return NextResponse.json(
+                    offered
+                        ? { ok: true, handoffOffered: true }
+                        : { ok: true, superseded: true },
+                );
             }
             const includeDelayedFeedback = shouldOfferDelayedFeedback(result.previousAiReplyCount);
-            await sendAndStore(
+            const telegramMessage = await sendAndStore(
                 conversation.id,
                 chatId,
                 result.reply,
@@ -1658,13 +1826,33 @@ export async function POST(request: Request) {
                 result.sources,
                 includeDelayedFeedback ? delayedFeedbackKeyboard(conversation.id) : undefined,
             );
-            await setConversationStatus(conversation, "waiting_parent", "ai", "AI response sent.");
-            await supportAdmin.from("support_conversations").update({
-                last_message_at: new Date().toISOString(),
-                last_message_preview: result.reply.slice(0, 180),
-            }).eq("id", conversation.id);
+            const statusChanged = await setConversationStatus(
+                conversation,
+                "waiting_parent",
+                "ai",
+                "AI response sent.",
+                ["ai_active", "waiting_parent"],
+            );
+            if (!statusChanged && includeDelayedFeedback) {
+                try {
+                    await clearSupportTelegramKeyboard(chatId, telegramMessage.message_id);
+                } catch {
+                    console.error("Could not clear a superseded AI feedback control.");
+                }
+            }
+            if (statusChanged) {
+                await supportAdmin.from("support_conversations").update({
+                    last_message_at: new Date().toISOString(),
+                    last_message_preview: result.reply.slice(0, 180),
+                })
+                    .eq("id", conversation.id)
+                    .eq("status", "waiting_parent");
+            }
         } catch (error) {
             console.error("AI support response failed:", error);
+            if (!await aiTextTurnIsCurrent(conversation, inboundMessageId)) {
+                return NextResponse.json({ ok: true, superseded: true });
+            }
             await offerCoachHandoff(
                 conversation,
                 chatId,

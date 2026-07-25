@@ -259,7 +259,7 @@ export async function POST(request: NextRequest) {
             try {
                 telegramMessage = await sendSupportTelegramMessage(
                     conversation.contact.telegram_chat_id,
-                    formatCoachReply(content, replyOffersConversationControls),
+                    formatCoachReply(content),
                 );
             } catch (deliveryError) {
                 // Keep the AI paused: a parent message may have arrived while Telegram delivery was in flight.
