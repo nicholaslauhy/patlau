@@ -92,6 +92,13 @@ export async function GET(request: NextRequest) {
 
         const conversationId = request.nextUrl.searchParams.get("conversation_id");
         if (conversationId) {
+            const { error: readError } = await auditedAdmin
+                .from("support_conversations")
+                .update({ unread_count: 0 })
+                .eq("id", conversationId)
+                .gt("unread_count", 0);
+            if (readError) throw readError;
+
             const { data: conversation, error: conversationError } = await auditedAdmin
                 .from("support_conversations")
                 .select("*, contact:support_contacts(*)")
@@ -106,10 +113,6 @@ export async function GET(request: NextRequest) {
                 .order("created_at", { ascending: true });
             if (messagesError) throw messagesError;
 
-            await auditedAdmin
-                .from("support_conversations")
-                .update({ unread_count: 0 })
-                .eq("id", conversationId);
             return NextResponse.json({
                 conversation,
                 messages: (messages || []).map(publicSupportMessage),
@@ -561,6 +564,93 @@ export async function POST(request: NextRequest) {
                 newValues: { status },
             });
             return NextResponse.json({ success: true, ...(notificationWarning ? { warning: notificationWarning } : {}) });
+        }
+
+        if (action === "delete_conversation") {
+            const conversationId = String(body.conversationId || "").trim();
+            const expectedUpdatedAt = String(body.expectedUpdatedAt || "").trim();
+            if (
+                !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(conversationId)
+                || !expectedUpdatedAt
+                || Number.isNaN(Date.parse(expectedUpdatedAt))
+            ) {
+                return NextResponse.json(
+                    { error: "A valid conversation and confirmation version are required." },
+                    { status: 400 },
+                );
+            }
+
+            const { data: existing, error: existingError } = await auditedAdmin
+                .from("support_conversations")
+                .select("id,status,updated_at,contact:support_contacts(first_name,last_name,username)")
+                .eq("id", conversationId)
+                .maybeSingle();
+            if (existingError) throw existingError;
+            if (!existing) {
+                return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
+            }
+            if (existing.updated_at !== expectedUpdatedAt) {
+                return NextResponse.json(
+                    {
+                        error: "This conversation changed after the confirmation opened. Review the latest messages before deleting it.",
+                    },
+                    { status: 409 },
+                );
+            }
+
+            const [messageCountResult, statusCountResult] = await Promise.all([
+                auditedAdmin
+                    .from("support_messages")
+                    .select("id", { count: "exact", head: true })
+                    .eq("conversation_id", conversationId),
+                auditedAdmin
+                    .from("support_status_events")
+                    .select("id", { count: "exact", head: true })
+                    .eq("conversation_id", conversationId),
+            ]);
+            if (messageCountResult.error) throw messageCountResult.error;
+            if (statusCountResult.error) throw statusCountResult.error;
+
+            const { data: deleted, error: deleteError } = await auditedAdmin
+                .from("support_conversations")
+                .delete()
+                .eq("id", conversationId)
+                .eq("updated_at", expectedUpdatedAt)
+                .select("id")
+                .maybeSingle();
+            if (deleteError) throw deleteError;
+            if (!deleted) {
+                return NextResponse.json(
+                    {
+                        error: "This conversation changed before deletion. Refresh it and try again.",
+                    },
+                    { status: 409 },
+                );
+            }
+
+            const contact = Array.isArray(existing.contact) ? existing.contact[0] : existing.contact;
+            const contactLabel = supportContactLabel(contact);
+            await writeAuditEvent({
+                request,
+                actor,
+                category: "support",
+                eventType: "support.conversation.deleted",
+                action: "delete",
+                outcome: "success",
+                summary: `${user.user_metadata?.name || user.email || "Superuser"} permanently deleted ${contactLabel}'s stored support conversation`,
+                actorSource: "support_api",
+                targetTable: "support_conversations",
+                targetRecordId: { id: conversationId },
+                targetLabel: contactLabel,
+                metadata: {
+                    previous_status: existing.status,
+                    deleted_message_count: messageCountResult.count || 0,
+                    deleted_status_event_count: statusCountResult.count || 0,
+                    contact_retained: true,
+                    telegram_messages_deleted: false,
+                },
+            });
+            return NextResponse.json({ success: true });
         }
 
         if (action === "save_knowledge") {

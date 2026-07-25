@@ -234,6 +234,13 @@ export default function ChatsPage() {
     const conversationRequestRef = useRef(0);
     const foregroundConversationIdRef = useRef("");
     const loadedConversationIdRef = useRef("");
+    const deleteDialogRef = useRef<HTMLElement>(null);
+    const deleteTriggerRef = useRef<HTMLButtonElement>(null);
+    const deleteCancelButtonRef = useRef<HTMLButtonElement>(null);
+    const conversationListRef = useRef<HTMLElement>(null);
+    const deleteCompletedRef = useRef(false);
+    const busyRef = useRef(false);
+    const deleteInFlightRef = useRef(false);
     const [userName, setUserName] = useState("");
     const [authorized, setAuthorized] = useState(false);
     const [tab, setTab] = useState<ChatsTab>("inbox");
@@ -246,6 +253,8 @@ export default function ChatsPage() {
     const [conversationLoadingId, setConversationLoadingId] = useState("");
     const [conversationLoadFailedId, setConversationLoadFailedId] = useState("");
     const [requestedConversationMissing, setRequestedConversationMissing] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<SupportConversation | null>(null);
+    const [deleteConversationError, setDeleteConversationError] = useState("");
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [knowledgeSearch, setKnowledgeSearch] = useState("");
@@ -255,6 +264,7 @@ export default function ChatsPage() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
+    busyRef.current = busy;
 
     const [knowledgeForm, setKnowledgeForm] = useState({
         id: "",
@@ -290,7 +300,11 @@ export default function ChatsPage() {
             },
         });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Support request failed.");
+        if (!response.ok) {
+            const requestError = new Error(data.error || "Support request failed.") as Error & { status?: number };
+            requestError.status = response.status;
+            throw requestError;
+        }
         return data;
     }, [token]);
 
@@ -308,6 +322,8 @@ export default function ChatsPage() {
         setConversationLoadingId(conversationId);
         setConversationLoadFailedId("");
         setRequestedConversationMissing(false);
+        setDeleteTarget(null);
+        setDeleteConversationError("");
         setError("");
     }, []);
 
@@ -337,6 +353,8 @@ export default function ChatsPage() {
                 setConversationLoadingId("");
                 setConversationLoadFailedId("");
                 setRequestedConversationMissing(false);
+                setDeleteTarget(null);
+                setDeleteConversationError("");
             }
 
             if (!selectedIdRef.current) {
@@ -433,6 +451,69 @@ export default function ChatsPage() {
     }, [loadConversation, selectedId]);
 
     useEffect(() => {
+        if (!deleteTarget) return;
+        const previousOverflow = document.body.style.overflow;
+        const previousPosition = document.body.style.position;
+        const previousTop = document.body.style.top;
+        const previousWidth = document.body.style.width;
+        const scrollPosition = window.scrollY;
+        const focusFrame = window.requestAnimationFrame(() => deleteCancelButtonRef.current?.focus());
+        const handleDialogKey = (event: KeyboardEvent) => {
+            if (event.key === "Escape" && !busyRef.current) {
+                setDeleteTarget(null);
+                setDeleteConversationError("");
+                return;
+            }
+            if (event.key === "Tab") {
+                const dialog = deleteDialogRef.current;
+                const focusable = Array.from(
+                    dialog?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") || [],
+                );
+                if (!focusable.length) {
+                    event.preventDefault();
+                    dialog?.focus();
+                    return;
+                }
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (!dialog?.contains(document.activeElement)) {
+                    event.preventDefault();
+                    first.focus();
+                } else if (event.shiftKey && document.activeElement === first) {
+                    event.preventDefault();
+                    last.focus();
+                } else if (!event.shiftKey && document.activeElement === last) {
+                    event.preventDefault();
+                    first.focus();
+                }
+            }
+        };
+        document.body.style.overflow = "hidden";
+        document.body.style.position = "fixed";
+        document.body.style.top = `-${scrollPosition}px`;
+        document.body.style.width = "100%";
+        document.addEventListener("keydown", handleDialogKey);
+        return () => {
+            window.cancelAnimationFrame(focusFrame);
+            document.body.style.overflow = previousOverflow;
+            document.body.style.position = previousPosition;
+            document.body.style.top = previousTop;
+            document.body.style.width = previousWidth;
+            window.scrollTo(0, scrollPosition);
+            document.removeEventListener("keydown", handleDialogKey);
+            const deletionCompleted = deleteCompletedRef.current;
+            window.requestAnimationFrame(() => {
+                if (deletionCompleted || !deleteTriggerRef.current) {
+                    conversationListRef.current?.focus();
+                } else {
+                    deleteTriggerRef.current?.focus();
+                }
+                deleteCompletedRef.current = false;
+            });
+        };
+    }, [deleteTarget]);
+
+    useEffect(() => {
         if (!authorized) return;
         const interval = window.setInterval(() => {
             void loadSummary(false);
@@ -505,6 +586,94 @@ export default function ChatsPage() {
         if (!selectedConversation || !["resolved", "closed_parent"].includes(selectedConversation.status)) return;
         if (!window.confirm("Reopen this conversation as Coach Patrick? The parent will be notified, and the AI will stay paused while you send a follow-up.")) return;
         void changeStatus("human_active", "Closed conversation reopened by Coach Patrick for a follow-up.");
+    };
+
+    const openConversationDeletion = () => {
+        if (!selectedConversation || busy) return;
+        deleteCompletedRef.current = false;
+        setDeleteConversationError("");
+        setDeleteTarget(selectedConversation);
+    };
+
+    const cancelConversationDeletion = () => {
+        if (busy) return;
+        setDeleteTarget(null);
+        setDeleteConversationError("");
+    };
+
+    const clearConversationFromView = (conversationId: string) => {
+        if (selectedIdRef.current === conversationId) {
+            conversationRequestRef.current += 1;
+            selectedIdRef.current = "";
+            foregroundConversationIdRef.current = "";
+            loadedConversationIdRef.current = "";
+            setSelectedId("");
+            setSelectedConversation(null);
+            setMessages([]);
+            setReply("");
+            setConversationLoadingId("");
+            setConversationLoadFailedId("");
+            setRequestedConversationMissing(false);
+        }
+        const deepLinkedConversation = new URLSearchParams(window.location.search).get("conversation");
+        if (deepLinkedConversation === conversationId) {
+            window.history.replaceState(window.history.state, "", "/chats");
+        }
+    };
+
+    const confirmConversationDeletion = async () => {
+        const target = deleteTarget;
+        if (!target || busy || deleteInFlightRef.current) return;
+        deleteInFlightRef.current = true;
+        deleteDialogRef.current?.focus();
+        setBusy(true);
+        setError("");
+        setSuccess("");
+        setDeleteConversationError("");
+        try {
+            await supportFetch("/api/support", {
+                method: "POST",
+                body: JSON.stringify({
+                    action: "delete_conversation",
+                    conversationId: target.id,
+                    expectedUpdatedAt: target.updated_at,
+                }),
+            });
+
+            clearConversationFromView(target.id);
+            deleteCompletedRef.current = true;
+            setDeleteTarget(null);
+            setSuccess(`Conversation with ${contactName(target)} permanently deleted.`);
+            await loadSummary(false);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "The conversation could not be deleted.";
+            const status = err instanceof Error
+                ? (err as Error & { status?: number }).status
+                : undefined;
+            if (status === 409) {
+                setDeleteTarget(null);
+                setDeleteConversationError("");
+                setError(`${message} Open Delete conversation again after reviewing the latest conversation.`);
+                if (selectedIdRef.current === target.id) {
+                    await loadConversation(target.id, true);
+                    window.requestAnimationFrame(() => deleteTriggerRef.current?.focus());
+                }
+            } else if (status === 404) {
+                clearConversationFromView(target.id);
+                deleteCompletedRef.current = true;
+                setDeleteTarget(null);
+                setDeleteConversationError("");
+                setSuccess("This conversation had already been removed.");
+                await loadSummary(false);
+            } else {
+                setDeleteConversationError(message);
+                setError(message);
+            }
+        } finally {
+            deleteInFlightRef.current = false;
+            setBusy(false);
+            window.requestAnimationFrame(() => deleteCancelButtonRef.current?.focus());
+        }
     };
 
     const resetKnowledgeForm = () => setKnowledgeForm({ id: "", title: "", category: "General", content: "", status: "draft" });
@@ -604,7 +773,12 @@ export default function ChatsPage() {
 
                 {tab === "inbox" && (
                     <section className="chats-inbox">
-                        <aside className="chats-conversation-list">
+                        <aside
+                            ref={conversationListRef}
+                            className="chats-conversation-list"
+                            aria-label="Parent conversations"
+                            tabIndex={-1}
+                        >
                             <div className="chats-list-tools">
                                 <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search parents or messages…" aria-label="Search conversations" />
                                 <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter by status">
@@ -700,6 +874,15 @@ export default function ChatsPage() {
                                                     )}
                                                 </>
                                             )}
+                                            <button
+                                                ref={deleteTriggerRef}
+                                                type="button"
+                                                className="is-destructive chats-delete-trigger"
+                                                onClick={openConversationDeletion}
+                                                disabled={busy}
+                                            >
+                                                Delete conversation
+                                            </button>
                                         </div>
                                     <div className="chats-messages" aria-live="polite">
                                         {messages.map((message, index) => {
@@ -809,6 +992,85 @@ export default function ChatsPage() {
                     </section>
                 )}
             </main>
+
+            {deleteTarget && (
+                <div
+                    className="chats-delete-modal__backdrop"
+                    role="presentation"
+                    onMouseDown={(event) => {
+                        if (event.currentTarget === event.target) cancelConversationDeletion();
+                    }}
+                >
+                    <section
+                        ref={deleteDialogRef}
+                        className="chats-delete-modal"
+                        role="dialog"
+                        tabIndex={-1}
+                        aria-modal="true"
+                        aria-labelledby="delete-conversation-title"
+                        aria-describedby={[
+                            "delete-conversation-description",
+                            !["resolved", "closed_parent"].includes(deleteTarget.status)
+                                ? "delete-conversation-active-warning"
+                                : "",
+                            "delete-conversation-scope",
+                        ].filter(Boolean).join(" ")}
+                    >
+                        <header className="chats-delete-modal__header">
+                            <span className="chats-delete-modal__icon" aria-hidden="true">!</span>
+                            <div>
+                                <span className="chats-eyebrow">Permanent action</span>
+                                <h2 id="delete-conversation-title">Delete this conversation?</h2>
+                            </div>
+                        </header>
+                        <div className="chats-delete-modal__body">
+                            <p id="delete-conversation-description">
+                                You are permanently deleting the stored conversation with <strong>{contactName(deleteTarget)}</strong>.
+                                This cannot be undone.
+                            </p>
+                            {!["resolved", "closed_parent"].includes(deleteTarget.status) && (
+                                <p id="delete-conversation-active-warning" className="chats-delete-modal__active-warning">
+                                    This conversation is currently active. Deleting it ends the current support flow immediately;
+                                    the parent's next message will begin a new conversation.
+                                </p>
+                            )}
+                            <ul id="delete-conversation-scope">
+                                <li>All stored messages, image references and status history for this conversation will be removed.</li>
+                                <li>The parent contact remains, so their next message will start a fresh conversation.</li>
+                                <li>Messages already visible in Telegram and previously exported audit records are not removed.</li>
+                            </ul>
+                            {busy && (
+                                <p className="chats-delete-modal__progress" role="status" aria-live="polite">
+                                    Deleting conversation…
+                                </p>
+                            )}
+                            {deleteConversationError && (
+                                <p className="chats-delete-modal__error" role="alert">
+                                    {deleteConversationError}
+                                </p>
+                            )}
+                        </div>
+                        <footer className="chats-delete-modal__actions">
+                            <button
+                                ref={deleteCancelButtonRef}
+                                type="button"
+                                onClick={cancelConversationDeletion}
+                                disabled={busy}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                className="is-destructive"
+                                onClick={() => void confirmConversationDeletion()}
+                                disabled={busy}
+                            >
+                                {busy ? "Deleting..." : "Delete permanently"}
+                            </button>
+                        </footer>
+                    </section>
+                </div>
+            )}
         </div>
     );
 }
