@@ -11,6 +11,18 @@ function normalizeKey(key: string) {
 /** Redacts credential-like text even when it was placed in a free-form field. */
 export function scrubSentryText(value: string) {
     return value
+        // Telegram file downloads and Bot API calls embed the bot credential in
+        // the URL path. Redact file paths too so media identifiers cannot leak
+        // through fetch errors, breadcrumbs, or serialized response metadata.
+        .replace(
+            /((?:https?:\/\/)?api\.telegram\.org\/file\/bot)[^/\s"'\\},\]]+(?:\/[^\s"'\\},\]]*)?/gi,
+            '$1[FILTERED]/[FILTERED_FILE]',
+        )
+        .replace(
+            /((?:https?:\/\/)?api\.telegram\.org\/bot)[^/\s"'\\},\]]+(?=\/|[\s"'\\},\]]|$)/gi,
+            '$1[FILTERED]',
+        )
+        .replace(/\bpatlau-internal:[^\s"'\\},\]]+/gi, '[FILTERED_INTERNAL_REF]')
         .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [FILTERED]')
         .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[FILTERED_JWT]')
         // Stop at JSON/string delimiters so re-scrubbing an already serialized

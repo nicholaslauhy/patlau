@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import AuthHeader from './components/AuthHeader';
 import PasswordField from './components/PasswordField';
+import { safeChatReturnPath } from './lib/auth-return';
 import './styles.css';
 
 const supabase = createBrowserClient(
@@ -85,7 +86,10 @@ export default function Login() {
                 console.error('Profile upsert failed:', profileError);
             }
 
-            router.push('/dashboard');
+            const requestedPath = safeChatReturnPath(
+                new URLSearchParams(window.location.search).get('next')
+            );
+            router.replace(requestedPath || '/dashboard');
         } catch (err) {
             console.error('Login error:', err);
             setError('Login failed — please try again.');

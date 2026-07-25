@@ -78,6 +78,14 @@ export async function answerSupportCallback(callbackQueryId: string, text: strin
 }
 
 export async function clearSupportTelegramKeyboard(chatId: string, messageId: string | number) {
+    return setSupportTelegramKeyboard(chatId, messageId, { inline_keyboard: [] });
+}
+
+export async function setSupportTelegramKeyboard(
+    chatId: string,
+    messageId: string | number,
+    replyMarkup: Record<string, unknown>,
+) {
     const token = process.env.TELEGRAM_PARENT_SUPPORT_BOT_TOKEN;
     if (!token) return;
     const response = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
@@ -86,11 +94,14 @@ export async function clearSupportTelegramKeyboard(chatId: string, messageId: st
         body: JSON.stringify({
             chat_id: chatId,
             message_id: messageId,
-            reply_markup: { inline_keyboard: [] },
+            reply_markup: replyMarkup,
         }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
+        if (String(data?.description || "").toLowerCase().includes("message is not modified")) {
+            return data?.result;
+        }
         throw new Error(data?.description || "Telegram could not update the conversation controls.");
     }
 }

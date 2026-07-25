@@ -1,6 +1,4 @@
 const CONVERSATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const APP_IDENTIFIER_PREFIX_PATTERN = /^[A-Z0-9]{10}$/;
-const BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]{2,199}$/;
 
 function productionBaseUrl(value: unknown) {
     if (typeof value !== "string" || !value.trim()) return null;
@@ -16,15 +14,27 @@ function productionBaseUrl(value: unknown) {
     }
 }
 
+export function normalizeSupportConversationId(value: unknown) {
+    const conversationId = typeof value === "string" ? value.trim() : "";
+    return CONVERSATION_ID_PATTERN.test(conversationId) ? conversationId : null;
+}
+
+export function buildSupportAppSchemeUrl(conversationIdValue: unknown) {
+    const conversationId = normalizeSupportConversationId(conversationIdValue);
+    if (!conversationId) return null;
+
+    const appUrl = new URL("patlau://chats");
+    appUrl.searchParams.set("conversation", conversationId);
+    return appUrl.toString();
+}
+
 export function buildSupportConversationLinks(
     conversationIdValue: unknown,
     siteUrlValue: unknown,
 ) {
-    const conversationId = typeof conversationIdValue === "string"
-        ? conversationIdValue.trim()
-        : "";
+    const conversationId = normalizeSupportConversationId(conversationIdValue);
     const baseUrl = productionBaseUrl(siteUrlValue);
-    if (!baseUrl || !CONVERSATION_ID_PATTERN.test(conversationId)) {
+    if (!baseUrl || !conversationId) {
         return { appUrl: null, webUrl: null };
     }
 
@@ -49,40 +59,4 @@ export function formatSupportConversationLinks(
     );
     if (!appUrl || !webUrl) return "";
     return `\n\nOpen in PatLau app: ${appUrl}\nOpen on website: ${webUrl}`;
-}
-
-export function buildAppleAppSiteAssociation(
-    identifierPrefixValue: unknown,
-    bundleIdValue: unknown,
-) {
-    const identifierPrefix = typeof identifierPrefixValue === "string"
-        ? identifierPrefixValue.trim()
-        : "";
-    const bundleId = typeof bundleIdValue === "string"
-        ? bundleIdValue.trim()
-        : "";
-    if (
-        !APP_IDENTIFIER_PREFIX_PATTERN.test(identifierPrefix)
-        || !BUNDLE_IDENTIFIER_PATTERN.test(bundleId)
-        || bundleId.includes("..")
-    ) {
-        return null;
-    }
-
-    return {
-        applinks: {
-            details: [
-                {
-                    appIDs: [`${identifierPrefix}.${bundleId}`],
-                    components: [
-                        {
-                            "/": "/open-in-app/chats",
-                            "?": { conversation: "*" },
-                            comment: "Opens a PatLau parent-support conversation in the iOS app.",
-                        },
-                    ],
-                },
-            ],
-        },
-    };
 }

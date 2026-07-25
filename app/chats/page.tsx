@@ -12,6 +12,8 @@ import type {
     SupportMessage,
     SupportStatus,
 } from "../../types/support";
+import { chatReturnPath } from "../lib/auth-return";
+import { canCloseAfterCoachReply } from "../lib/support-conversation-policy";
 import { normaliseCoachReferences } from "../lib/telegram-support-flow";
 import "../styles.css";
 import "../dashboard/dashboard.css";
@@ -39,7 +41,7 @@ const conversationModeCopy: Record<SupportStatus, { title: string; description: 
     escalated: { title: "Coach Patrick's attention is required", description: "The AI assistant has paused so Coach Patrick can review the conversation and reply personally." },
     human_active: { title: "Coach Patrick is handling this conversation", description: "The AI assistant is paused. Replies sent here are identified to the parent as coming from Coach Patrick." },
     resolved: { title: "Conversation closed", description: "Replies are paused. The parent can reopen it from Telegram, or you can reopen it here with the AI assistant." },
-    closed_parent: { title: "Conversation closed by the parent", description: "The parent ended this conversation. Only the parent can reopen it from Telegram or by sending a new message." },
+    closed_parent: { title: "Conversation closed by the parent", description: "The parent ended this conversation. Reopen as Coach Patrick only when a correction or important follow-up is needed." },
 };
 
 const senderDetails: Record<SupportMessage["sender_type"], { label: string; badge: string }> = {
@@ -143,6 +145,88 @@ function ChatsNotification({
     );
 }
 
+function SupportImagePreview({
+    messageId,
+    getToken,
+}: {
+    messageId: number;
+    getToken: () => Promise<string>;
+}) {
+    const [state, setState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+    const [imageUrl, setImageUrl] = useState("");
+    const [retryNonce, setRetryNonce] = useState(0);
+    const [requested, setRequested] = useState(false);
+
+    useEffect(() => {
+        if (!requested) return;
+        let cancelled = false;
+        let objectUrl = "";
+
+        const load = async () => {
+            setState("loading");
+            setImageUrl("");
+            try {
+                const accessToken = await getToken();
+                const response = await fetch(`/api/support/image?message_id=${encodeURIComponent(String(messageId))}`, {
+                    headers: { Authorization: `Bearer ${accessToken}` },
+                });
+                if (!response.ok) {
+                    const payload = await response.json().catch(() => null);
+                    throw new Error(payload?.error || "Could not load the image.");
+                }
+                const image = await response.blob();
+                objectUrl = URL.createObjectURL(image);
+                if (cancelled) return;
+                setImageUrl(objectUrl);
+                setState("ready");
+            } catch {
+                if (!cancelled) setState("error");
+            }
+        };
+
+        void load();
+        return () => {
+            cancelled = true;
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+    }, [getToken, messageId, requested, retryNonce]);
+
+    if (state === "idle") {
+        return (
+            <div className="chats-image-state chats-image-state--sensitive">
+                <button type="button" onClick={() => setRequested(true)}>View parent image</button>
+                <span>Loads only when you choose to view it.</span>
+            </div>
+        );
+    }
+    if (state === "loading") {
+        return <div className="chats-image-state" role="status">Loading parent image…</div>;
+    }
+    if (state === "error") {
+        return (
+            <div className="chats-image-state chats-image-state--error" role="status">
+                <span>Could not load this parent image.</span>
+                <button
+                    type="button"
+                    onClick={() => {
+                        setState("loading");
+                        setRetryNonce((value) => value + 1);
+                    }}
+                >
+                    Try again
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <a className="chats-image-preview" href={imageUrl} target="_blank" rel="noreferrer" aria-label="Open parent image at full size">
+            <img src={imageUrl} alt="Image sent by parent" />
+            <span>Open full size</span>
+        </a>
+    );
+}
+
 export default function ChatsPage() {
     const router = useRouter();
     const messageEndRef = useRef<HTMLDivElement>(null);
@@ -161,6 +245,7 @@ export default function ChatsPage() {
     const [messages, setMessages] = useState<SupportMessage[]>([]);
     const [conversationLoadingId, setConversationLoadingId] = useState("");
     const [conversationLoadFailedId, setConversationLoadFailedId] = useState("");
+    const [requestedConversationMissing, setRequestedConversationMissing] = useState(false);
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [knowledgeSearch, setKnowledgeSearch] = useState("");
@@ -222,6 +307,7 @@ export default function ChatsPage() {
         setReply("");
         setConversationLoadingId(conversationId);
         setConversationLoadFailedId("");
+        setRequestedConversationMissing(false);
         setError("");
     }, []);
 
@@ -234,12 +320,20 @@ export default function ChatsPage() {
             setAnnouncements(data.announcements || []);
             setError("");
 
-            if (!selectedIdRef.current && data.conversations?.length) {
+            if (!selectedIdRef.current) {
                 const requestedId = new URLSearchParams(window.location.search).get("conversation");
-                const nextId = data.conversations.some((item: SupportConversation) => item.id === requestedId)
-                    ? requestedId
-                    : data.conversations[0].id;
-                selectConversation(nextId || "");
+                if (requestedId) {
+                    const requestedConversation = data.conversations?.find(
+                        (item: SupportConversation) => item.id === requestedId,
+                    );
+                    if (requestedConversation) {
+                        selectConversation(requestedConversation.id);
+                    } else {
+                        setRequestedConversationMissing(true);
+                    }
+                } else if (data.conversations?.length) {
+                    selectConversation(data.conversations[0].id);
+                }
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : "Could not load Chats.");
@@ -294,12 +388,15 @@ export default function ChatsPage() {
         const initialise = async () => {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
-                router.push("/");
+                const requestedPath = chatReturnPath(
+                    new URLSearchParams(window.location.search).get("conversation"),
+                );
+                router.replace(requestedPath ? `/?next=${encodeURIComponent(requestedPath)}` : "/");
                 return;
             }
             const role = user.app_metadata?.role || user.user_metadata?.role || "member";
             if (role !== "superuser") {
-                router.push("/dashboard");
+                router.replace("/dashboard");
                 return;
             }
             setUserName(user.user_metadata?.name || user.email || "User");
@@ -355,7 +452,15 @@ export default function ChatsPage() {
         const content = reply.trim();
         const conversationId = selectedIdRef.current;
         if (!content || !conversationId) return;
-        const sent = await runAction({ action: "send_message", conversationId, content });
+        const latestParentMessage = [...messages]
+            .reverse()
+            .find((message) => message.sender_type === "parent");
+        const sent = await runAction({
+            action: "send_message",
+            conversationId,
+            content,
+            expectedParentMessageId: latestParentMessage?.id ?? "",
+        });
         if (sent) setReply("");
     };
 
@@ -375,6 +480,12 @@ export default function ChatsPage() {
         if (selectedConversation?.status !== "resolved") return;
         if (!window.confirm("Reopen this conversation with the AI assistant? The parent will be able to continue messaging.")) return;
         void changeStatus("ai_active", "Closed conversation reopened with the AI assistant by Coach Patrick.");
+    };
+
+    const reopenAsCoachPatrick = () => {
+        if (!selectedConversation || !["resolved", "closed_parent"].includes(selectedConversation.status)) return;
+        if (!window.confirm("Reopen this conversation as Coach Patrick? The parent will be notified, and the AI will stay paused while you send a follow-up.")) return;
+        void changeStatus("human_active", "Closed conversation reopened by Coach Patrick for a follow-up.");
     };
 
     const resetKnowledgeForm = () => setKnowledgeForm({ id: "", title: "", category: "General", content: "", status: "draft" });
@@ -424,6 +535,10 @@ export default function ChatsPage() {
     const selectedConversationSummary = useMemo(
         () => conversations.find((item) => item.id === selectedId) || null,
         [conversations, selectedId],
+    );
+    const canCloseConversation = useMemo(
+        () => canCloseAfterCoachReply(messages),
+        [messages],
     );
     const selectedConversationName = selectedConversationSummary ? contactName(selectedConversationSummary) : "this parent";
     const selectedConversationIsLoading = Boolean(
@@ -517,6 +632,11 @@ export default function ChatsPage() {
                                         <button type="button" onClick={() => void loadConversation(selectedId, true)}>Try again</button>
                                     </div>
                                 </div>
+                            ) : requestedConversationMissing ? (
+                                <div className="chats-thread-empty">
+                                    <h2>Conversation not found</h2>
+                                    <p>This chat may no longer be available, or your link may be out of date. Select another conversation from the list.</p>
+                                </div>
                             ) : !selectedConversation ? (
                                 <div className="chats-thread-empty"><h2>Select a conversation</h2><p>The full Telegram history will appear here.</p></div>
                             ) : (
@@ -540,10 +660,14 @@ export default function ChatsPage() {
                                             <small>{conversationModeCopy[selectedConversation.status].description}</small>
                                         </span>
                                     </div>
-                                    {selectedConversation.status !== "closed_parent" && (
-                                        <div className="chats-thread-actions">
-                                            {selectedConversation.status === "resolved" ? (
-                                                <button type="button" className="is-primary" onClick={reopenResolvedConversation} disabled={busy}>Reopen with AI</button>
+                                    <div className="chats-thread-actions">
+                                            {["resolved", "closed_parent"].includes(selectedConversation.status) ? (
+                                                <>
+                                                    <button type="button" className="is-primary" onClick={reopenAsCoachPatrick} disabled={busy}>Reopen as Coach Patrick</button>
+                                                    {selectedConversation.status === "resolved" && (
+                                                        <button type="button" onClick={reopenResolvedConversation} disabled={busy}>Reopen with AI</button>
+                                                    )}
+                                                </>
                                             ) : (
                                                 <>
                                                     {selectedConversation.status !== "human_active" && (
@@ -552,11 +676,12 @@ export default function ChatsPage() {
                                                     {["escalated", "human_active"].includes(selectedConversation.status) && (
                                                         <button type="button" onClick={() => void changeStatus("ai_active", "Returned to the AI assistant by Coach Patrick.")} disabled={busy}>Return to AI</button>
                                                     )}
-                                                    <button type="button" className="is-resolve" onClick={confirmResolution} disabled={busy}>Close conversation</button>
+                                                    {selectedConversation.status === "human_active" && canCloseConversation && (
+                                                        <button type="button" className="is-resolve" onClick={confirmResolution} disabled={busy}>Close conversation</button>
+                                                    )}
                                                 </>
                                             )}
                                         </div>
-                                    )}
                                     <div className="chats-messages" aria-live="polite">
                                         {messages.map((message, index) => {
                                             const sender = senderDetails[message.sender_type];
@@ -581,6 +706,7 @@ export default function ChatsPage() {
                                                             <time>{formatTime(message.created_at)}</time>
                                                         </div>
                                                         <p>{displayMessageContent(message)}</p>
+                                                        {message.has_image && <SupportImagePreview messageId={message.id} getToken={token} />}
                                                         {message.source_refs?.length > 0 && <small>Sources: {message.source_refs.join(", ")}</small>}
                                                     </article>
                                                 </Fragment>
@@ -593,7 +719,7 @@ export default function ChatsPage() {
                                             <span className="chats-reply-closed__icon" aria-hidden="true">Closed</span>
                                             <span className="chats-reply-closed__copy">
                                                 <strong>{selectedConversation.status === "closed_parent" ? "The parent closed this conversation" : "This conversation is closed"}</strong>
-                                                <span>{selectedConversation.status === "closed_parent" ? "Replies are disabled. The parent can reopen it from Telegram or by sending a new message." : "Replies are disabled until you reopen the conversation above."}</span>
+                                                <span>{selectedConversation.status === "closed_parent" ? "Replies are disabled. The parent can reopen it, or you can reopen as Coach Patrick for an important correction or follow-up." : "Replies are disabled until you reopen the conversation above."}</span>
                                             </span>
                                         </div>
                                     ) : (

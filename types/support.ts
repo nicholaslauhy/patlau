@@ -41,6 +41,7 @@ export interface SupportMessage {
     sender_user_id: string | null;
     content: string;
     source_refs: string[];
+    has_image?: boolean;
     telegram_delivery_status: string | null;
     created_at: string;
 }

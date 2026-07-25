@@ -2,16 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 import type { SupportStatus } from "../../../types/support";
 import { createAuditedAdminClient, getOptionalAuditActor, safeAuditError, writeAuditEvent } from "../../lib/audit-server";
 import {
+    clearSupportTelegramKeyboard,
     recordSupportStatus,
+    setSupportTelegramKeyboard,
     sendSupportTelegramMessage,
 } from "../../lib/support-server";
 import {
     COACH_CLOSED_CONVERSATION_MESSAGE,
     REOPENED_CONVERSATION_MESSAGE,
+    coachReplyCloseKeyboard,
     formatCoachReply,
     formatSystemMessage,
     reopenConversationKeyboard,
 } from "../../lib/telegram-support-flow";
+import {
+    COACH_FOLLOW_UP_REOPENED_MESSAGE,
+    canCloseAfterCoachReply,
+    isSubstantiveCoachReply,
+} from "../../lib/support-conversation-policy";
+import {
+    extractSupportImageFileId,
+    publicSupportSourceRefs,
+} from "../../lib/support-image-server";
 
 const validStatuses: SupportStatus[] = [
     "ai_active",
@@ -32,6 +44,15 @@ function supportContactLabel(contact: any) {
     if (fullName) return fullName;
     if (contact?.username) return `@${contact.username}`;
     return "Parent";
+}
+
+function publicSupportMessage(message: any) {
+    const sourceRefs = publicSupportSourceRefs(message?.source_refs);
+    return {
+        ...message,
+        source_refs: sourceRefs,
+        has_image: Boolean(extractSupportImageFileId(message?.source_refs)),
+    };
 }
 
 export async function GET(request: NextRequest) {
@@ -89,7 +110,10 @@ export async function GET(request: NextRequest) {
                 .from("support_conversations")
                 .update({ unread_count: 0 })
                 .eq("id", conversationId);
-            return NextResponse.json({ conversation, messages: messages || [] });
+            return NextResponse.json({
+                conversation,
+                messages: (messages || []).map(publicSupportMessage),
+            });
         }
 
         const [conversationsResult, knowledgeResult, announcementsResult] = await Promise.all([
@@ -156,6 +180,9 @@ export async function POST(request: NextRequest) {
         if (action === "send_message") {
             const conversationId = String(body.conversationId || "");
             const content = String(body.content || "").trim();
+            const expectedParentMessageId = body.expectedParentMessageId == null
+                ? null
+                : String(body.expectedParentMessageId);
             if (!conversationId || !content) {
                 return NextResponse.json({ error: "Conversation and message are required." }, { status: 400 });
             }
@@ -180,6 +207,35 @@ export async function POST(request: NextRequest) {
                 );
             }
 
+            const replyStartedAt = new Date().toISOString();
+            const { data: latestParentBeforeReply, error: latestParentBeforeReplyError } = await auditedAdmin
+                .from("support_messages")
+                .select("id")
+                .eq("conversation_id", conversationId)
+                .eq("sender_type", "parent")
+                .order("created_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (latestParentBeforeReplyError) throw latestParentBeforeReplyError;
+            const parentContextVerified = expectedParentMessageId !== null
+                && String(latestParentBeforeReply?.id || "") === expectedParentMessageId;
+            if (
+                expectedParentMessageId !== null
+                && !parentContextVerified
+            ) {
+                return NextResponse.json(
+                    {
+                        error: "A new parent message arrived before this reply was sent. Review the latest message and try again.",
+                    },
+                    { status: 409 },
+                );
+            }
+            const replyOffersConversationControls = Boolean(
+                parentContextVerified
+                && latestParentBeforeReply?.id
+                && isSubstantiveCoachReply(content),
+            );
+
             const previousStatus = conversation.status as SupportStatus;
             const { data: claimedRows, error: claimError } = await auditedAdmin
                 .from("support_conversations")
@@ -203,7 +259,7 @@ export async function POST(request: NextRequest) {
             try {
                 telegramMessage = await sendSupportTelegramMessage(
                     conversation.contact.telegram_chat_id,
-                    formatCoachReply(content),
+                    formatCoachReply(content, replyOffersConversationControls),
                 );
             } catch (deliveryError) {
                 // Keep the AI paused: a parent message may have arrived while Telegram delivery was in flight.
@@ -218,11 +274,50 @@ export async function POST(request: NextRequest) {
                     sender_type: "superuser",
                     sender_user_id: user.id,
                     content,
-                    telegram_delivery_status: "sent",
+                    telegram_delivery_status: parentContextVerified ? "sent" : "sent_unverified_context",
+                    created_at: replyStartedAt,
                 })
                 .select("*")
                 .single();
             if (insertError) throw insertError;
+
+            if (replyOffersConversationControls) {
+                try {
+                    const { data: latestParentAfterReply, error: latestParentAfterReplyError } = await auditedAdmin
+                        .from("support_messages")
+                        .select("id")
+                        .eq("conversation_id", conversationId)
+                        .eq("sender_type", "parent")
+                        .order("created_at", { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+                    if (latestParentAfterReplyError) throw latestParentAfterReplyError;
+                    if (String(latestParentAfterReply?.id || "") === String(latestParentBeforeReply.id)) {
+                        await setSupportTelegramKeyboard(
+                            conversation.contact.telegram_chat_id,
+                            telegramMessage.message_id,
+                            coachReplyCloseKeyboard(conversationId),
+                        );
+                        const { data: latestParentAfterControl, error: latestParentAfterControlError } = await auditedAdmin
+                            .from("support_messages")
+                            .select("id")
+                            .eq("conversation_id", conversationId)
+                            .eq("sender_type", "parent")
+                            .order("created_at", { ascending: false })
+                            .limit(1)
+                            .maybeSingle();
+                        if (latestParentAfterControlError) throw latestParentAfterControlError;
+                        if (String(latestParentAfterControl?.id || "") !== String(latestParentBeforeReply.id)) {
+                            await clearSupportTelegramKeyboard(
+                                conversation.contact.telegram_chat_id,
+                                telegramMessage.message_id,
+                            );
+                        }
+                    }
+                } catch (closeControlError) {
+                    console.error("Could not add the parent close control to Coach Patrick's reply:", closeControlError);
+                }
+            }
 
             const { error: updateError } = await auditedAdmin.from("support_conversations").update({
                 last_message_at: new Date().toISOString(),
@@ -247,7 +342,11 @@ export async function POST(request: NextRequest) {
                 targetTable: "support_conversations",
                 targetRecordId: { id: conversationId },
                 targetLabel: supportContactLabel(conversation.contact),
-                metadata: { message_id: message.id, delivery_status: "sent" },
+                metadata: {
+                    message_id: message.id,
+                    delivery_status: "sent",
+                    parent_context_verified: parentContextVerified,
+                },
             });
             return NextResponse.json({ message });
         }
@@ -265,11 +364,68 @@ export async function POST(request: NextRequest) {
                 .single();
             if (currentError) throw currentError;
             const currentContact = Array.isArray(current.contact) ? current.contact[0] : current.contact;
-            if (current.status === "closed_parent" && status !== "closed_parent") {
+            if (
+                current.status === "closed_parent"
+                && !["closed_parent", "human_active"].includes(status)
+            ) {
                 return NextResponse.json(
-                    { error: "The parent closed this conversation. It will reopen when the parent sends a new message." },
+                    { error: "A parent-closed conversation can only be reopened as Coach Patrick." },
                     { status: 409 },
                 );
+            }
+            if (status === "resolved") {
+                if (current.status !== "human_active") {
+                    return NextResponse.json(
+                        {
+                            error: "Coach Patrick must be handling the conversation before it can be closed.",
+                        },
+                        { status: 409 },
+                    );
+                }
+                const { data: messages, error: messagesError } = await auditedAdmin
+                    .from("support_messages")
+                    .select("sender_type,content,created_at,telegram_delivery_status")
+                    .eq("conversation_id", conversationId)
+                    .order("created_at", { ascending: true });
+                if (messagesError) throw messagesError;
+                if (!canCloseAfterCoachReply(messages || [])) {
+                    return NextResponse.json(
+                        {
+                            error: "Send the parent a complete Coach Patrick reply before closing this conversation.",
+                        },
+                        { status: 409 },
+                    );
+                }
+            }
+            const reopenMarkerContent = ["resolved", "closed_parent"].includes(current.status)
+                && ["ai_active", "human_active"].includes(status)
+                ? status === "human_active"
+                    ? COACH_FOLLOW_UP_REOPENED_MESSAGE
+                    : REOPENED_CONVERSATION_MESSAGE
+                : null;
+            let reopenMarkerId = "";
+            if (reopenMarkerContent) {
+                const { data: reopenMarker, error: reopenMarkerError } = await auditedAdmin
+                    .from("support_messages")
+                    .insert({
+                        conversation_id: conversationId,
+                        direction: "outbound",
+                        sender_type: "system",
+                        content: reopenMarkerContent,
+                        telegram_delivery_status: "pending",
+                    })
+                    .select("id")
+                    .single();
+                if (reopenMarkerError || !reopenMarker) {
+                    console.error("Could not establish the conversation reopen baseline:", reopenMarkerError);
+                    return NextResponse.json(
+                        {
+                            error: "The conversation could not be reopened safely. Please try again.",
+                        },
+                        { status: 503 },
+                    );
+                }
+                reopenMarkerId = String(reopenMarker.id);
             }
             const now = new Date().toISOString();
             const updates: Record<string, unknown> = {
@@ -285,8 +441,28 @@ export async function POST(request: NextRequest) {
                 .eq("id", conversationId)
                 .eq("status", current.status)
                 .select("id");
-            if (error) throw error;
+            if (error) {
+                if (reopenMarkerId) {
+                    const { error: cleanupError } = await auditedAdmin
+                        .from("support_messages")
+                        .delete()
+                        .eq("id", reopenMarkerId);
+                    if (cleanupError) {
+                        console.error("Could not remove an unused conversation reopen marker:", cleanupError);
+                    }
+                }
+                throw error;
+            }
             if (!updatedRows?.length) {
+                if (reopenMarkerId) {
+                    const { error: cleanupError } = await auditedAdmin
+                        .from("support_messages")
+                        .delete()
+                        .eq("id", reopenMarkerId);
+                    if (cleanupError) {
+                        console.error("Could not remove an unused conversation reopen marker:", cleanupError);
+                    }
+                }
                 return NextResponse.json(
                     { error: "The conversation changed before this action was completed. Refresh it and try again." },
                     { status: 409 },
@@ -300,6 +476,8 @@ export async function POST(request: NextRequest) {
                 }
                 : current.status === "resolved" && status === "ai_active"
                     ? { content: REOPENED_CONVERSATION_MESSAGE, keyboard: undefined }
+                    : ["resolved", "closed_parent"].includes(current.status) && status === "human_active"
+                        ? { content: COACH_FOLLOW_UP_REOPENED_MESSAGE, keyboard: undefined }
                     : null;
             if (parentStateMessage && currentContact?.telegram_chat_id && !currentContact.blocked) {
                 try {
@@ -308,21 +486,54 @@ export async function POST(request: NextRequest) {
                         formatSystemMessage(parentStateMessage.content),
                         parentStateMessage.keyboard,
                     );
-                    const { error: messageError } = await auditedAdmin.from("support_messages").insert({
-                        conversation_id: conversationId,
-                        telegram_message_id: String(telegramMessage.message_id),
-                        direction: "outbound",
-                        sender_type: "system",
-                        content: parentStateMessage.content,
-                        telegram_delivery_status: "sent",
-                    });
+                    const { error: messageError } = reopenMarkerId
+                        ? await auditedAdmin
+                            .from("support_messages")
+                            .update({
+                                telegram_message_id: String(telegramMessage.message_id),
+                                telegram_delivery_status: "sent",
+                            })
+                            .eq("id", reopenMarkerId)
+                        : await auditedAdmin.from("support_messages").insert({
+                            conversation_id: conversationId,
+                            telegram_message_id: String(telegramMessage.message_id),
+                            direction: "outbound",
+                            sender_type: "system",
+                            content: parentStateMessage.content,
+                            telegram_delivery_status: "sent",
+                        });
                     if (messageError) {
                         console.error("Could not save a delivered conversation-state message:", messageError);
-                        notificationWarning = "The parent was notified, but the status message could not be saved in the chat history.";
+                        notificationWarning = reopenMarkerId
+                            ? "The parent was notified, but the delivery status could not be synchronized."
+                            : "The parent was notified, but the status message could not be saved in the chat history.";
                     }
                 } catch (notificationError) {
                     console.error("Could not notify the parent about the conversation state:", notificationError);
                     notificationWarning = "The conversation status changed, but Telegram could not deliver the status update.";
+                    if (reopenMarkerId) {
+                        const { error: markerUpdateError } = await auditedAdmin
+                            .from("support_messages")
+                            .update({ telegram_delivery_status: "failed" })
+                            .eq("id", reopenMarkerId);
+                        if (markerUpdateError) {
+                            console.error("Could not update the failed conversation-state delivery:", markerUpdateError);
+                        }
+                    }
+                }
+            }
+            if (
+                reopenMarkerId
+                && (!currentContact?.telegram_chat_id || currentContact.blocked)
+            ) {
+                const { error: markerError } = await auditedAdmin
+                    .from("support_messages")
+                    .update({
+                        telegram_delivery_status: currentContact?.blocked ? "blocked" : "not_sent",
+                    })
+                    .eq("id", reopenMarkerId);
+                if (markerError) {
+                    console.error("Could not update the undelivered conversation-state marker:", markerError);
                 }
             }
             await recordSupportStatus(
