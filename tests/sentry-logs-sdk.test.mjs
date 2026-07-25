@@ -3,7 +3,7 @@ import test from 'node:test';
 import * as SentryNamespace from '@sentry/nextjs';
 import { createAuditTrackingTransport } from '../app/lib/sentry-audit-transport.ts';
 import { sendSentryLogBatch } from '../app/lib/sentry-log-sink.ts';
-import { scrubSentryLog } from '../app/lib/sentry-scrub.ts';
+import { scrubSentryLog, scrubSentryText } from '../app/lib/sentry-scrub.ts';
 
 const Sentry = SentryNamespace.default || SentryNamespace;
 
@@ -14,6 +14,49 @@ function capturedLogs(envelopes) {
             .flatMap((item) => item?.[1]?.items || [])
     ));
 }
+
+test('the Sentry scrubber removes Telegram bot credentials and private file paths from URLs', () => {
+    const botToken = '123456789:AAExampleSecretToken_0123456789';
+    const filePath = 'photos/file_42.jpg';
+    const fileUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
+    const apiUrl = `https://api.telegram.org/bot${botToken}/getFile`;
+    const internalRef = 'patlau-internal:telegram-photo:v1:QWdBQ0FnVUFBeGtCQUFJQjQy';
+
+    const scrubbedText = scrubSentryText(
+        `Telegram download failed at ${fileUrl}; API request: ${apiUrl}; ref: ${internalRef}`,
+    );
+    assert.equal(scrubbedText.includes(botToken), false);
+    assert.equal(scrubbedText.includes(filePath), false);
+    assert.equal(scrubbedText.includes(internalRef), false);
+    assert.match(
+        scrubbedText,
+        /https:\/\/api\.telegram\.org\/file\/bot\[FILTERED\]\/\[FILTERED_FILE\]/,
+    );
+    assert.match(
+        scrubbedText,
+        /https:\/\/api\.telegram\.org\/bot\[FILTERED\]\/getFile/,
+    );
+
+    const scrubbedLog = scrubSentryLog({
+        message: `Could not download ${fileUrl}`,
+        body: `Telegram returned an error for ${apiUrl}`,
+        attributes: {
+            error: {
+                request_url: fileUrl,
+                retry_url: apiUrl,
+                source_ref: internalRef,
+            },
+        },
+    });
+    const serialized = JSON.stringify(scrubbedLog);
+    assert.equal(serialized.includes(botToken), false);
+    assert.equal(serialized.includes(filePath), false);
+    assert.equal(serialized.includes(internalRef), false);
+    assert.equal(
+        scrubSentryText('https://telegram.org/privacy'),
+        'https://telegram.org/privacy',
+    );
+});
 
 test('the audit sink emits tracked rows through the official Sentry SDK envelope', async () => {
     const envelopes = [];
