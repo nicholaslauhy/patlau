@@ -91,7 +91,7 @@ export function isSubstantiveCoachReply(text: string | null | undefined) {
         .trim();
     if (!withoutGreeting || NON_SUBSTANTIVE_PHRASES.has(withoutGreeting)) return false;
     const isInformationRequest = /^(?:(?:can|could|would|will)\s+you|please|kindly)\s+(?:send|share|tell|provide|confirm|clarify|explain|describe|forward|upload|let\s+me\s+know)\b/i.test(withoutGreeting);
-    const isSingleQuestion = /^(?:what|when|where|which|who|why|how|is|are|do|does|did|can|could|would)\b[^.!]*\?$/i.test(withoutGreeting);
+    const isSingleQuestion = /^(?:what|when|where|which|who|why|how|is|are|do|does|did|can|could|would)\b/i.test(withoutGreeting);
     if (isInformationRequest || isSingleQuestion) return false;
 
     const meaningfulWords = withoutGreeting

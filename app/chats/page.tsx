@@ -315,15 +315,34 @@ export default function ChatsPage() {
         if (showLoader) setLoading(true);
         try {
             const data = await supportFetch("/api/support");
-            setConversations(data.conversations || []);
+            const nextConversations: SupportConversation[] = data.conversations || [];
+            setConversations(nextConversations);
             setKnowledge(data.knowledge || []);
             setAnnouncements(data.announcements || []);
             setError("");
 
+            const activeConversationId = selectedIdRef.current;
+            if (
+                activeConversationId
+                && !nextConversations.some((item) => item.id === activeConversationId)
+            ) {
+                conversationRequestRef.current += 1;
+                selectedIdRef.current = "";
+                foregroundConversationIdRef.current = "";
+                loadedConversationIdRef.current = "";
+                setSelectedId("");
+                setSelectedConversation(null);
+                setMessages([]);
+                setReply("");
+                setConversationLoadingId("");
+                setConversationLoadFailedId("");
+                setRequestedConversationMissing(false);
+            }
+
             if (!selectedIdRef.current) {
                 const requestedId = new URLSearchParams(window.location.search).get("conversation");
                 if (requestedId) {
-                    const requestedConversation = data.conversations?.find(
+                    const requestedConversation = nextConversations.find(
                         (item: SupportConversation) => item.id === requestedId,
                     );
                     if (requestedConversation) {
@@ -331,8 +350,8 @@ export default function ChatsPage() {
                     } else {
                         setRequestedConversationMissing(true);
                     }
-                } else if (data.conversations?.length) {
-                    selectConversation(data.conversations[0].id);
+                } else if (nextConversations.length) {
+                    selectConversation(nextConversations[0].id);
                 }
             }
         } catch (err) {

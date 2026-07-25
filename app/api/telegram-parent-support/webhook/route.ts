@@ -14,10 +14,15 @@ import {
 import {
     AI_INTRO_MESSAGE,
     CLOSED_CONVERSATION_MESSAGE,
+    DELETE_CONVERSATION_CANCELLED_MESSAGE,
+    DELETE_CONVERSATION_CONFIRMATION_MESSAGE,
+    DELETED_CONVERSATION_MESSAGE,
     REOPENED_CONVERSATION_MESSAGE,
     coachHandoffKeyboard,
+    deleteConversationConfirmationKeyboard,
     formatAiReply,
     formatSystemMessage,
+    isAuthorizedParentDeleteCallback,
     normaliseCoachReferences,
     parentConversationStatusMessage,
     parentExplicitlyRequestsCoach,
@@ -26,6 +31,7 @@ import {
     reopenConversationKeyboard,
     shouldDeliverSupportAiResponse,
     shouldOfferDelayedFeedback,
+    supportHelpKeyboard,
 } from "../../../lib/telegram-support-flow";
 import { ensureTelegramSupportCommands } from "../../../lib/telegram-support-commands";
 import {
@@ -51,6 +57,8 @@ const delayedFeedbackKeyboard = (conversationId: string) => ({
         [{ text: "This answered my question", callback_data: `ps|helpful|${conversationId}` }],
     ],
 });
+
+const DELETE_CONVERSATION_ACTIONS = ["delete_request", "delete_confirm", "delete_cancel"];
 
 const parentName = (from: any) =>
     [from?.first_name, from?.last_name].filter(Boolean).join(" ").trim()
@@ -866,13 +874,22 @@ ${knowledgeText || "None"}`;
 async function handleCallback(callbackQuery: any) {
     const [prefix, action, conversationId] = String(callbackQuery.data || "").split("|");
     if (prefix !== "ps" || !action || !conversationId) return;
-    const { data: conversation } = await supportAdmin
+    const { data: conversation, error: conversationError } = await supportAdmin
         .from("support_conversations")
         .select("*, contact:support_contacts(*)")
         .eq("id", conversationId)
         .maybeSingle();
+    if (conversationError) {
+        await answerSupportCallback(callbackQuery.id, "The conversation could not be verified. Please try again.");
+        throw conversationError;
+    }
     if (!conversation) {
-        await answerSupportCallback(callbackQuery.id, "Conversation not found.");
+        await answerSupportCallback(
+            callbackQuery.id,
+            action === "delete_confirm"
+                ? "This conversation has already been deleted."
+                : "Conversation not found.",
+        );
         return;
     }
     const chatId = String(callbackQuery.message?.chat?.id || conversation.contact.telegram_chat_id);
@@ -885,10 +902,24 @@ async function handleCallback(callbackQuery: any) {
         await answerSupportCallback(callbackQuery.id, "This action belongs to another conversation.");
         return;
     }
+    if (
+        DELETE_CONVERSATION_ACTIONS.includes(action)
+        && !isAuthorizedParentDeleteCallback({
+            action,
+            callbackUserId,
+            callbackChatId: String(callbackQuery.message?.chat?.id || ""),
+            callbackChatType: String(callbackQuery.message?.chat?.type || ""),
+            contactUserId: String(conversation.contact.telegram_user_id || ""),
+            contactChatId: String(conversation.contact.telegram_chat_id || ""),
+        })
+    ) {
+        await answerSupportCallback(callbackQuery.id, "This deletion request is not valid.");
+        return;
+    }
     const name = parentName(callbackQuery.from);
     const callbackMessageId = String(callbackQuery.message?.message_id || "");
 
-    if (["helpful", "handoff_yes", "handoff_no"].includes(action)) {
+    if (["helpful", "handoff_yes", "handoff_no", ...DELETE_CONVERSATION_ACTIONS].includes(action)) {
         const isCurrentControl = callbackMessageId
             && await isLatestConversationMessage(conversation.id, callbackMessageId);
         if (!isCurrentControl) {
@@ -898,7 +929,99 @@ async function handleCallback(callbackQuery: any) {
         }
     }
 
-    if (action === "helpful") {
+    if (action === "delete_request") {
+        await clearCallbackKeyboard(callbackQuery);
+        await answerSupportCallback(callbackQuery.id, "Please confirm permanent deletion below.");
+        await sendAndStore(
+            conversation.id,
+            chatId,
+            DELETE_CONVERSATION_CONFIRMATION_MESSAGE,
+            "system",
+            [],
+            deleteConversationConfirmationKeyboard(conversation.id),
+        );
+    } else if (action === "delete_cancel") {
+        const { data: cancellationMarker, error: cancellationError } = await supportAdmin
+            .from("support_messages")
+            .insert({
+                conversation_id: conversation.id,
+                telegram_message_id: null,
+                direction: "outbound",
+                sender_type: "system",
+                content: DELETE_CONVERSATION_CANCELLED_MESSAGE,
+                source_refs: [],
+                telegram_delivery_status: "pending",
+            })
+            .select("id")
+            .single();
+        if (cancellationError) throw cancellationError;
+
+        await clearCallbackKeyboard(callbackQuery);
+        await answerSupportCallback(callbackQuery.id, "Deletion cancelled.");
+        try {
+            const telegramMessage = await sendSupportTelegramMessage(
+                chatId,
+                DELETE_CONVERSATION_CANCELLED_MESSAGE,
+            );
+            const { error: deliveryUpdateError } = await supportAdmin
+                .from("support_messages")
+                .update({
+                    telegram_message_id: String(telegramMessage.message_id),
+                    telegram_delivery_status: "sent",
+                })
+                .eq("id", cancellationMarker.id);
+            if (deliveryUpdateError) throw deliveryUpdateError;
+        } catch (error) {
+            console.error("Deletion was cancelled, but Telegram could not deliver its acknowledgement:", error);
+        }
+    } else if (action === "delete_confirm") {
+        if (!await isLatestConversationMessage(conversation.id, callbackMessageId)) {
+            await clearCallbackKeyboard(callbackQuery);
+            await answerSupportCallback(callbackQuery.id, "This deletion request is no longer active.");
+            return;
+        }
+
+        let deleteQuery = supportAdmin
+            .from("support_conversations")
+            .delete()
+            .eq("id", conversation.id)
+            .eq("contact_id", conversation.contact_id);
+        if (conversation.updated_at) {
+            deleteQuery = deleteQuery.eq("updated_at", conversation.updated_at);
+        }
+        const { data: deletedConversation, error: deleteError } = await deleteQuery
+            .select("id")
+            .maybeSingle();
+        if (deleteError) throw deleteError;
+        if (!deletedConversation) {
+            const { data: stillExists, error: stillExistsError } = await supportAdmin
+                .from("support_conversations")
+                .select("id")
+                .eq("id", conversation.id)
+                .maybeSingle();
+            if (stillExistsError) throw stillExistsError;
+            await clearCallbackKeyboard(callbackQuery);
+            await answerSupportCallback(
+                callbackQuery.id,
+                stillExists
+                    ? "The conversation changed. Use /help to start a new deletion request."
+                    : "This conversation has already been deleted.",
+            );
+            return;
+        }
+
+        try {
+            await clearCallbackKeyboard(callbackQuery);
+            await answerSupportCallback(callbackQuery.id, "Conversation deleted.");
+        } catch (error) {
+            console.error("Stored conversation was deleted, but its Telegram controls could not be cleared:", error);
+        }
+        try {
+            await sendSupportTelegramMessage(chatId, DELETED_CONVERSATION_MESSAGE);
+        } catch (error) {
+            console.error("Stored conversation was deleted, but Telegram could not deliver the acknowledgement:", error);
+        }
+    } else if (action === "helpful") {
         if (conversation.status !== "waiting_parent") {
             await clearCallbackKeyboard(callbackQuery);
             await answerSupportCallback(
@@ -1132,9 +1255,10 @@ async function aiTextTurnIsCurrent(
 async function isLatestConversationMessage(conversationId: string, telegramMessageId: string) {
     const { data, error } = await supportAdmin
         .from("support_messages")
-        .select("telegram_message_id,direction")
+        .select("id,telegram_message_id,direction")
         .eq("conversation_id", conversationId)
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(1)
         .maybeSingle();
     if (error) throw error;
@@ -1642,9 +1766,16 @@ export async function POST(request: Request) {
                 return NextResponse.json({ ok: true, closed: true });
             }
             const helpMessage = ["escalated", "human_active"].includes(conversation.status)
-                ? "This conversation has been escalated to Coach Patrick. You can continue typing your message here. Use /status to check the conversation, or /close to close it after Coach Patrick has given a complete reply."
-                : "Type and send your coaching question normally, or send an image using Telegram's Photo option, so the AI assistant can help first. Use /status to check the conversation. Possible injury, safety or complaint photos go directly to Coach Patrick; other unsupported questions will offer a handoff.";
-            await sendAndStore(conversation.id, chatId, helpMessage, "system");
+                ? "This conversation has been escalated to Coach Patrick. You can continue typing your message here. Use /status to check the conversation, or /close to close it after Coach Patrick has given a complete reply. You can also permanently delete PatLau's stored copy of this conversation below."
+                : "Type and send your coaching question normally, or send an image using Telegram's Photo option, so the AI assistant can help first. Use /status to check the conversation. Possible injury, safety or complaint photos go directly to Coach Patrick; other unsupported questions will offer a handoff. You can also permanently delete PatLau's stored copy of this conversation below.";
+            await sendAndStore(
+                conversation.id,
+                chatId,
+                helpMessage,
+                "system",
+                [],
+                supportHelpKeyboard(conversation.id),
+            );
             return NextResponse.json({ ok: true });
         }
         if (command === "/status") {

@@ -3,13 +3,50 @@ export const AI_INTRO_MESSAGE = "Hello! I can help with general coaching informa
 export const CLOSED_CONVERSATION_MESSAGE = "This conversation is closed. Select Reopen conversation below or simply send a new message whenever you need more help.";
 export const COACH_CLOSED_CONVERSATION_MESSAGE = "Coach Patrick has closed this conversation. Select Reopen conversation below or simply send a new message whenever you need more help.";
 export const REOPENED_CONVERSATION_MESSAGE = "Conversation reopened. Please type and send your question below.";
+export const DELETE_CONVERSATION_CONFIRMATION_MESSAGE = "Permanently delete this conversation from PatLau's stored records? This removes its chat history from the website and cannot be undone. It does not delete messages already visible in Telegram.";
+export const DELETE_CONVERSATION_CANCELLED_MESSAGE = "Deletion cancelled. Your stored conversation is still available.";
+export const DELETED_CONVERSATION_MESSAGE = "Your stored PatLau conversation has been permanently deleted. Send a new message whenever you want to start a fresh conversation.";
 
 export function reopenConversationKeyboard(conversationId: string) {
     return {
         inline_keyboard: [
             [{ text: "Reopen conversation", callback_data: `ps|reopen|${conversationId}` }],
+            [{ text: "Delete stored conversation", callback_data: `ps|delete_request|${conversationId}` }],
         ],
     };
+}
+
+export function supportHelpKeyboard(conversationId: string) {
+    return {
+        inline_keyboard: [
+            [{ text: "Delete stored conversation", callback_data: `ps|delete_request|${conversationId}` }],
+        ],
+    };
+}
+
+export function deleteConversationConfirmationKeyboard(conversationId: string) {
+    return {
+        inline_keyboard: [[
+            { text: "Yes, delete permanently", callback_data: `ps|delete_confirm|${conversationId}` },
+            { text: "Cancel", callback_data: `ps|delete_cancel|${conversationId}` },
+        ]],
+    };
+}
+
+export function isAuthorizedParentDeleteCallback(input: {
+    action: string;
+    callbackUserId: string;
+    callbackChatId: string;
+    callbackChatType: string;
+    contactUserId: string;
+    contactChatId: string;
+}) {
+    return ["delete_request", "delete_confirm", "delete_cancel"].includes(input.action)
+        && Boolean(input.callbackUserId)
+        && input.callbackUserId === input.contactUserId
+        && Boolean(input.callbackChatId)
+        && input.callbackChatId === input.contactChatId
+        && input.callbackChatType === "private";
 }
 
 export function coachHandoffKeyboard(conversationId: string) {
