@@ -128,11 +128,13 @@ Parents can choose **Delete stored conversation** from `/help` or from a closed 
 
 Website superusers have the same permanent **Delete conversation** control in the selected `/chats` conversation. A dedicated confirmation dialog explains the deletion scope and keeps Cancel as the initially focused action. The API requires the conversation version that was displayed when confirmation opened and refuses deletion when the stored conversation record has changed before deletion. Successful deletion removes the conversation from the inbox immediately, clears any deep link to it, retains the parent contact for a future fresh conversation, and records a content-free audit event with the acting superuser, parent label, prior status and observed deleted-row counts; message bodies, Telegram IDs and image references are not copied into that event.
 
-Website superusers can manage additional Telegram notification administrators from Settings. A prospective administrator sends `/myid` to the parent-support bot, the superuser adds the returned private numeric user ID, and the administrator then sends `/start` before using **Send test**. Every active database administrator receives escalation and managed-chat follow-up alerts independently, so one blocked account does not stop delivery to the others. Group and channel IDs are rejected to keep parent messages private. Telegram alert access does not grant website access to `/chats`; that still requires a Superuser website account. `TELEGRAM_PARENT_SUPPORT_ADMIN_CHAT_ID` remains an always-active deployment fallback during rollout and is added alongside the database-managed administrators. Remove that Vercel environment variable before pausing or deleting the matching account from Settings.
+Website superusers can manage additional Telegram notification administrators from Settings. A prospective administrator sends `/myid` to the parent-support bot, the superuser adds the returned positive numeric user ID, and the administrator then sends `/start` before using **Send test**. The administrator list always contains individual Telegram user IDs, never a group or channel ID. Telegram alert access does not grant website access to `/chats`; that still requires a Superuser website account. `TELEGRAM_PARENT_SUPPORT_ADMIN_CHAT_ID` remains an always-active deployment fallback during rollout and is added alongside the database-managed administrators. Remove that Vercel environment variable before pausing or deleting the matching account from Settings.
 
 Escalation notifications include two distinct HTTPS links. `/open-in-app/chats?conversation=...` opens a PatLau-branded bridge that attempts the free `patlau://chats?conversation=...` custom scheme and falls back to the same website conversation when the app is unavailable. `/chats?conversation=...` always targets the website directly. The bridge validates the conversation UUID before opening either destination. If the website requires sign-in, it carries a strictly validated chat-only return path through login and then opens that exact conversation; invalid or unavailable conversation links never silently open a different parent’s chat.
 
-An authorised Telegram administrator can answer without opening the website or app by using Telegram's **Reply** action on the latest parent alert. Each delivered alert is privately mapped to its conversation and latest parent message. The webhook rechecks administrator access, refuses expired or stale alerts, makes retries idempotent, and prevents two administrators from unintentionally answering the same parent turn. The parent's Telegram receives only the administrator's message exactly as written; channel labels and delivery-source footers are never appended. This feature requires `sql/setup_telegram_support_admin_replies.sql` in addition to the administrator-list setup.
+An optional private Telegram supergroup forum provides a structured Coach inbox. Topics must be enabled, the parent-support bot must be an administrator with **Manage Topics**, and **Remain anonymous** must stay off. Each escalated parent receives one private topic with a status-labelled title. An authorised administrator can type a normal message in that topic; the webhook authorises the individual sender's positive Telegram ID, checks the mapped conversation and latest parent turn, makes retries idempotent, and lets the first administrator own that turn. The parent's Telegram receives only the administrator's message exactly as written. Photos and other sensitive attachments are not copied into the forum; the secured app and website links remain available in the alert.
+
+`TELEGRAM_PARENT_SUPPORT_FORUM_CHAT_ID` stores the forum's separate negative `-100...` supergroup ID. After the forum-enabled deployment is live, an existing authorised administrator can send `/forumid` inside the private forum to obtain it. If the forum is unconfigured, still provisioning, unavailable, or rejects an alert, PatLau keeps the existing private per-administrator alert and ForceReply workflow as a safe fallback. Website replies are mirrored into an existing topic, status changes rename/close/reopen it, and permanent conversation deletion removes the Telegram topic before deleting Supabase history. Run `sql/setup_telegram_support_forum.sql` before enabling the environment variable.
 
 ## Audit trail
 
@@ -246,6 +248,9 @@ TELEGRAM_PARENT_SUPPORT_WEBHOOK_SECRET=
 # Optional legacy/deployment fallback. Additional recipients are managed from
 # Settings and stored privately in telegram_support_admins.
 TELEGRAM_PARENT_SUPPORT_ADMIN_CHAT_ID=
+# Optional structured private-supergroup inbox. This is the negative -100...
+# forum group ID returned by /forumid, not an administrator user ID.
+TELEGRAM_PARENT_SUPPORT_FORUM_CHAT_ID=
 OPENAI_API_KEY=
 # Shared parent-support text model.
 OPENAI_SUPPORT_MODEL=
@@ -311,6 +316,7 @@ The application expects its Supabase tables, RPC functions, and RLS policies to 
 - `sql/setup_payment_history_rls.sql`
 - `sql/setup_telegram_support_admins.sql`
 - `sql/setup_telegram_support_admin_replies.sql`
+- `sql/setup_telegram_support_forum.sql`
 
 The running application also references programme, makeup, coach-attendance, reset-code, profile, and payment-state tables. Keep the deployed Supabase schema and RPC definitions in sync with the codebase, and enforce permissions with RLS rather than relying only on hidden interface controls.
 

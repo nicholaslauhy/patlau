@@ -5,11 +5,29 @@ export const TELEGRAM_SUPPORT_PARENT_COMMANDS = [
     { command: "close", description: "Close after Coach Patrick has replied" },
 ] as const;
 
+export const TELEGRAM_SUPPORT_FORUM_COMMANDS = [
+    { command: "forumid", description: "Show this private support forum ID" },
+] as const;
+
 const TELEGRAM_COMMAND_TARGETS = [
-    { scope: { type: "default" } },
-    { scope: { type: "all_private_chats" } },
-    { scope: { type: "default" }, language_code: "en" },
-    { scope: { type: "all_private_chats" }, language_code: "en" },
+    { scope: { type: "default" }, commands: TELEGRAM_SUPPORT_PARENT_COMMANDS },
+    { scope: { type: "all_private_chats" }, commands: TELEGRAM_SUPPORT_PARENT_COMMANDS },
+    { scope: { type: "all_group_chats" }, commands: TELEGRAM_SUPPORT_FORUM_COMMANDS },
+    {
+        scope: { type: "default" },
+        language_code: "en",
+        commands: TELEGRAM_SUPPORT_PARENT_COMMANDS,
+    },
+    {
+        scope: { type: "all_private_chats" },
+        language_code: "en",
+        commands: TELEGRAM_SUPPORT_PARENT_COMMANDS,
+    },
+    {
+        scope: { type: "all_group_chats" },
+        language_code: "en",
+        commands: TELEGRAM_SUPPORT_FORUM_COMMANDS,
+    },
 ] as const;
 
 type TelegramFetch = (
@@ -37,7 +55,7 @@ export async function setTelegramSupportCommands(
                 headers: { "Content-Type": "application/json" },
                 signal: AbortSignal.timeout(10_000),
                 body: JSON.stringify({
-                    commands: TELEGRAM_SUPPORT_PARENT_COMMANDS,
+                    commands: target.commands,
                     ...target,
                 }),
             },

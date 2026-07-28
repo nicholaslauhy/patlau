@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+    TELEGRAM_SUPPORT_FORUM_COMMANDS,
     TELEGRAM_SUPPORT_PARENT_COMMANDS,
     setTelegramSupportCommands,
 } from "../app/lib/telegram-support-commands.ts";
@@ -16,7 +17,14 @@ test("the Telegram parent menu exposes only the four supported commands", () => 
     );
 });
 
-test("command synchronization replaces both default and private-chat menus", async () => {
+test("the private forum menu exposes only the safe setup command", () => {
+    assert.deepEqual(
+        TELEGRAM_SUPPORT_FORUM_COMMANDS.map(({ command }) => command),
+        ["forumid"],
+    );
+});
+
+test("command synchronization keeps parent and private-forum menus separate", async () => {
     const requests = [];
     await setTelegramSupportCommands("TEST_TOKEN", async (input, init) => {
         requests.push({
@@ -30,23 +38,49 @@ test("command synchronization replaces both default and private-chat menus", asy
         });
     });
 
-    assert.equal(requests.length, 4);
+    assert.equal(requests.length, 6);
     assert.deepEqual(
         requests.map(({ body }) => ({
             scope: body.scope,
             language_code: body.language_code,
+            commands: body.commands,
         })),
         [
-            { scope: { type: "default" }, language_code: undefined },
-            { scope: { type: "all_private_chats" }, language_code: undefined },
-            { scope: { type: "default" }, language_code: "en" },
-            { scope: { type: "all_private_chats" }, language_code: "en" },
+            {
+                scope: { type: "default" },
+                language_code: undefined,
+                commands: TELEGRAM_SUPPORT_PARENT_COMMANDS,
+            },
+            {
+                scope: { type: "all_private_chats" },
+                language_code: undefined,
+                commands: TELEGRAM_SUPPORT_PARENT_COMMANDS,
+            },
+            {
+                scope: { type: "all_group_chats" },
+                language_code: undefined,
+                commands: TELEGRAM_SUPPORT_FORUM_COMMANDS,
+            },
+            {
+                scope: { type: "default" },
+                language_code: "en",
+                commands: TELEGRAM_SUPPORT_PARENT_COMMANDS,
+            },
+            {
+                scope: { type: "all_private_chats" },
+                language_code: "en",
+                commands: TELEGRAM_SUPPORT_PARENT_COMMANDS,
+            },
+            {
+                scope: { type: "all_group_chats" },
+                language_code: "en",
+                commands: TELEGRAM_SUPPORT_FORUM_COMMANDS,
+            },
         ],
     );
     for (const request of requests) {
         assert.equal(request.method, "POST");
         assert.match(request.url, /\/setMyCommands$/);
-        assert.deepEqual(request.body.commands, TELEGRAM_SUPPORT_PARENT_COMMANDS);
     }
 });
 

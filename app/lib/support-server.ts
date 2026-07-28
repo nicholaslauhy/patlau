@@ -11,6 +11,7 @@ import {
     TELEGRAM_SUPPORT_ADMIN_FORCE_REPLY_MARKUP,
 } from "./telegram-support-admin-replies";
 import { formatSupportConversationLinks } from "./support-links";
+import { notifySupportForum } from "./support-forum-server";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -151,6 +152,7 @@ export async function notifySupportAdmins(
         process.env.NEXT_PUBLIC_SITE_URL,
     );
     const notification = `Parent chat needs attention\n\nParent: ${parentName}\nReason: ${reason}\n\nLatest message:\n${message.slice(0, 700)}\n\nReply directly to this alert to answer the parent.${links}`;
+    const forumNotification = `Parent chat needs attention\n\nParent: ${parentName}\nReason: ${reason}\n\nLatest message:\n${message.slice(0, 700)}\n\nType a normal message in this topic to answer this parent. They receive only your message exactly as written.${links}`;
     let expectedParentMessageId: string | null = null;
     try {
         expectedParentMessageId = await loadLatestSupportParentMessageId(
@@ -162,6 +164,44 @@ export async function notifySupportAdmins(
         // additive feature. A missing parent reference makes a later direct
         // reply fail closed rather than risking a response to stale context.
         console.error("Could not identify the parent message for a Telegram support alert.");
+    }
+
+    if (expectedParentMessageId) {
+        try {
+            const forumResult = await notifySupportForum(supportAdmin, {
+                conversationId,
+                parentName,
+                expectedParentMessageId,
+                alertText: forumNotification,
+                status: "escalated",
+                latestSenderType: "parent",
+            });
+            if (forumResult.delivered) {
+                return {
+                    attempted: 1,
+                    delivered: 1,
+                    failed: 0,
+                    mappingFailures: forumResult.errorCode ? 1 : 0,
+                    route: "forum" as const,
+                    forum: forumResult,
+                };
+            }
+            if (forumResult.inFlight) {
+                console.error(
+                    "A Telegram support forum alert is still in flight; sending the private administrator fallback as well.",
+                );
+            }
+            if (forumResult.reason && forumResult.errorCode !== "forum_unconfigured") {
+                console.error(
+                    `Telegram support forum delivery is unavailable (${forumResult.errorCode || "unknown"}); using private administrator alerts.`,
+                );
+            }
+        } catch {
+            // Forum topics are an additive inbox. The existing private alert
+            // path remains the availability fallback during rollout or a
+            // temporary Telegram/Supabase failure.
+            console.error("Telegram support forum delivery failed; using private administrator alerts.");
+        }
     }
 
     let mappingFailures = 0;
@@ -199,7 +239,7 @@ export async function notifySupportAdmins(
     if (result.attempted > 0 && result.delivered === 0) {
         throw new Error("Telegram could not deliver the support notification to any administrator.");
     }
-    return { ...result, mappingFailures };
+    return { ...result, mappingFailures, route: "private" as const };
 }
 
 export async function recordSupportStatus(

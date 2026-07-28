@@ -6,6 +6,7 @@ import {
     recordSupportStatus,
     setSupportTelegramKeyboard,
     sendSupportTelegramMessage,
+    supportAdmin,
 } from "../../lib/support-server";
 import {
     COACH_CLOSED_CONVERSATION_MESSAGE,
@@ -24,6 +25,11 @@ import {
     extractSupportImageFileId,
     publicSupportSourceRefs,
 } from "../../lib/support-image-server";
+import {
+    deleteSupportForumTopicBeforeConversation,
+    mirrorSupportForumCoachReply,
+    syncSupportForumState,
+} from "../../lib/support-forum-server";
 
 const validStatuses: SupportStatus[] = [
     "ai_active",
@@ -333,6 +339,17 @@ export async function POST(request: NextRequest) {
             if (previousStatus !== "human_active") {
                 await recordSupportStatus(conversationId, previousStatus, "human_active", "superuser", "Coach Patrick replied.", user.id);
             }
+            try {
+                await mirrorSupportForumCoachReply(supportAdmin, {
+                    conversationId,
+                    parentName: supportContactLabel(conversation.contact),
+                    text: `Coach Patrick replied:\n\n${content}`,
+                });
+            } catch {
+                // The parent reply has already been delivered. The private
+                // forum is an operational mirror and cannot roll that back.
+                console.error("Could not mirror a PatLau Chats reply into the Telegram support forum.");
+            }
             await writeAuditEvent({
                 request,
                 actor,
@@ -547,6 +564,30 @@ export async function POST(request: NextRequest) {
                 String(body.reason || "Status changed in Chats."),
                 user.id,
             );
+            try {
+                const forumSync = await syncSupportForumState(supportAdmin, {
+                    conversationId,
+                    parentName: supportContactLabel(currentContact),
+                    status,
+                    latestSenderType: status === "human_active"
+                        ? "system"
+                        : status === "waiting_parent"
+                            ? "ai"
+                            : "system",
+                });
+                if (!forumSync.synced && !forumSync.noTopic) {
+                    notificationWarning = [
+                        notificationWarning,
+                        "The Telegram support topic could not be synchronized.",
+                    ].filter(Boolean).join(" ");
+                }
+            } catch {
+                console.error("Could not synchronize the Telegram support forum after a status change.");
+                notificationWarning = [
+                    notificationWarning,
+                    "The Telegram support topic could not be synchronized.",
+                ].filter(Boolean).join(" ");
+            }
             await writeAuditEvent({
                 request,
                 actor,
@@ -611,6 +652,20 @@ export async function POST(request: NextRequest) {
             if (messageCountResult.error) throw messageCountResult.error;
             if (statusCountResult.error) throw statusCountResult.error;
 
+            const forumDeletion = await deleteSupportForumTopicBeforeConversation(
+                supportAdmin,
+                { conversationId },
+            );
+            if (!forumDeletion.canDeleteConversation) {
+                return NextResponse.json(
+                    {
+                        error: "The private Telegram support topic could not be removed, so nothing was deleted. Please try again.",
+                    },
+                    { status: 503 },
+                );
+            }
+            const supportForumTopicDeleted = forumDeletion.deleted;
+
             const { data: deleted, error: deleteError } = await auditedAdmin
                 .from("support_conversations")
                 .delete()
@@ -648,6 +703,7 @@ export async function POST(request: NextRequest) {
                     deleted_status_event_count: statusCountResult.count || 0,
                     contact_retained: true,
                     telegram_messages_deleted: false,
+                    telegram_support_forum_topic_deleted: supportForumTopicDeleted,
                 },
             });
             return NextResponse.json({ success: true });

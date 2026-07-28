@@ -5,6 +5,7 @@ import {
     answerSupportCallback,
     clearSupportTelegramKeyboard,
     getSingaporeDateKey,
+    getTelegramSupportAdminRecipients,
     isTelegramSupportAdmin,
     notifySupportAdmins,
     recordSupportStatus,
@@ -63,6 +64,22 @@ import {
     loadLatestSupportParentMessageId,
     telegramSupportAdminNotificationIsExpired,
 } from "../../../lib/telegram-support-admin-replies";
+import {
+    claimTelegramSupportForumReplyReceipt,
+    finishTelegramSupportForumReplyReceipt,
+    getConfiguredTelegramSupportForumChatId,
+    loadForumTopicByConversation,
+    loadForumTopicByThread,
+    parseTelegramSupportForumMessage,
+    reactToTelegramSupportForumMessage,
+    sendTelegramSupportForumMessage,
+} from "../../../lib/telegram-support-forum";
+import {
+    claimSupportForumTurn,
+    deleteSupportForumTopicBeforeConversation,
+    mirrorSupportForumCoachReply,
+    syncSupportForumState,
+} from "../../../lib/support-forum-server";
 import {
     downloadSupportTelegramImage,
     selectLargestTelegramPhoto,
@@ -456,6 +473,31 @@ async function setConversationStatus(
         await recordSupportStatus(conversation.id, conversation.status, status, actor, reason || null);
     }
     conversation.status = status;
+    try {
+        const { data: forumConversation } = await supportAdmin
+            .from("support_conversations")
+            .select("contact:support_contacts(first_name,last_name,username)")
+            .eq("id", conversation.id)
+            .maybeSingle();
+        const forumContact = Array.isArray(forumConversation?.contact)
+            ? forumConversation.contact[0]
+            : forumConversation?.contact;
+        await syncSupportForumState(supportAdmin, {
+            conversationId: conversation.id,
+            parentName: parentName(forumContact),
+            status,
+            latestSenderType: actor === "parent"
+                ? "parent"
+                : actor === "ai"
+                    ? "ai"
+                    : "system",
+        });
+    } catch {
+        // Supabase remains the canonical conversation state. Forum topic
+        // labels are operational navigation and must not roll back a
+        // parent-facing status transition.
+        console.error("Could not synchronize the Telegram support forum status.");
+    }
     return true;
 }
 
@@ -1073,6 +1115,18 @@ async function handleCallback(callbackQuery: any) {
             return;
         }
 
+        const forumDeletion = await deleteSupportForumTopicBeforeConversation(
+            supportAdmin,
+            { conversationId: conversation.id },
+        );
+        if (!forumDeletion.canDeleteConversation) {
+            await answerSupportCallback(
+                callbackQuery.id,
+                "The private Coach forum copy could not be removed. Nothing was deleted; please try again.",
+            );
+            return;
+        }
+
         let deleteQuery = supportAdmin
             .from("support_conversations")
             .delete()
@@ -1657,6 +1711,374 @@ async function completeTelegramAdminReplyReceipt(
     }
 }
 
+async function completeTelegramForumReplyReceipt(
+    receiptId: string,
+    input: {
+        status: "sending" | "delivered" | "failed" | "ignored";
+        supportMessageId?: string | number | null;
+        parentTelegramMessageId?: string | number | null;
+        deliveryError?: string | null;
+    },
+) {
+    try {
+        await finishTelegramSupportForumReplyReceipt(supportAdmin, {
+            receiptId,
+            ...input,
+        });
+    } catch {
+        // Telegram webhook retries must never cause the same administrator
+        // message to be delivered twice merely because receipt finalization
+        // failed after the parent-facing send.
+        console.error("Could not finalize a Telegram support forum reply receipt.");
+    }
+}
+
+async function sendForumOperationalNotice(
+    forumChatId: string,
+    messageThreadId: string | number,
+    text: string,
+) {
+    try {
+        await sendTelegramSupportForumMessage({
+            chatId: forumChatId,
+            messageThreadId,
+            text,
+            disableNotification: true,
+        });
+    } catch {
+        console.error("Could not send an operational notice to a Telegram support topic.");
+    }
+}
+
+async function handleTelegramSupportForumReply(
+    request: Request,
+    message: any,
+) {
+    const configuredForumChatId = getConfiguredTelegramSupportForumChatId();
+    if (
+        !configuredForumChatId
+        || String(message?.chat?.id || "") !== configuredForumChatId
+    ) {
+        return null;
+    }
+
+    const recipients = await getTelegramSupportAdminRecipients();
+    const reply = parseTelegramSupportForumMessage(message, {
+        forumChatId: configuredForumChatId,
+        authorizedAdminUserIds: recipients.map((recipient) => recipient.telegramChatId),
+    });
+    if (!reply) {
+        const senderId = String(message?.from?.id || "").trim();
+        const senderIsAuthorized = recipients.some(
+            (recipient) => recipient.telegramChatId === senderId,
+        );
+        if (
+            senderIsAuthorized
+            && message?.is_topic_message === true
+            && Number(message?.message_thread_id) > 1
+            && String(message?.text || "").trim().startsWith("/")
+        ) {
+            await sendForumOperationalNotice(
+                configuredForumChatId,
+                message.message_thread_id,
+                "Commands are not sent to the parent. Type the reply normally in this topic, or manage the conversation from PatLau Chats.",
+            );
+        }
+        return { ok: true, forum: true, ignored: true };
+    }
+
+    const topic = await loadForumTopicByThread(
+        supportAdmin,
+        reply.forumChatId,
+        reply.messageThreadId,
+    );
+    if (!topic) {
+        await sendForumOperationalNotice(
+            reply.forumChatId,
+            reply.messageThreadId,
+            "This topic is not linked to an active PatLau parent conversation, so nothing was sent.",
+        );
+        return { ok: true, forum: true, ignored: "unmapped_topic" };
+    }
+
+    const recipient = recipients.find(
+        (candidate) => candidate.telegramChatId === reply.adminUserId,
+    );
+    const adminDisplayName = recipient?.displayName || reply.adminDisplayName;
+    const claim = await claimTelegramSupportForumReplyReceipt(supportAdmin, {
+        topicId: topic.id,
+        telegramMessageId: reply.telegramMessageId,
+        adminUserId: reply.adminUserId,
+        adminDisplayName,
+    });
+    if (!claim.claimed) {
+        return { ok: true, forum: true, duplicate: true };
+    }
+    const receiptId = claim.receipt.id;
+
+    const reject = async (failureCode: string, adminMessage: string) => {
+        await completeTelegramForumReplyReceipt(receiptId, {
+            status: "ignored",
+            deliveryError: failureCode,
+        });
+        await sendForumOperationalNotice(
+            reply.forumChatId,
+            reply.messageThreadId,
+            adminMessage,
+        );
+        return { ok: true, forum: true, rejected: failureCode };
+    };
+
+    if (reply.content.length > 3900) {
+        return reject(
+            "message_too_long",
+            "That reply is too long. Keep it to 3,900 characters or fewer and send it again.",
+        );
+    }
+    if (
+        topic.lifecycle_status !== "open"
+        || topic.display_state === "closed"
+    ) {
+        return reject(
+            "conversation_not_active",
+            "This conversation is closed. Reopen it from PatLau Chats before replying.",
+        );
+    }
+
+    const conversationId = String(topic.conversation_id);
+    const { data: conversation, error: conversationError } = await supportAdmin
+        .from("support_conversations")
+        .select("*, contact:support_contacts(*)")
+        .eq("id", conversationId)
+        .maybeSingle();
+    if (conversationError) throw conversationError;
+    if (!conversation) {
+        return reject(
+            "conversation_deleted",
+            "This stored conversation no longer exists, so nothing was sent.",
+        );
+    }
+    const contact = Array.isArray(conversation.contact)
+        ? conversation.contact[0]
+        : conversation.contact;
+    if (!contact?.telegram_chat_id) {
+        return reject(
+            "contact_unavailable",
+            "The parent contact is unavailable, so nothing was sent.",
+        );
+    }
+    if (contact.blocked) {
+        return reject(
+            "parent_blocked_bot",
+            "The parent has blocked the bot, so this reply cannot be delivered.",
+        );
+    }
+    if (!["escalated", "human_active"].includes(String(conversation.status))) {
+        return reject(
+            "conversation_not_active",
+            String(conversation.status) === "closed_parent"
+                ? "The parent closed this conversation. Reopen it in PatLau before replying."
+                : "This conversation is no longer awaiting a Coach reply. Review it in PatLau Chats first.",
+        );
+    }
+
+    const expectedParentMessageId = topic.expected_parent_message_id == null
+        ? ""
+        : String(topic.expected_parent_message_id);
+    const latestParentMessageId = await loadLatestSupportParentMessageId(
+        supportAdmin,
+        conversationId,
+    );
+    if (
+        !expectedParentMessageId
+        || !latestParentMessageId
+        || latestParentMessageId !== expectedParentMessageId
+    ) {
+        return reject(
+            "stale_parent_message",
+            "A newer parent message exists than this topic currently shows. Wait for the latest PatLau alert before replying.",
+        );
+    }
+
+    const turn = await claimSupportForumTurn(supportAdmin, {
+        topicId: topic.id,
+        conversationId,
+        expectedParentMessageId,
+        adminUserId: reply.adminUserId,
+        adminDisplayName,
+    });
+    if (!turn.claimedByCaller) {
+        return reject(
+            turn.errorCode || "reply_turn_claimed",
+            turn.reason || "Another administrator is already handling this parent message.",
+        );
+    }
+
+    const previousStatus = conversation.status as SupportStatus;
+    const { data: claimedConversation, error: conversationClaimError } = await supportAdmin
+        .from("support_conversations")
+        .update({
+            status: "human_active",
+            assigned_to: null,
+            escalation_reason: null,
+        })
+        .eq("id", conversationId)
+        .eq("status", previousStatus)
+        .select("id");
+    if (conversationClaimError) throw conversationClaimError;
+    if (!claimedConversation?.length) {
+        return reject(
+            "conversation_changed",
+            "The conversation changed before the reply could be sent. Review the latest state in PatLau Chats.",
+        );
+    }
+
+    await completeTelegramForumReplyReceipt(receiptId, { status: "sending" });
+    const replyStartedAt = new Date().toISOString();
+    let telegramMessage: any;
+    try {
+        telegramMessage = await sendSupportTelegramMessage(
+            String(contact.telegram_chat_id),
+            formatCoachReply(reply.content),
+        );
+    } catch {
+        await completeTelegramForumReplyReceipt(receiptId, {
+            status: "failed",
+            deliveryError: "telegram_parent_delivery_failed",
+        });
+        await sendForumOperationalNotice(
+            reply.forumChatId,
+            reply.messageThreadId,
+            "Telegram could not deliver that reply to the parent. The AI remains paused; review the conversation before trying again.",
+        );
+        return { ok: true, forum: true, failed: "telegram_parent_delivery_failed" };
+    }
+
+    const { data: storedMessage, error: messageError } = await supportAdmin
+        .from("support_messages")
+        .insert({
+            conversation_id: conversationId,
+            telegram_message_id: String(telegramMessage.message_id),
+            direction: "outbound",
+            sender_type: "superuser",
+            sender_user_id: null,
+            content: reply.content,
+            source_refs: [],
+            telegram_delivery_status: "sent",
+            created_at: replyStartedAt,
+        })
+        .select("id")
+        .single();
+    if (messageError || !storedMessage) {
+        await completeTelegramForumReplyReceipt(receiptId, {
+            status: "failed",
+            parentTelegramMessageId: telegramMessage.message_id,
+            deliveryError: "history_storage_failed",
+        });
+        await sendForumOperationalNotice(
+            reply.forumChatId,
+            reply.messageThreadId,
+            "The reply reached the parent, but PatLau could not save it in chat history. Do not resend it; open PatLau Chats to verify.",
+        );
+        return { ok: true, forum: true, failed: "history_storage_failed" };
+    }
+
+    if (isSubstantiveCoachReply(reply.content)) {
+        try {
+            const parentMessageAfterReply = await loadLatestSupportParentMessageId(
+                supportAdmin,
+                conversationId,
+            );
+            if (parentMessageAfterReply === latestParentMessageId) {
+                await setSupportTelegramKeyboard(
+                    String(contact.telegram_chat_id),
+                    telegramMessage.message_id,
+                    coachReplyCloseKeyboard(conversationId),
+                );
+                const parentMessageAfterControl = await loadLatestSupportParentMessageId(
+                    supportAdmin,
+                    conversationId,
+                );
+                if (parentMessageAfterControl !== latestParentMessageId) {
+                    await clearSupportTelegramKeyboard(
+                        String(contact.telegram_chat_id),
+                        telegramMessage.message_id,
+                    );
+                }
+            }
+        } catch {
+            console.error("Could not add the parent close control to a forum administrator reply.");
+        }
+    }
+
+    const { error: conversationUpdateError } = await supportAdmin
+        .from("support_conversations")
+        .update({
+            last_message_at: new Date().toISOString(),
+            last_message_preview: reply.content.slice(0, 180),
+        })
+        .eq("id", conversationId)
+        .eq("status", "human_active");
+    if (conversationUpdateError) {
+        console.error("Could not update the conversation preview after a forum reply.");
+    }
+    if (previousStatus !== "human_active") {
+        await recordSupportStatus(
+            conversationId,
+            previousStatus,
+            "human_active",
+            "superuser",
+            "Coach Patrick replied from the private Telegram support forum.",
+        );
+    }
+
+    const parentLabel = [
+        contact.first_name,
+        contact.last_name,
+    ].filter(Boolean).join(" ").trim() || contact.username || "the parent";
+    await syncSupportForumState(supportAdmin, {
+        conversationId,
+        parentName: parentLabel,
+        status: "human_active",
+        latestSenderType: "superuser",
+        displayState: "waiting_parent",
+    });
+    await completeTelegramForumReplyReceipt(receiptId, {
+        status: "delivered",
+        supportMessageId: storedMessage.id,
+        parentTelegramMessageId: telegramMessage.message_id,
+    });
+    try {
+        await reactToTelegramSupportForumMessage({
+            chatId: reply.forumChatId,
+            messageId: reply.telegramMessageId,
+            emoji: "✅",
+        });
+    } catch {
+        console.error("Could not acknowledge a delivered Telegram support forum reply.");
+    }
+    await writeAuditEvent({
+        request,
+        category: "support",
+        eventType: "support.reply.sent",
+        action: "send_message",
+        outcome: "success",
+        summary: `${adminDisplayName} replied to a parent conversation`,
+        actorSource: "telegram_support_forum",
+        targetTable: "support_conversations",
+        targetRecordId: { id: conversationId },
+        targetLabel: parentLabel,
+        metadata: {
+            delivery_status: "sent",
+            reply_channel: "telegram_forum",
+            administrator_record_id: recipient?.id || null,
+            telegram_admin_user_id: reply.adminUserId,
+            parent_context_verified: true,
+        },
+    });
+    return { ok: true, forum: true, delivered: true };
+}
+
 async function handleTelegramSupportAdminReply(
     request: Request,
     message: any,
@@ -1759,14 +2181,40 @@ async function handleTelegramSupportAdminReply(
         );
     }
 
-    const turn = await claimTelegramSupportAdminReplyTurn(supportAdmin, {
-        notification,
-    });
-    if (!turn.claimed && !turn.ownedByRequester) {
-        return reject(
-            "reply_turn_claimed",
-            `${turn.ownerDisplayName || "Another administrator"} is already handling this parent message.`,
+    let forumTopicForTurn: any = null;
+    try {
+        forumTopicForTurn = await loadForumTopicByConversation(
+            supportAdmin,
+            conversationId,
         );
+    } catch {
+        // The forum mapping is additive. Private alerts retain their original
+        // ownership table until the forum SQL is available.
+    }
+    if (forumTopicForTurn) {
+        const forumTurn = await claimSupportForumTurn(supportAdmin, {
+            topicId: forumTopicForTurn.id,
+            conversationId,
+            expectedParentMessageId: latestParentMessageId,
+            adminUserId: reply.adminUserId,
+            adminDisplayName: notification.admin_display_name,
+        });
+        if (!forumTurn.claimedByCaller) {
+            return reject(
+                forumTurn.errorCode || "reply_turn_claimed",
+                forumTurn.reason || "Another administrator is already handling this parent message.",
+            );
+        }
+    } else {
+        const turn = await claimTelegramSupportAdminReplyTurn(supportAdmin, {
+            notification,
+        });
+        if (!turn.claimed && !turn.ownedByRequester) {
+            return reject(
+                "reply_turn_claimed",
+                `${turn.ownerDisplayName || "Another administrator"} is already handling this parent message.`,
+            );
+        }
     }
 
     const previousStatus = conversation.status as SupportStatus;
@@ -1893,6 +2341,15 @@ async function handleTelegramSupportAdminReply(
         contact.first_name,
         contact.last_name,
     ].filter(Boolean).join(" ").trim() || contact.username || "the parent";
+    try {
+        await mirrorSupportForumCoachReply(supportAdmin, {
+            conversationId,
+            parentName: parentLabel,
+            text: `Coach Patrick replied:\n\n${reply.content}`,
+        });
+    } catch {
+        console.error("Could not mirror a private Telegram administrator reply into the support forum.");
+    }
     await writeAuditEvent({
         request,
         category: "support",
@@ -1959,13 +2416,67 @@ export async function POST(request: Request) {
         }
 
         const message = update.message;
-        if (!message?.chat?.id || message.chat.type !== "private") {
+        if (!message?.chat?.id) {
             return NextResponse.json({ ok: true, ignored: true });
         }
-        const chatId = String(message.chat.id);
+        const messageChatId = String(message.chat.id);
         const text = String(message.text || "").trim();
         const command = text.split(/\s+/, 1)[0]?.split("@", 1)[0]?.toLowerCase();
 
+        if (
+            command === "/forumid"
+            && message.chat.type === "supergroup"
+            && message.chat.is_forum === true
+        ) {
+            const adminUserId = String(message.from?.id || "").trim();
+            const authorized = Boolean(
+                adminUserId
+                && message.from?.is_bot !== true
+                && !message.sender_chat
+                && await isTelegramSupportAdmin(adminUserId)
+            );
+            if (!authorized) {
+                return NextResponse.json({
+                    ok: true,
+                    forumSetup: true,
+                    unauthorized: true,
+                });
+            }
+
+            const setupMessage = [
+                `This private support forum ID is ${messageChatId}.`,
+                "",
+                "Add it to Vercel as TELEGRAM_PARENT_SUPPORT_FORUM_CHAT_ID, apply the forum SQL in Supabase, then redeploy PatLau.",
+                "Do not add this negative group ID to the Telegram Administrators list; that list must contain each administrator's positive /myid value.",
+            ].join("\n");
+            if (message.is_topic_message && Number(message.message_thread_id) > 0) {
+                await sendTelegramSupportForumMessage({
+                    chatId: messageChatId,
+                    messageThreadId: message.message_thread_id,
+                    text: setupMessage,
+                });
+            } else {
+                await sendSupportTelegramMessage(messageChatId, setupMessage);
+            }
+            return NextResponse.json({
+                ok: true,
+                forumSetup: true,
+                chatIdProvided: true,
+            });
+        }
+
+        if (message.chat.type !== "private") {
+            const forumResult = await handleTelegramSupportForumReply(
+                request,
+                message,
+            );
+            if (forumResult) {
+                return NextResponse.json(forumResult);
+            }
+            return NextResponse.json({ ok: true, ignored: true });
+        }
+
+        const chatId = messageChatId;
         if (command === "/myid") {
             await sendSupportTelegramMessage(
                 chatId,
