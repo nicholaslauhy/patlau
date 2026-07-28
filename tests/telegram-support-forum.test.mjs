@@ -17,6 +17,7 @@ import {
     parseTelegramSupportForumMessage,
     reactToTelegramSupportForumMessage,
     reopenTelegramSupportForumTopic,
+    resolveTelegramSupportForumReplyTarget,
     sendTelegramSupportForumMessage,
 } from "../app/lib/telegram-support-forum.ts";
 
@@ -94,6 +95,9 @@ test("only authorized plain text in a configured forum topic becomes a reply", (
             first_name: "Patrick",
             last_name: "Lau",
         },
+        reply_to_message: {
+            message_id: 699,
+        },
         text: "Saturday training continues as usual.",
     };
     const options = {
@@ -105,6 +109,7 @@ test("only authorized plain text in a configured forum topic becomes a reply", (
         forumChatId: FORUM_CHAT_ID,
         messageThreadId: "44",
         telegramMessageId: "701",
+        replyToTelegramMessageId: "699",
         adminUserId: "1127073766",
         adminDisplayName: "Patrick Lau",
         content: "Saturday training continues as usual.",
@@ -294,6 +299,104 @@ test("topic mappings load only from the configured group and current topic state
         await loadForumTopicByThread(byThread.database, "1127073766", 44),
         null,
     );
+});
+
+test("forum reply targets resolve only through the verified topic mappings", async () => {
+    const calls = [];
+    const database = {
+        from(table) {
+            return {
+                select() {
+                    return this;
+                },
+                eq(field, value) {
+                    calls.push({ table, field, value: String(value) });
+                    return this;
+                },
+                async maybeSingle() {
+                    if (table === "telegram_support_forum_notifications") {
+                        return {
+                            data: { expected_parent_message_id: 91 },
+                            error: null,
+                        };
+                    }
+                    if (table === "support_messages") {
+                        return { data: { id: 91 }, error: null };
+                    }
+                    return { data: null, error: null };
+                },
+            };
+        },
+    };
+
+    assert.equal(
+        await resolveTelegramSupportForumReplyTarget(
+            database,
+            "topic-1",
+            "699",
+            "conversation-a",
+        ),
+        "91",
+    );
+    assert.deepEqual(calls, [
+        { table: "telegram_support_forum_notifications", field: "topic_id", value: "topic-1" },
+        { table: "telegram_support_forum_notifications", field: "telegram_message_id", value: "699" },
+        { table: "support_messages", field: "id", value: "91" },
+        { table: "support_messages", field: "conversation_id", value: "conversation-a" },
+    ]);
+    assert.equal(
+        await resolveTelegramSupportForumReplyTarget(
+            database,
+            "topic-1",
+            null,
+            "conversation-a",
+        ),
+        null,
+    );
+});
+
+test("forum reply targets fall back to reply receipts and reject another conversation", async () => {
+    const requestedTables = [];
+    const database = {
+        from(table) {
+            requestedTables.push(table);
+            return {
+                select() {
+                    return this;
+                },
+                eq() {
+                    return this;
+                },
+                async maybeSingle() {
+                    if (table === "telegram_support_forum_notifications") {
+                        return { data: null, error: null };
+                    }
+                    if (table === "telegram_support_forum_reply_receipts") {
+                        return { data: { support_message_id: 92 }, error: null };
+                    }
+                    // The canonical message lookup is conversation-scoped.
+                    // A missing row represents a mapped message from a
+                    // different parent conversation.
+                    return { data: null, error: null };
+                },
+            };
+        },
+    };
+
+    assert.equal(
+        await resolveTelegramSupportForumReplyTarget(
+            database,
+            "topic-1",
+            "700",
+            "conversation-a",
+        ),
+        null,
+    );
+    assert.deepEqual(requestedTables, [
+        "telegram_support_forum_notifications",
+        "telegram_support_forum_reply_receipts",
+        "support_messages",
+    ]);
 });
 
 test("forum reply receipt claims are idempotent and completion records delivery", async () => {

@@ -21,10 +21,7 @@ import {
     canCloseAfterCoachReply,
     isSubstantiveCoachReply,
 } from "../../lib/support-conversation-policy";
-import {
-    extractSupportImageFileId,
-    publicSupportSourceRefs,
-} from "../../lib/support-image-server";
+import { buildPublicSupportMessages } from "../../lib/support-message-replies";
 import {
     deleteSupportForumTopicBeforeConversation,
     mirrorSupportForumCoachReply,
@@ -50,15 +47,6 @@ function supportContactLabel(contact: any) {
     if (fullName) return fullName;
     if (contact?.username) return `@${contact.username}`;
     return "Parent";
-}
-
-function publicSupportMessage(message: any) {
-    const sourceRefs = publicSupportSourceRefs(message?.source_refs);
-    return {
-        ...message,
-        source_refs: sourceRefs,
-        has_image: Boolean(extractSupportImageFileId(message?.source_refs)),
-    };
 }
 
 export async function GET(request: NextRequest) {
@@ -121,7 +109,7 @@ export async function GET(request: NextRequest) {
 
             return NextResponse.json({
                 conversation,
-                messages: (messages || []).map(publicSupportMessage),
+                messages: buildPublicSupportMessages(messages),
             });
         }
 

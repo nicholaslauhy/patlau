@@ -43,6 +43,7 @@ export interface TelegramSupportForumMessageEnvelope {
     forumChatId: string;
     messageThreadId: string;
     telegramMessageId: string;
+    replyToTelegramMessageId: string | null;
     adminUserId: string;
     adminDisplayName: string;
     content: string;
@@ -231,6 +232,8 @@ export function parseTelegramSupportForumMessage(
     const forumChatId = String(message?.chat?.id || "").trim();
     const messageThreadId = normalizePositiveTelegramId(message?.message_thread_id);
     const telegramMessageId = normalizePositiveTelegramId(message?.message_id);
+    const replyToTelegramMessageId =
+        normalizePositiveTelegramId(message?.reply_to_message?.message_id) || null;
     const adminUserId = normalizePositiveTelegramId(message?.from?.id);
     const content = typeof message?.text === "string" ? message.text.trim() : "";
     const authorizedAdminIds = normalizeAuthorizedAdminIds(
@@ -269,6 +272,7 @@ export function parseTelegramSupportForumMessage(
         forumChatId,
         messageThreadId,
         telegramMessageId,
+        replyToTelegramMessageId,
         adminUserId,
         adminDisplayName,
         content,
@@ -515,6 +519,61 @@ export async function loadForumTopicByThread(
         .maybeSingle();
     if (error) throw error;
     return data || null;
+}
+
+/**
+ * Resolves a Telegram forum message to the canonical support message it
+ * represents. Forum alert IDs and administrator message IDs live in the
+ * private group, so they must be scoped to the already-verified topic.
+ */
+export async function resolveTelegramSupportForumReplyTarget(
+    database: SupportDatabaseClient,
+    topicId: string,
+    telegramMessageId: string | number | null | undefined,
+    conversationId: string,
+): Promise<string | null> {
+    const normalizedTopicId = String(topicId || "").trim();
+    const normalizedMessageId = normalizePositiveTelegramId(telegramMessageId);
+    const normalizedConversationId = String(conversationId || "").trim();
+    if (
+        !normalizedTopicId
+        || !normalizedMessageId
+        || !normalizedConversationId
+    ) {
+        return null;
+    }
+
+    const notification = await database
+        .from("telegram_support_forum_notifications")
+        .select("expected_parent_message_id")
+        .eq("topic_id", normalizedTopicId)
+        .eq("telegram_message_id", normalizedMessageId)
+        .maybeSingle();
+    if (notification.error) throw notification.error;
+    let supportMessageId = normalizePositiveTelegramId(
+        notification.data?.expected_parent_message_id,
+    );
+    if (!supportMessageId) {
+        const receipt = await database
+            .from("telegram_support_forum_reply_receipts")
+            .select("support_message_id")
+            .eq("topic_id", normalizedTopicId)
+            .eq("telegram_message_id", normalizedMessageId)
+            .maybeSingle();
+        if (receipt.error) throw receipt.error;
+        supportMessageId =
+            normalizePositiveTelegramId(receipt.data?.support_message_id);
+    }
+    if (!supportMessageId) return null;
+
+    const target = await database
+        .from("support_messages")
+        .select("id")
+        .eq("id", supportMessageId)
+        .eq("conversation_id", normalizedConversationId)
+        .maybeSingle();
+    if (target.error) throw target.error;
+    return normalizePositiveTelegramId(target.data?.id) || null;
 }
 
 export async function claimTelegramSupportForumReplyReceipt(

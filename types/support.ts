@@ -42,6 +42,12 @@ export interface SupportMessage {
     content: string;
     source_refs: string[];
     has_image?: boolean;
+    reply_preview?: {
+        message_id: number;
+        sender_type: "parent" | "ai" | "superuser" | "system";
+        text: string;
+        has_image: boolean;
+    } | null;
     telegram_delivery_status: string | null;
     created_at: string;
 }

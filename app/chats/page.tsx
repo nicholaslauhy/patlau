@@ -83,6 +83,54 @@ const previousResponder = (messages: SupportMessage[], index: number) => {
     return null;
 };
 
+function MessageReplyPreview({
+    preview,
+    parentLabel,
+    onOpenOriginal,
+}: {
+    preview: NonNullable<SupportMessage["reply_preview"]>;
+    parentLabel: string;
+    onOpenOriginal: (messageId: number) => void;
+}) {
+    const sender = senderDetails[preview.sender_type];
+    const senderLabel = preview.sender_type === "parent" ? parentLabel : sender.label;
+    const rawPreviewText = String(preview.text || "");
+    const previewText = (
+        preview.sender_type === "parent"
+            ? rawPreviewText
+            : normaliseCoachReferences(rawPreviewText)
+    )
+        .replace(/^\[Photo\]\s*/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    const accessibleSummary = previewText
+        || (preview.has_image ? "Photo" : "Message unavailable");
+
+    return (
+        <button
+            type="button"
+            className={`chats-quote chats-quote--${preview.sender_type}`}
+            onClick={() => onOpenOriginal(preview.message_id)}
+            aria-label={`Go to ${senderLabel}'s original message: ${accessibleSummary}`}
+            title="Go to original message"
+        >
+            <span className="chats-quote__sender">{senderLabel}</span>
+            <span className="chats-quote__body">
+                {preview.has_image && (
+                    <span className="chats-quote__media" aria-label="Photo">
+                        Photo
+                    </span>
+                )}
+                {previewText ? (
+                    <span className="chats-quote__text">{previewText}</span>
+                ) : !preview.has_image ? (
+                    <span className="chats-quote__text">Message unavailable</span>
+                ) : null}
+            </span>
+        </button>
+    );
+}
+
 function highlightSearchMatch(value: string, query: string): ReactNode {
     const term = query.trim();
     if (!term) return value;
@@ -296,6 +344,8 @@ export default function ChatsPage() {
     const deleteCompletedRef = useRef(false);
     const busyRef = useRef(false);
     const deleteInFlightRef = useRef(false);
+    const quoteHighlightTimerRef = useRef<number | null>(null);
+    const quoteHighlightFrameRef = useRef<number | null>(null);
     const [userName, setUserName] = useState("");
     const [authorized, setAuthorized] = useState(false);
     const [tab, setTab] = useState<ChatsTab>("inbox");
@@ -319,6 +369,7 @@ export default function ChatsPage() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
+    const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
     busyRef.current = busy;
 
     const [knowledgeForm, setKnowledgeForm] = useState({
@@ -362,6 +413,40 @@ export default function ChatsPage() {
         }
         return data;
     }, [token]);
+
+    const openQuotedMessage = useCallback((messageId: number) => {
+        const normalizedMessageId = Number(messageId);
+        if (!Number.isSafeInteger(normalizedMessageId) || normalizedMessageId <= 0) return;
+        const target = document.getElementById(`support-message-${normalizedMessageId}`);
+        if (!target) return;
+
+        if (quoteHighlightTimerRef.current !== null) {
+            window.clearTimeout(quoteHighlightTimerRef.current);
+        }
+        if (quoteHighlightFrameRef.current !== null) {
+            window.cancelAnimationFrame(quoteHighlightFrameRef.current);
+        }
+        setHighlightedMessageId(null);
+        target.focus({ preventScroll: true });
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        quoteHighlightFrameRef.current = window.requestAnimationFrame(() => {
+            setHighlightedMessageId(normalizedMessageId);
+            quoteHighlightFrameRef.current = null;
+            quoteHighlightTimerRef.current = window.setTimeout(() => {
+                setHighlightedMessageId(null);
+                quoteHighlightTimerRef.current = null;
+            }, 1800);
+        });
+    }, []);
+
+    useEffect(() => () => {
+        if (quoteHighlightTimerRef.current !== null) {
+            window.clearTimeout(quoteHighlightTimerRef.current);
+        }
+        if (quoteHighlightFrameRef.current !== null) {
+            window.cancelAnimationFrame(quoteHighlightFrameRef.current);
+        }
+    }, []);
 
     const selectConversation = useCallback((conversationId: string) => {
         if (!conversationId) return;
@@ -954,7 +1039,11 @@ export default function ChatsPage() {
                                                             <strong>{startsHumanTakeover ? "Coach Patrick joined the conversation" : "AI assistant resumed the conversation"}</strong>
                                                         </div>
                                                     )}
-                                                    <article className={`chats-bubble chats-bubble--${message.sender_type}`}>
+                                                    <article
+                                                        id={`support-message-${message.id}`}
+                                                        className={`chats-bubble chats-bubble--${message.sender_type}${highlightedMessageId === message.id ? " is-quote-target" : ""}`}
+                                                        tabIndex={-1}
+                                                    >
                                                         <div className="chats-bubble-meta">
                                                             <span className="chats-sender">
                                                                 <strong>{message.sender_type === "parent" ? contactName(selectedConversation) : sender.label}</strong>
@@ -962,6 +1051,13 @@ export default function ChatsPage() {
                                                             </span>
                                                             <time>{formatTime(message.created_at)}</time>
                                                         </div>
+                                                        {message.reply_preview && (
+                                                            <MessageReplyPreview
+                                                                preview={message.reply_preview}
+                                                                parentLabel={contactName(selectedConversation)}
+                                                                onOpenOriginal={openQuotedMessage}
+                                                            />
+                                                        )}
                                                         <p>{displayMessageContent(message)}</p>
                                                         {message.has_image && <SupportImagePreview messageId={message.id} getToken={token} />}
                                                         {message.source_refs?.length > 0 && <small>Sources: {message.source_refs.join(", ")}</small>}

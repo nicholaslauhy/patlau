@@ -134,7 +134,11 @@ Escalation notifications include two distinct HTTPS links. `/open-in-app/chats?c
 
 An optional private Telegram supergroup forum provides a structured Coach inbox. Topics must be enabled, the parent-support bot must be an administrator with **Manage Topics**, and **Remain anonymous** must stay off. Each escalated parent receives one private topic with a status-labelled title. An authorised administrator can type a normal message in that topic; the webhook authorises the individual sender's positive Telegram ID, checks the mapped conversation and latest parent turn, makes retries idempotent, and lets the first administrator own that turn. The parent's Telegram receives only the administrator's message exactly as written. Photos and other sensitive attachments are not copied into the forum; the secured app and website links remain available in the alert.
 
+When a parent uses Telegram's **Reply** action, `/chats` can show a compact preview of the quoted stored message. The database accepts only same-conversation references and clears the preview reference if the quoted message is deleted. Missing, deleted, or unmapped Telegram targets degrade to an ordinary unquoted message; raw Telegram payloads and file metadata are not exposed in the preview.
+
 `TELEGRAM_PARENT_SUPPORT_FORUM_CHAT_ID` stores the forum's separate negative `-100...` supergroup ID. After the forum-enabled deployment is live, an existing authorised administrator can send `/forumid` inside the private forum to obtain it. If the forum is unconfigured, still provisioning, unavailable, or rejects an alert, PatLau keeps the existing private per-administrator alert and ForceReply workflow as a safe fallback. Website replies are mirrored into an existing topic, status changes rename/close/reopen it, and permanent conversation deletion removes the Telegram topic before deleting Supabase history. Run `sql/setup_telegram_support_forum.sql` before enabling the environment variable.
+
+Apply `sql/setup_support_message_replies.sql` before deploying the reply-preview application code. The code deliberately continues without quote context when that migration is not yet present, so a staggered deployment does not interrupt the Telegram webhook. Apply `sql/setup_telegram_support_forum.sql` afterwards and before setting the forum environment variable.
 
 ## Audit trail
 
@@ -316,6 +320,7 @@ The application expects its Supabase tables, RPC functions, and RLS policies to 
 - `sql/setup_payment_history_rls.sql`
 - `sql/setup_telegram_support_admins.sql`
 - `sql/setup_telegram_support_admin_replies.sql`
+- `sql/setup_support_message_replies.sql`
 - `sql/setup_telegram_support_forum.sql`
 
 The running application also references programme, makeup, coach-attendance, reset-code, profile, and payment-state tables. Keep the deployed Supabase schema and RPC definitions in sync with the codebase, and enforce permissions with RLS rather than relying only on hidden interface controls.

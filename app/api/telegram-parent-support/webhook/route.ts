@@ -72,6 +72,7 @@ import {
     loadForumTopicByThread,
     parseTelegramSupportForumMessage,
     reactToTelegramSupportForumMessage,
+    resolveTelegramSupportForumReplyTarget,
     sendTelegramSupportForumMessage,
 } from "../../../lib/telegram-support-forum";
 import {
@@ -86,6 +87,11 @@ import {
     SupportImageDownloadError,
     supportImageSourceRefs,
 } from "../../../lib/support-image-server";
+import {
+    extractTelegramReplyToMessageId,
+    insertSupportMessageWithReplyFallback,
+    resolveSupportReplyTargetId,
+} from "../../../lib/support-message-replies";
 import { writeAuditEvent } from "../../../lib/audit-server";
 
 const delayedFeedbackKeyboard = (conversationId: string) => ({
@@ -152,10 +158,11 @@ async function saveInbound(
     telegramMessageId: string,
     content: string,
     sourceRefs: string[] = [],
+    replyToMessageId: string | number | null = null,
 ) {
-    const { data, error } = await supportAdmin
-        .from("support_messages")
-        .insert({
+    const { data, error } = await insertSupportMessageWithReplyFallback(
+        supportAdmin,
+        {
             conversation_id: conversationId,
             telegram_message_id: telegramMessageId,
             direction: "inbound",
@@ -163,12 +170,31 @@ async function saveInbound(
             content,
             source_refs: sourceRefs,
             telegram_delivery_status: "received",
-        })
-        .select("id")
-        .single();
+        },
+        replyToMessageId,
+    );
     if (error?.code === "23505") return false;
     if (error) throw error;
     return String(data.id);
+}
+
+async function resolveParentReplyTarget(
+    conversationId: string,
+    message: Record<string, any>,
+) {
+    const telegramMessageId = extractTelegramReplyToMessageId(message);
+    if (!telegramMessageId) return null;
+    try {
+        return await resolveSupportReplyTargetId(supportAdmin, {
+            conversationId,
+            telegramMessageId,
+        });
+    } catch {
+        // Reply previews are additional context. A temporary lookup failure
+        // must not prevent the parent's new message from being accepted.
+        console.error("Could not resolve a parent Telegram reply target.");
+        return null;
+    }
 }
 
 const IMAGE_PROCESSING_LEASE_MS = 120_000;
@@ -198,21 +224,23 @@ async function claimInboundImage(
     telegramMessageId: string,
     content: string,
     sourceRefs: string[],
+    replyToMessageId: string | number | null,
 ): Promise<InboundImageClaim> {
     const lease = newImageProcessingLease();
-    const { data: inserted, error: insertError } = await supportAdmin
-        .from("support_messages")
-        .insert({
-            conversation_id: conversationId,
-            telegram_message_id: telegramMessageId,
-            direction: "inbound",
-            sender_type: "parent",
-            content,
-            source_refs: sourceRefs,
-            telegram_delivery_status: lease,
-        })
-        .select("id")
-        .single();
+    const { data: inserted, error: insertError } =
+        await insertSupportMessageWithReplyFallback(
+            supportAdmin,
+            {
+                conversation_id: conversationId,
+                telegram_message_id: telegramMessageId,
+                direction: "inbound",
+                sender_type: "parent",
+                content,
+                source_refs: sourceRefs,
+                telegram_delivery_status: lease,
+            },
+            replyToMessageId,
+        );
     if (!insertError && inserted) {
         return { claimed: true, messageRowId: Number(inserted.id), lease, insertedNew: true };
     }
@@ -1453,6 +1481,7 @@ async function handleTelegramSupportImage(
     conversation: any,
     chatId: string,
     image: TelegramSupportImage,
+    replyToMessageId: string | number | null,
 ) {
     const caption = String(message.caption || "").trim();
     const content = imageMessageContent(caption);
@@ -1461,6 +1490,7 @@ async function handleTelegramSupportImage(
         String(message.message_id),
         content,
         supportImageSourceRefs(image.fileId),
+        replyToMessageId,
     );
     if (!claim.claimed) {
         return "retry" in claim && claim.retry
@@ -1801,6 +1831,23 @@ async function handleTelegramSupportForumReply(
         return { ok: true, forum: true, ignored: "unmapped_topic" };
     }
 
+    let forumReplyToSupportMessageId: string | null = null;
+    if (reply.replyToTelegramMessageId) {
+        try {
+            forumReplyToSupportMessageId =
+                await resolveTelegramSupportForumReplyTarget(
+                    supportAdmin,
+                    topic.id,
+                    reply.replyToTelegramMessageId,
+                    String(topic.conversation_id),
+                );
+        } catch {
+            // The administrator reply itself can still be delivered safely.
+            // Only the optional website quote is omitted on lookup failure.
+            console.error("Could not resolve a Telegram forum reply target.");
+        }
+    }
+
     const recipient = recipients.find(
         (candidate) => candidate.telegramChatId === reply.adminUserId,
     );
@@ -1954,21 +2001,22 @@ async function handleTelegramSupportForumReply(
         return { ok: true, forum: true, failed: "telegram_parent_delivery_failed" };
     }
 
-    const { data: storedMessage, error: messageError } = await supportAdmin
-        .from("support_messages")
-        .insert({
-            conversation_id: conversationId,
-            telegram_message_id: String(telegramMessage.message_id),
-            direction: "outbound",
-            sender_type: "superuser",
-            sender_user_id: null,
-            content: reply.content,
-            source_refs: [],
-            telegram_delivery_status: "sent",
-            created_at: replyStartedAt,
-        })
-        .select("id")
-        .single();
+    const { data: storedMessage, error: messageError } =
+        await insertSupportMessageWithReplyFallback(
+            supportAdmin,
+            {
+                conversation_id: conversationId,
+                telegram_message_id: String(telegramMessage.message_id),
+                direction: "outbound",
+                sender_type: "superuser",
+                sender_user_id: null,
+                content: reply.content,
+                source_refs: [],
+                telegram_delivery_status: "sent",
+                created_at: replyStartedAt,
+            },
+            forumReplyToSupportMessageId,
+        );
     if (messageError || !storedMessage) {
         await completeTelegramForumReplyReceipt(receiptId, {
             status: "failed",
@@ -2255,21 +2303,22 @@ async function handleTelegramSupportAdminReply(
         return { ok: true, admin: true, failed: "telegram_delivery_failed" };
     }
 
-    const { data: storedMessage, error: messageError } = await supportAdmin
-        .from("support_messages")
-        .insert({
-            conversation_id: conversationId,
-            telegram_message_id: String(telegramMessage.message_id),
-            direction: "outbound",
-            sender_type: "superuser",
-            sender_user_id: null,
-            content: formatCoachReply(reply.content),
-            source_refs: [],
-            telegram_delivery_status: "sent",
-            created_at: replyStartedAt,
-        })
-        .select("id")
-        .single();
+    const { data: storedMessage, error: messageError } =
+        await insertSupportMessageWithReplyFallback(
+            supportAdmin,
+            {
+                conversation_id: conversationId,
+                telegram_message_id: String(telegramMessage.message_id),
+                direction: "outbound",
+                sender_type: "superuser",
+                sender_user_id: null,
+                content: formatCoachReply(reply.content),
+                source_refs: [],
+                telegram_delivery_status: "sent",
+                created_at: replyStartedAt,
+            },
+            notification.expected_parent_message_id,
+        );
     if (messageError || !storedMessage) {
         await completeTelegramAdminReplyReceipt(receiptId, {
             status: "failed",
@@ -2545,6 +2594,10 @@ export async function POST(request: Request) {
         }
 
         const { contact, conversation } = await getOrCreateConversation(message.chat, message.from);
+        const parentReplyToMessageId = await resolveParentReplyTarget(
+            conversation.id,
+            message,
+        );
         const image = getTelegramSupportImage(message);
         if (image) {
             const imageResult = await handleTelegramSupportImage(
@@ -2553,6 +2606,7 @@ export async function POST(request: Request) {
                 conversation,
                 chatId,
                 image,
+                parentReplyToMessageId,
             );
             return NextResponse.json(imageResult, {
                 status: "retry" in imageResult && imageResult.retry ? 503 : 200,
@@ -2581,6 +2635,8 @@ export async function POST(request: Request) {
                     conversation.id,
                     String(message.message_id),
                     placeholder,
+                    [],
+                    parentReplyToMessageId,
                 );
                 if (!inserted) return NextResponse.json({ ok: true, duplicate: true });
                 await supportAdmin.from("support_conversations").update({
@@ -2637,6 +2693,8 @@ export async function POST(request: Request) {
                 conversation.id,
                 String(message.message_id),
                 text,
+                [],
+                parentReplyToMessageId,
             );
             if (!inboundMessageId) {
                 return NextResponse.json({ ok: true, duplicate: true });
@@ -2785,7 +2843,13 @@ export async function POST(request: Request) {
             return NextResponse.json({ ok: true });
         }
 
-        const inboundMessageId = await saveInbound(conversation.id, String(message.message_id), text);
+        const inboundMessageId = await saveInbound(
+            conversation.id,
+            String(message.message_id),
+            text,
+            [],
+            parentReplyToMessageId,
+        );
         if (!inboundMessageId) return NextResponse.json({ ok: true, duplicate: true });
         await supportAdmin.from("support_conversations").update({
             last_message_at: new Date().toISOString(),
