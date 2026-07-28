@@ -132,6 +132,8 @@ Website superusers can manage additional Telegram notification administrators fr
 
 Escalation notifications include two distinct HTTPS links. `/open-in-app/chats?conversation=...` opens a PatLau-branded bridge that attempts the free `patlau://chats?conversation=...` custom scheme and falls back to the same website conversation when the app is unavailable. `/chats?conversation=...` always targets the website directly. The bridge validates the conversation UUID before opening either destination. If the website requires sign-in, it carries a strictly validated chat-only return path through login and then opens that exact conversation; invalid or unavailable conversation links never silently open a different parent’s chat.
 
+An authorised Telegram administrator can answer without opening the website or app by using Telegram's **Reply** action on the latest parent alert. Each delivered alert is privately mapped to its conversation and latest parent message. The webhook rechecks administrator access, refuses expired or stale alerts, makes retries idempotent, and prevents two administrators from unintentionally answering the same parent turn. The parent's Telegram receives only the administrator's message exactly as written; channel labels and delivery-source footers are never appended. This feature requires `sql/setup_telegram_support_admin_replies.sql` in addition to the administrator-list setup.
+
 ## Audit trail
 
 `audit_logs` is an append-only operational and security timeline. Database triggers cover inserts, updates, and deletes on the current public business tables, including changes made inside RPC functions. Server routes add understandable events for actions outside those tables, such as login attempts, password recovery, Auth user administration, profile photos, support actions, Telegram delivery, and scheduled summaries.
@@ -245,6 +247,8 @@ TELEGRAM_PARENT_SUPPORT_WEBHOOK_SECRET=
 # Settings and stored privately in telegram_support_admins.
 TELEGRAM_PARENT_SUPPORT_ADMIN_CHAT_ID=
 OPENAI_API_KEY=
+# Shared parent-support text model.
+OPENAI_SUPPORT_MODEL=
 # Optional. Falls back to OPENAI_SUPPORT_MODEL, then the application's default.
 OPENAI_SUPPORT_IMAGE_MODEL=
 
@@ -306,6 +310,7 @@ The application expects its Supabase tables, RPC functions, and RLS policies to 
 - `migrations/20260721220000_make_audit_logs_human_readable.sql`
 - `sql/setup_payment_history_rls.sql`
 - `sql/setup_telegram_support_admins.sql`
+- `sql/setup_telegram_support_admin_replies.sql`
 
 The running application also references programme, makeup, coach-attendance, reset-code, profile, and payment-state tables. Keep the deployed Supabase schema and RPC definitions in sync with the codebase, and enforce permissions with RLS rather than relying only on hidden interface controls.
 
@@ -331,6 +336,8 @@ npm run build
 
 - Configure all required Supabase, Brevo, Telegram, Sentry, and cron variables.
 - Apply the required database tables, RPC functions, and RLS policies.
+- Send a small-detail Telegram photo and confirm vision either answers a routine query or immediately escalates a possible injury, safety issue, or complaint.
+- From each active Telegram administrator, reply to the latest escalation alert and confirm the parent receives exactly the typed text once, with no channel footer.
 - Confirm the audit export queue has no dead-letter rows, use **Export now**, and find the same stable event ID in Sentry before relying on automatic pruning.
 - Configure the coach-attendance Telegram webhook.
 - Test login and recovery for each role.
