@@ -17,6 +17,20 @@ export const SUPPORT_IMAGE_TRIAGE_CATEGORIES = [
     "unreadable",
 ] as const;
 
+export const SUPPORT_IMAGE_VISIBLE_FINDINGS = [
+    "scratch",
+    "bruise",
+    "cut",
+    "swelling",
+    "bleeding",
+    "burn",
+    "skin_irritation",
+    "other_injury",
+    "safety_concern",
+    "none",
+    "unclear",
+] as const;
+
 /**
  * Strict Structured Outputs supports only a subset of JSON Schema. Keep this
  * schema in one tested location so unsupported keywords cannot silently break
@@ -34,9 +48,13 @@ export const SUPPORT_IMAGE_TRIAGE_RESPONSE_SCHEMA = {
         },
         confidence: { type: "number", minimum: 0, maximum: 1 },
         readable: { type: "boolean" },
+        visibleFinding: {
+            type: "string",
+            enum: SUPPORT_IMAGE_VISIBLE_FINDINGS,
+        },
         summary: { type: "string" },
     },
-    required: ["categories", "confidence", "readable", "summary"],
+    required: ["categories", "confidence", "readable", "visibleFinding", "summary"],
 } as const;
 
 export const SUPPORT_IMAGE_INPUT_DETAIL = "original" as const;
@@ -55,6 +73,7 @@ export function selectSupportImageModel(
 }
 
 export type SupportImageTriageCategory = typeof SUPPORT_IMAGE_TRIAGE_CATEGORIES[number];
+export type SupportImageVisibleFinding = typeof SUPPORT_IMAGE_VISIBLE_FINDINGS[number];
 export type SupportImageTriageDecision =
     | "escalate_immediately"
     | "ai_can_answer"
@@ -116,8 +135,60 @@ export type SupportImageTriage = {
     categories: SupportImageTriageCategory[];
     confidence: number;
     readable: boolean;
+    visibleFinding: SupportImageVisibleFinding;
     summary?: string;
 };
+
+const MEDICAL_OR_SAFETY_CATEGORIES = new Set<SupportImageTriageCategory>([
+    "injury",
+    "medical",
+    "safety",
+    "abuse",
+    "urgent",
+]);
+const COMPLAINT_CATEGORIES = new Set<SupportImageTriageCategory>([
+    "complaint",
+    "refund",
+    "dispute",
+]);
+const FINDING_DESCRIPTION: Partial<Record<SupportImageVisibleFinding, string>> = {
+    scratch: "what looks like a scratch",
+    bruise: "what looks like a bruise",
+    cut: "what looks like a cut",
+    swelling: "what looks like some swelling",
+    bleeding: "what looks like some bleeding",
+    burn: "what may be a burn",
+    skin_irritation: "what looks like skin irritation",
+    other_injury: "a visible injury",
+    safety_concern: "a possible safety concern",
+};
+
+/**
+ * Builds deterministic parent-facing handoff copy from validated categories.
+ * Free-form model summaries are deliberately ignored because they may contain
+ * private details or an unreliable description of the photo.
+ */
+export function supportImageEscalationMessage(
+    triage: SupportImageTriage | null,
+    analysisFailed = false,
+) {
+    const categories = triage?.categories ?? [];
+
+    if (analysisFailed || !triage) {
+        return "I'm sorry, but I couldn't safely determine what this photo shows.\n\nThe AI assistant is now paused. Coach Patrick will take over the conversation from here. Please wait for his reply.";
+    }
+    if (categories.some((category) => MEDICAL_OR_SAFETY_CATEGORIES.has(category))) {
+        const finding = FINDING_DESCRIPTION[triage.visibleFinding];
+        const acknowledgement = finding
+            ? `I can see ${finding} in the photo.`
+            : "The photo may involve an injury or safety concern.";
+        return `I'm sorry this happened. ${acknowledgement}\n\nThe AI assistant is now paused. Coach Patrick will take over the conversation from here. Please wait for his reply.\n\nIf anyone may need urgent medical attention or is in immediate danger, please seek appropriate medical or emergency help now rather than waiting for a chat reply.`;
+    }
+    if (categories.some((category) => COMPLAINT_CATEGORIES.has(category))) {
+        return "Thank you for sharing this.\n\nThe AI assistant is now paused. Coach Patrick will take over the conversation from here. Please wait for his reply. You can continue adding relevant details in this chat.";
+    }
+    return "The AI assistant is now paused. Coach Patrick will take over the conversation from here. Please wait for his reply.";
+}
 
 const CATEGORY_SET = new Set<string>(SUPPORT_IMAGE_TRIAGE_CATEGORIES);
 const IMMEDIATE_HUMAN_CATEGORIES = new Set<SupportImageTriageCategory>([
@@ -145,6 +216,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isSupportImageTriageCategory(value: unknown): value is SupportImageTriageCategory {
     return typeof value === "string" && CATEGORY_SET.has(value);
+}
+
+const VISIBLE_FINDING_SET = new Set<string>(SUPPORT_IMAGE_VISIBLE_FINDINGS);
+
+function isSupportImageVisibleFinding(value: unknown): value is SupportImageVisibleFinding {
+    return typeof value === "string" && VISIBLE_FINDING_SET.has(value);
 }
 
 function normaliseModelJson(value: string) {
@@ -178,12 +255,14 @@ export function parseSupportImageTriage(value: unknown): SupportImageTriage | nu
         return null;
     }
     if (typeof candidate.readable !== "boolean") return null;
+    if (!isSupportImageVisibleFinding(candidate.visibleFinding)) return null;
     if (candidate.summary !== undefined && typeof candidate.summary !== "string") return null;
 
     return {
         categories: [...new Set(candidate.categories)],
         confidence: candidate.confidence,
         readable: candidate.readable,
+        visibleFinding: candidate.visibleFinding,
         ...(typeof candidate.summary === "string" ? { summary: candidate.summary.trim().slice(0, 500) } : {}),
     };
 }
@@ -202,7 +281,13 @@ export function triageSupportImageCaption(caption: string): SupportImageTriage |
         categories.push("complaint");
     }
     return categories.length > 0
-        ? { categories, confidence: 1, readable: true, summary: "The caption requires human review." }
+        ? {
+            categories,
+            confidence: 1,
+            readable: true,
+            visibleFinding: "unclear",
+            summary: "The caption requires human review.",
+        }
         : null;
 }
 
