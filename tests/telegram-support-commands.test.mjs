@@ -15,6 +15,10 @@ test("the Telegram parent menu exposes only the four supported commands", () => 
         TELEGRAM_SUPPORT_PARENT_COMMANDS.some(({ command }) => command === "human"),
         false,
     );
+    assert.equal(
+        TELEGRAM_SUPPORT_PARENT_COMMANDS.find(({ command }) => command === "close")?.description,
+        "Close this conversation",
+    );
 });
 
 test("the private forum menu exposes only the safe setup command", () => {

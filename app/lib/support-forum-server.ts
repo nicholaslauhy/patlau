@@ -1503,6 +1503,115 @@ export async function mirrorSupportForumCoachReply(
     };
 }
 
+/**
+ * Copy an AI or system response into an existing parent-support topic without
+ * changing the topic's workflow state. State changes remain the responsibility
+ * of syncSupportForumState so mirroring a message can never reopen, rename, or
+ * close a conversation by accident.
+ */
+export async function mirrorSupportForumAutomatedMessage(
+    database: SupportForumDatabaseClient,
+    input: {
+        conversationId: string;
+        text: string;
+    } & ForumTransportOptions,
+): Promise<ForumMirrorResult> {
+    const conversationId = cleanIdentifier(input.conversationId);
+    const text = String(input.text || "").trim();
+    if (!conversationId || !text) {
+        return {
+            mirrored: false,
+            noTopic: !conversationId,
+            telegramMessageId: null,
+            topic: null,
+            fallbackRequired: false,
+            reason: "A conversation ID and message text are required.",
+            errorCode: "invalid_forum_mirror",
+        };
+    }
+    const forumChatId = configuredForumChatId(input);
+    if (!forumChatId) {
+        return {
+            mirrored: false,
+            noTopic: true,
+            telegramMessageId: null,
+            topic: null,
+            fallbackRequired: false,
+            reason: null,
+            errorCode: null,
+        };
+    }
+
+    const loaded = await loadAnyForumTopic(database, conversationId);
+    if (loaded.error) {
+        return {
+            mirrored: false,
+            noTopic: false,
+            telegramMessageId: null,
+            topic: null,
+            fallbackRequired: false,
+            reason: `The forum mapping could not be loaded: ${errorText(loaded.error)}`,
+            errorCode: databaseErrorCode(loaded.error),
+        };
+    }
+    const topic = loaded.topic;
+    if (topic && topic.telegram_forum_chat_id !== forumChatId) {
+        return {
+            mirrored: false,
+            noTopic: false,
+            telegramMessageId: null,
+            topic,
+            fallbackRequired: false,
+            reason: "The stored forum topic belongs to a different Telegram group, so the automated message was not mirrored.",
+            errorCode: "forum_group_mismatch",
+        };
+    }
+    if (
+        !topic
+        || !positiveInteger(topic.telegram_message_thread_id)
+        || topic.lifecycle_status !== "open"
+    ) {
+        return {
+            mirrored: false,
+            noTopic: !topic,
+            telegramMessageId: null,
+            topic,
+            fallbackRequired: false,
+            reason: null,
+            errorCode: null,
+        };
+    }
+
+    try {
+        const remoteMessage = await sendTelegramSupportForumMessage({
+            chatId: topic.telegram_forum_chat_id,
+            messageThreadId: topic.telegram_message_thread_id!,
+            text,
+            disableNotification: true,
+            ...transport(input),
+        });
+        return {
+            mirrored: true,
+            noTopic: false,
+            telegramMessageId: remoteMessage?.message_id || null,
+            topic,
+            fallbackRequired: false,
+            reason: null,
+            errorCode: null,
+        };
+    } catch (error) {
+        return {
+            mirrored: false,
+            noTopic: false,
+            telegramMessageId: null,
+            topic,
+            fallbackRequired: false,
+            reason: `Telegram could not mirror the automated message: ${errorText(error)}`,
+            errorCode: telegramErrorCode(error, "mirror"),
+        };
+    }
+}
+
 export async function claimSupportForumTurn(
     database: SupportForumDatabaseClient,
     input: {

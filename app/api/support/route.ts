@@ -21,9 +21,13 @@ import {
     canCloseAfterCoachReply,
     isSubstantiveCoachReply,
 } from "../../lib/support-conversation-policy";
-import { buildPublicSupportMessages } from "../../lib/support-message-replies";
+import {
+    buildPublicSupportMessage,
+    buildPublicSupportMessages,
+} from "../../lib/support-message-replies";
 import {
     deleteSupportForumTopicBeforeConversation,
+    mirrorSupportForumAutomatedMessage,
     mirrorSupportForumCoachReply,
     syncSupportForumState,
 } from "../../lib/support-forum-server";
@@ -356,7 +360,9 @@ export async function POST(request: NextRequest) {
                     parent_context_verified: parentContextVerified,
                 },
             });
-            return NextResponse.json({ message });
+            return NextResponse.json({
+                message: buildPublicSupportMessage(message, [message]),
+            });
         }
 
         if (action === "set_status") {
@@ -494,22 +500,29 @@ export async function POST(request: NextRequest) {
                         formatSystemMessage(parentStateMessage.content),
                         parentStateMessage.keyboard,
                     );
-                    const { error: messageError } = reopenMarkerId
-                        ? await auditedAdmin
+                    let messageError: any = null;
+                    if (reopenMarkerId) {
+                        const result = await auditedAdmin
                             .from("support_messages")
                             .update({
                                 telegram_message_id: String(telegramMessage.message_id),
                                 telegram_delivery_status: "sent",
                             })
-                            .eq("id", reopenMarkerId)
-                        : await auditedAdmin.from("support_messages").insert({
+                            .eq("id", reopenMarkerId);
+                        messageError = result.error;
+                    } else {
+                        const result = await auditedAdmin.from("support_messages").insert({
                             conversation_id: conversationId,
                             telegram_message_id: String(telegramMessage.message_id),
                             direction: "outbound",
                             sender_type: "system",
                             content: parentStateMessage.content,
                             telegram_delivery_status: "sent",
-                        });
+                        })
+                            .select("id")
+                            .single();
+                        messageError = result.error;
+                    }
                     if (messageError) {
                         console.error("Could not save a delivered conversation-state message:", messageError);
                         notificationWarning = reopenMarkerId
@@ -544,6 +557,34 @@ export async function POST(request: NextRequest) {
                     console.error("Could not update the undelivered conversation-state marker:", markerError);
                 }
             }
+            const mirrorStoredStateMessageToForum = async () => {
+                if (!parentStateMessage) return;
+                try {
+                    const forumMirror = await mirrorSupportForumAutomatedMessage(
+                        supportAdmin,
+                        {
+                            conversationId,
+                            text: `System:\n\n${formatSystemMessage(parentStateMessage.content)}`,
+                        },
+                    );
+                    if (!forumMirror.mirrored && !forumMirror.noTopic) {
+                        notificationWarning = [
+                            notificationWarning,
+                            "The conversation update could not be mirrored into the Telegram support topic.",
+                        ].filter(Boolean).join(" ");
+                    }
+                } catch {
+                    notificationWarning = [
+                        notificationWarning,
+                        "The conversation update could not be mirrored into the Telegram support topic.",
+                    ].filter(Boolean).join(" ");
+                }
+            };
+            if (status === "resolved") {
+                // A resolved topic is about to close, so mirror the final
+                // message while the forum topic is still open.
+                await mirrorStoredStateMessageToForum();
+            }
             await recordSupportStatus(
                 conversationId,
                 current.status as SupportStatus,
@@ -575,6 +616,11 @@ export async function POST(request: NextRequest) {
                     notificationWarning,
                     "The Telegram support topic could not be synchronized.",
                 ].filter(Boolean).join(" ");
+            }
+            if (status !== "resolved") {
+                // Reopen the forum first, then place the matching system turn
+                // into the same topic.
+                await mirrorStoredStateMessageToForum();
             }
             await writeAuditEvent({
                 request,

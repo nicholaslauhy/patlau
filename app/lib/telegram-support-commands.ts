@@ -2,7 +2,7 @@ export const TELEGRAM_SUPPORT_PARENT_COMMANDS = [
     { command: "start", description: "Start or restart parent support" },
     { command: "help", description: "See how parent support works" },
     { command: "status", description: "Check your conversation status" },
-    { command: "close", description: "Close after Coach Patrick has replied" },
+    { command: "close", description: "Close this conversation" },
 ] as const;
 
 export const TELEGRAM_SUPPORT_FORUM_COMMANDS = [

@@ -21,7 +21,6 @@ import {
     reopenConversationKeyboard,
     shouldDeliverSupportAiResponse,
     shouldOfferDelayedFeedback,
-    supportHelpKeyboard,
 } from "../app/lib/telegram-support-flow.ts";
 
 test("AI messages use a disclaimer while Coach replies avoid personal attribution", () => {
@@ -141,17 +140,12 @@ test("closed conversations provide a safe, explicit Telegram reopen action", () 
                 text: "Reopen conversation",
                 callback_data: `ps|reopen|${conversationId}`,
             }],
-            [{
-                text: "Delete stored conversation",
-                callback_data: `ps|delete_request|${conversationId}`,
-            }],
         ],
     });
 });
 
 test("stored-conversation deletion is explicit, confirmed, and within Telegram callback limits", () => {
     const conversationId = "3de79fc3-7fbd-4f58-bf4b-a26f757595b1";
-    const helpKeyboard = supportHelpKeyboard(conversationId);
     const confirmationKeyboard = deleteConversationConfirmationKeyboard(conversationId);
 
     assert.match(DELETE_CONVERSATION_CONFIRMATION_MESSAGE, /permanently delete/i);
@@ -159,12 +153,6 @@ test("stored-conversation deletion is explicit, confirmed, and within Telegram c
     assert.match(DELETE_CONVERSATION_CONFIRMATION_MESSAGE, /does not delete messages already visible in Telegram/i);
     assert.match(DELETE_CONVERSATION_CANCELLED_MESSAGE, /still available/i);
     assert.match(DELETED_CONVERSATION_MESSAGE, /permanently deleted/i);
-    assert.deepEqual(helpKeyboard, {
-        inline_keyboard: [[{
-            text: "Delete stored conversation",
-            callback_data: `ps|delete_request|${conversationId}`,
-        }]],
-    });
     assert.deepEqual(confirmationKeyboard, {
         inline_keyboard: [[
             {
@@ -178,7 +166,7 @@ test("stored-conversation deletion is explicit, confirmed, and within Telegram c
         ]],
     });
 
-    for (const keyboard of [helpKeyboard, confirmationKeyboard, reopenConversationKeyboard(conversationId)]) {
+    for (const keyboard of [confirmationKeyboard, reopenConversationKeyboard(conversationId)]) {
         for (const button of keyboard.inline_keyboard.flat()) {
             assert.ok(Buffer.byteLength(button.callback_data, "utf8") <= 64);
         }

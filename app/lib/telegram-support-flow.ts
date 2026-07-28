@@ -11,15 +11,6 @@ export function reopenConversationKeyboard(conversationId: string) {
     return {
         inline_keyboard: [
             [{ text: "Reopen conversation", callback_data: `ps|reopen|${conversationId}` }],
-            [{ text: "Delete stored conversation", callback_data: `ps|delete_request|${conversationId}` }],
-        ],
-    };
-}
-
-export function supportHelpKeyboard(conversationId: string) {
-    return {
-        inline_keyboard: [
-            [{ text: "Delete stored conversation", callback_data: `ps|delete_request|${conversationId}` }],
         ],
     };
 }

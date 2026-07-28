@@ -4,6 +4,7 @@ import {
     claimSupportForumTurn,
     deleteSupportForumTopicBeforeConversation,
     ensureSupportForumTopic,
+    mirrorSupportForumAutomatedMessage,
     mirrorSupportForumCoachReply,
     mirrorSupportForumParentMessage,
     notifySupportForum,
@@ -248,6 +249,40 @@ function createTelegramTransport() {
         },
     };
 }
+
+test("AI and system replies mirror without changing an open topic's workflow state", async () => {
+    const { database, tables } = createMemoryDatabase();
+    const telegram = createTelegramTransport();
+    const common = {
+        conversationId: CONVERSATION_ID,
+        parentName: "Brendan",
+        ...telegram.options,
+    };
+    assert.equal((await ensureSupportForumTopic(database, common)).state, "ready");
+    const topic = tables.telegram_support_forum_topics[0];
+    topic.display_state = "needs_reply";
+    topic.topic_name = "Brendan · #7CDA7535";
+
+    const callCountBeforeMirror = telegram.calls.length;
+    const result = await mirrorSupportForumAutomatedMessage(database, {
+        ...common,
+        text: "AI assistant:\n\nWeekend training continues as usual.",
+    });
+
+    assert.equal(result.mirrored, true);
+    assert.equal(result.topic.display_state, "needs_reply");
+    assert.equal(topic.topic_name, "Brendan · #7CDA7535");
+    const mirrorCalls = telegram.calls.slice(callCountBeforeMirror);
+    assert.deepEqual(mirrorCalls, [{
+        method: "sendMessage",
+        payload: {
+            chat_id: FORUM_CHAT_ID,
+            message_thread_id: 44,
+            text: "AI assistant:\n\nWeekend training continues as usual.",
+            disable_notification: true,
+        },
+    }]);
+});
 
 test("forum orchestration is idempotent and keeps one topic per parent", async () => {
     const { database, tables } = createMemoryDatabase();
@@ -551,6 +586,40 @@ test("canonical parent text is mirrored once and an escalated retry upgrades the
         1,
     );
     assert.equal(tables.telegram_support_forum_notifications.length, 1);
+});
+
+test("stored parent slash commands are mirrored into the support forum verbatim", async () => {
+    const { database, tables } = createMemoryDatabase();
+    const telegram = createTelegramTransport();
+    const commands = ["/start", "/help", "/status", "/close"];
+
+    for (const [index, command] of commands.entries()) {
+        const messageId = 150 + index;
+        tables.support_messages.push({
+            id: messageId,
+            conversation_id: CONVERSATION_ID,
+            sender_type: "parent",
+            content: command,
+            source_refs: [],
+        });
+        const result = await mirrorSupportForumParentMessage(database, {
+            conversationId: CONVERSATION_ID,
+            parentName: "Brendan",
+            expectedParentMessageId: messageId,
+            status: "ai_active",
+            ...telegram.options,
+        });
+        assert.equal(result.delivered, true);
+        assert.equal(result.duplicate, false);
+    }
+
+    const mirroredText = telegram.calls
+        .filter((call) => call.method === "sendMessage")
+        .map((call) => call.payload.text)
+        .filter((text) => commands.includes(text));
+
+    assert.deepEqual(mirroredText, commands);
+    assert.equal(tables.telegram_support_forum_notifications.length, commands.length);
 });
 
 test("a rapid second parent message waits for topic provisioning instead of being lost", async () => {

@@ -35,7 +35,6 @@ import {
     reopenConversationKeyboard,
     shouldDeliverSupportAiResponse,
     shouldOfferDelayedFeedback,
-    supportHelpKeyboard,
 } from "../../../lib/telegram-support-flow";
 import { ensureTelegramSupportCommands } from "../../../lib/telegram-support-commands";
 import {
@@ -78,6 +77,7 @@ import {
 import {
     claimSupportForumTurn,
     deleteSupportForumTopicBeforeConversation,
+    mirrorSupportForumAutomatedMessage,
     mirrorSupportForumCoachReply,
     mirrorSupportForumParentMessage,
     syncSupportForumState,
@@ -204,9 +204,7 @@ async function mirrorStoredParentMessageToForum(
             status: conversation.status as SupportStatus | undefined,
         });
         if (
-            !result.delivered
-            && !result.duplicate
-            && result.errorCode
+            result.errorCode
             && result.errorCode !== "forum_unconfigured"
         ) {
             console.error(
@@ -502,16 +500,37 @@ async function sendAndStore(
         ? formatAiReply(storedContent)
         : formatSystemMessage(storedContent);
     const message = await sendSupportTelegramMessage(chatId, deliveredContent.slice(0, 3900), keyboard);
-    const { error } = await supportAdmin.from("support_messages").insert({
-        conversation_id: conversationId,
-        telegram_message_id: String(message.message_id),
-        direction: "outbound",
-        sender_type: senderType,
-        content: storedContent.slice(0, 3900),
-        source_refs: sources,
-        telegram_delivery_status: "sent",
-    });
-    if (error) throw error;
+    const { data: storedMessage, error } = await supportAdmin
+        .from("support_messages")
+        .insert({
+            conversation_id: conversationId,
+            telegram_message_id: String(message.message_id),
+            direction: "outbound",
+            sender_type: senderType,
+            content: storedContent.slice(0, 3900),
+            source_refs: sources,
+            telegram_delivery_status: "sent",
+        })
+        .select("id")
+        .single();
+    if (error || !storedMessage) {
+        throw error || new Error("Could not save the delivered support message.");
+    }
+    try {
+        const forumResult = await mirrorSupportForumAutomatedMessage(supportAdmin, {
+            conversationId,
+            text: `${senderType === "ai" ? "AI assistant" : "System"}:\n\n${deliveredContent}`,
+        });
+        if (!forumResult.noTopic && forumResult.errorCode) {
+            console.error(
+                `An automated support message could not be mirrored to the Telegram support forum (${forumResult.errorCode}).`,
+            );
+        }
+    } catch {
+        // Supabase and the parent's Telegram chat remain canonical. A forum
+        // outage must not interrupt delivery to the parent.
+        console.error("An automated support message could not be mirrored to the Telegram support forum.");
+    }
     return message;
 }
 
@@ -647,6 +666,19 @@ async function reopenConversationFromTelegram(
         .eq("id", reopenMarker.id);
     if (markerUpdateError) {
         throw markerUpdateError;
+    }
+    try {
+        const forumResult = await mirrorSupportForumAutomatedMessage(supportAdmin, {
+            conversationId: conversation.id,
+            text: `System:\n\n${formatSystemMessage(REOPENED_CONVERSATION_MESSAGE)}`,
+        });
+        if (forumResult.errorCode) {
+            console.error(
+                `The Telegram reopen message mapping needs attention (${forumResult.errorCode}).`,
+            );
+        }
+    } catch {
+        console.error("Could not mirror the Telegram reopen message into the support forum.");
     }
 }
 
@@ -1259,17 +1291,21 @@ async function handleCallback(callbackQuery: any) {
             }
             return;
         }
+        try {
+            await sendAndStore(
+                conversation.id,
+                chatId,
+                `Glad I could help. ${CLOSED_CONVERSATION_MESSAGE}`,
+                "system",
+                [],
+                reopenConversationKeyboard(conversation.id),
+            );
+        } catch (error) {
+            console.error("Could not deliver the resolved-conversation notice:", error);
+        }
         await setConversationStatus(conversation, "resolved", "parent", "Parent marked the answer helpful.");
         await clearCallbackKeyboard(callbackQuery);
         await answerSupportCallback(callbackQuery.id, "Thank you — marked as resolved.");
-        await sendAndStore(
-            conversation.id,
-            chatId,
-            `Glad I could help. ${CLOSED_CONVERSATION_MESSAGE}`,
-            "system",
-            [],
-            reopenConversationKeyboard(conversation.id),
-        );
     } else if (action === "reopen") {
         if (!["resolved", "closed_parent"].includes(conversation.status)) {
             await clearCallbackKeyboard(callbackQuery);
@@ -1379,17 +1415,21 @@ async function handleCallback(callbackQuery: any) {
             );
             return;
         }
+        try {
+            await sendAndStore(
+                conversation.id,
+                chatId,
+                CLOSED_CONVERSATION_MESSAGE,
+                "system",
+                [],
+                reopenConversationKeyboard(conversation.id),
+            );
+        } catch (error) {
+            console.error("Could not deliver the closed-conversation notice:", error);
+        }
         await setConversationStatus(conversation, "closed_parent", "parent", "Parent closed the conversation.");
         await clearCallbackKeyboard(callbackQuery);
         await answerSupportCallback(callbackQuery.id, "Conversation closed.");
-        await sendAndStore(
-            conversation.id,
-            chatId,
-            CLOSED_CONVERSATION_MESSAGE,
-            "system",
-            [],
-            reopenConversationKeyboard(conversation.id),
-        );
     }
 }
 
@@ -1506,16 +1546,6 @@ async function clearCoachCloseControls(conversationId: string, chatId: string) {
             console.error("Could not clear an earlier Coach reply close control:", error);
         }
     }
-}
-
-async function parentCanCloseConversation(conversationId: string) {
-    const { data, error } = await supportAdmin
-        .from("support_messages")
-        .select("sender_type,content,created_at,telegram_delivery_status")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
-    if (error) throw error;
-    return canCloseAfterCoachReply(data || []);
 }
 
 async function handleTelegramSupportImage(
@@ -2443,11 +2473,16 @@ async function handleTelegramSupportAdminReply(
         contact.last_name,
     ].filter(Boolean).join(" ").trim() || contact.username || "the parent";
     try {
-        await mirrorSupportForumCoachReply(supportAdmin, {
+        const forumResult = await mirrorSupportForumCoachReply(supportAdmin, {
             conversationId,
             parentName: parentLabel,
             text: `Coach Patrick replied:\n\n${reply.content}`,
         });
+        if (forumResult.errorCode) {
+            console.error(
+                `A Telegram support-forum Coach reply mapping needs attention (${forumResult.errorCode}).`,
+            );
+        }
     } catch {
         console.error("Could not mirror a private Telegram administrator reply into the support forum.");
     }
@@ -2809,6 +2844,34 @@ export async function POST(request: Request) {
             return NextResponse.json({ ok: true, escalated: true });
         }
 
+        if (text.startsWith("/")) {
+            const savedCommand = await saveInbound(
+                conversation.id,
+                String(message.message_id),
+                text,
+                [],
+                parentReplyToMessageId,
+            );
+            if (!savedCommand.inserted) {
+                await mirrorStoredParentMessageToForum(
+                    conversation,
+                    parentName(message.from),
+                    savedCommand.messageRowId,
+                );
+                return NextResponse.json({ ok: true, duplicate: true });
+            }
+            await supportAdmin.from("support_conversations").update({
+                last_message_at: new Date().toISOString(),
+                last_message_preview: text.slice(0, 180),
+                unread_count: Number(conversation.unread_count || 0) + 1,
+            }).eq("id", conversation.id);
+            await mirrorStoredParentMessageToForum(
+                conversation,
+                parentName(message.from),
+                savedCommand.messageRowId,
+            );
+        }
+
         if (command === "/start") {
             if (["escalated", "human_active"].includes(conversation.status)) {
                 await sendAndStore(conversation.id, chatId, "Coach Patrick is already handling this conversation. You can continue typing your messages here, and the AI assistant will remain paused.", "system");
@@ -2842,15 +2905,13 @@ export async function POST(request: Request) {
                 return NextResponse.json({ ok: true, closed: true });
             }
             const helpMessage = ["escalated", "human_active"].includes(conversation.status)
-                ? "This conversation has been escalated to Coach Patrick. You can continue typing your message here. Use /status to check the conversation, or /close to close it after Coach Patrick has given a complete reply. You can also permanently delete PatLau's stored copy of this conversation below."
-                : "Type and send your coaching question normally, or send an image using Telegram's Photo option, so the AI assistant can help first. Use /status to check the conversation. Possible injury, safety or complaint photos go directly to Coach Patrick; other unsupported questions will offer a handoff. You can also permanently delete PatLau's stored copy of this conversation below.";
+                ? "This conversation has been escalated to Coach Patrick. You can continue typing your message here. Use /status to check the conversation, or /close to close it at any time."
+                : "Type and send your coaching question normally, or send an image using Telegram's Photo option, so the AI assistant can help first. Use /status to check the conversation or /close to close it at any time. Possible injury, safety or complaint photos go directly to Coach Patrick; other unsupported questions will offer a handoff.";
             await sendAndStore(
                 conversation.id,
                 chatId,
                 helpMessage,
                 "system",
-                [],
-                supportHelpKeyboard(conversation.id),
             );
             return NextResponse.json({ ok: true });
         }
@@ -2879,32 +2940,24 @@ export async function POST(request: Request) {
                 );
                 return NextResponse.json({ ok: true, closed: true });
             }
-            if (
-                conversation.status !== "human_active"
-                || !await parentCanCloseConversation(conversation.id)
-            ) {
+            try {
                 await sendAndStore(
                     conversation.id,
                     chatId,
-                    "You can close this conversation after Coach Patrick has given a complete reply. You may continue typing your message here in the meantime.",
+                    CLOSED_CONVERSATION_MESSAGE,
                     "system",
+                    [],
+                    reopenConversationKeyboard(conversation.id),
                 );
-                return NextResponse.json({ ok: true, closeNotReady: true });
+            } catch (error) {
+                console.error("Could not deliver the /close acknowledgement:", error);
             }
-            await setConversationStatus(conversation, "closed_parent", "parent", "Parent used /close after Coach Patrick's reply.");
+            await setConversationStatus(conversation, "closed_parent", "parent", "Parent used /close.");
             try {
                 await clearCoachCloseControls(conversation.id, chatId);
             } catch (error) {
                 console.error("Could not clear Coach reply controls while closing the conversation:", error);
             }
-            await sendAndStore(
-                conversation.id,
-                chatId,
-                CLOSED_CONVERSATION_MESSAGE,
-                "system",
-                [],
-                reopenConversationKeyboard(conversation.id),
-            );
             return NextResponse.json({ ok: true, closed: true });
         }
         if (text.startsWith("/")) {
