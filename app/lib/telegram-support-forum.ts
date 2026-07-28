@@ -432,7 +432,7 @@ export function sendTelegramSupportForumPhoto(input: {
     chatId: string;
     messageThreadId: string | number;
     photoFileId: string;
-    caption: string;
+    caption?: string | null;
     replyMarkup?: Record<string, unknown>;
     disableNotification?: boolean;
 } & TelegramSupportForumTransportOptions) {
@@ -444,17 +444,42 @@ export function sendTelegramSupportForumPhoto(input: {
         String(input.caption || "").trim(),
         MAX_SUPPORT_TELEGRAM_PHOTO_CAPTION_CHARACTERS,
     );
-    if (!caption) throw new Error("A Telegram forum photo caption cannot be empty.");
     return callTelegramSupportForumApi<Record<string, any>>("sendPhoto", {
         chat_id: target.chatId,
         message_thread_id: target.messageThreadId,
         photo: input.photoFileId,
-        caption,
+        ...(caption ? { caption } : {}),
         protect_content: true,
         ...(input.replyMarkup ? { reply_markup: input.replyMarkup } : {}),
         ...(typeof input.disableNotification === "boolean"
             ? { disable_notification: input.disableNotification }
             : {}),
+    }, input);
+}
+
+export function pinTelegramSupportForumMessage(input: {
+    chatId: string;
+    messageId: string | number;
+    disableNotification?: boolean;
+} & TelegramSupportForumTransportOptions) {
+    const chatId = getConfiguredTelegramSupportForumChatId(input.chatId);
+    if (!chatId) throw new Error("A valid Telegram forum supergroup ID is required.");
+    return callTelegramSupportForumApi<boolean>("pinChatMessage", {
+        chat_id: chatId,
+        message_id: telegramInteger(input.messageId, "The Telegram message ID"),
+        disable_notification: input.disableNotification ?? true,
+    }, input);
+}
+
+export function deleteTelegramSupportForumMessage(input: {
+    chatId: string;
+    messageId: string | number;
+} & TelegramSupportForumTransportOptions) {
+    const chatId = getConfiguredTelegramSupportForumChatId(input.chatId);
+    if (!chatId) throw new Error("A valid Telegram forum supergroup ID is required.");
+    return callTelegramSupportForumApi<boolean>("deleteMessage", {
+        chat_id: chatId,
+        message_id: telegramInteger(input.messageId, "The Telegram message ID"),
     }, input);
 }
 

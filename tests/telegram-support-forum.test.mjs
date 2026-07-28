@@ -5,6 +5,7 @@ import {
     claimTelegramSupportForumReplyReceipt,
     closeTelegramSupportForumTopic,
     createTelegramSupportForumTopic,
+    deleteTelegramSupportForumMessage,
     deleteTelegramSupportForumTopic,
     deriveTelegramSupportForumDisplayState,
     editTelegramSupportForumTopic,
@@ -16,6 +17,7 @@ import {
     loadForumTopicByConversation,
     loadForumTopicByThread,
     parseTelegramSupportForumMessage,
+    pinTelegramSupportForumMessage,
     reactToTelegramSupportForumMessage,
     reopenTelegramSupportForumTopic,
     resolveTelegramSupportForumReplyTarget,
@@ -291,6 +293,96 @@ test("forum photo delivery reuses a protected Telegram file and bounds the capti
         token: "123456:test-token",
         fetchImpl,
     }), /valid Telegram photo file ID/);
+});
+
+test("forum photos may omit a caption and topic messages can be pinned or deleted", async () => {
+    const calls = [];
+    const fetchImpl = async (url, init) => {
+        calls.push({
+            method: String(url).split("/").at(-1),
+            body: JSON.parse(init.body),
+        });
+        return new Response(JSON.stringify({
+            ok: true,
+            result: String(url).endsWith("/sendPhoto")
+                ? { message_id: 703 }
+                : true,
+        }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+        });
+    };
+    const transport = { token: "123456:test-token", fetchImpl };
+
+    await sendTelegramSupportForumPhoto({
+        chatId: FORUM_CHAT_ID,
+        messageThreadId: 44,
+        photoFileId: "AgACAgUAAxkBAAIBQ2_photo-id_123",
+        caption: "   ",
+        ...transport,
+    });
+    await pinTelegramSupportForumMessage({
+        chatId: FORUM_CHAT_ID,
+        messageId: 703,
+        ...transport,
+    });
+    await pinTelegramSupportForumMessage({
+        chatId: FORUM_CHAT_ID,
+        messageId: "704",
+        disableNotification: false,
+        ...transport,
+    });
+    await deleteTelegramSupportForumMessage({
+        chatId: FORUM_CHAT_ID,
+        messageId: 705,
+        ...transport,
+    });
+
+    assert.deepEqual(calls, [
+        {
+            method: "sendPhoto",
+            body: {
+                chat_id: FORUM_CHAT_ID,
+                message_thread_id: 44,
+                photo: "AgACAgUAAxkBAAIBQ2_photo-id_123",
+                protect_content: true,
+            },
+        },
+        {
+            method: "pinChatMessage",
+            body: {
+                chat_id: FORUM_CHAT_ID,
+                message_id: 703,
+                disable_notification: true,
+            },
+        },
+        {
+            method: "pinChatMessage",
+            body: {
+                chat_id: FORUM_CHAT_ID,
+                message_id: 704,
+                disable_notification: false,
+            },
+        },
+        {
+            method: "deleteMessage",
+            body: {
+                chat_id: FORUM_CHAT_ID,
+                message_id: 705,
+            },
+        },
+    ]);
+
+    assert.throws(() => pinTelegramSupportForumMessage({
+        chatId: FORUM_CHAT_ID,
+        messageId: 0,
+        ...transport,
+    }), /positive Telegram integer/);
+    assert.throws(() => deleteTelegramSupportForumMessage({
+        chatId: "not-a-forum",
+        messageId: 705,
+        ...transport,
+    }), /valid Telegram forum supergroup ID/);
 });
 
 function createQueryResultDatabase(result) {
