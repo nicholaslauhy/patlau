@@ -14,6 +14,10 @@ import type {
 } from "../../types/support";
 import { chatReturnPath } from "../lib/auth-return";
 import { canCloseAfterCoachReply } from "../lib/support-conversation-policy";
+import {
+    formatParentMessageActivity,
+    latestParentMessageAt,
+} from "../lib/support-parent-activity";
 import { normaliseCoachReferences } from "../lib/telegram-support-flow";
 import "../styles.css";
 import "../dashboard/dashboard.css";
@@ -423,6 +427,7 @@ export default function ChatsPage() {
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
     const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
+    const [activityNow, setActivityNow] = useState(() => Date.now());
     busyRef.current = busy;
 
     const [knowledgeForm, setKnowledgeForm] = useState({
@@ -499,6 +504,14 @@ export default function ChatsPage() {
         if (quoteHighlightFrameRef.current !== null) {
             window.cancelAnimationFrame(quoteHighlightFrameRef.current);
         }
+    }, []);
+
+    useEffect(() => {
+        const interval = window.setInterval(
+            () => setActivityNow(Date.now()),
+            30_000,
+        );
+        return () => window.clearInterval(interval);
     }, []);
 
     const selectConversation = useCallback((conversationId: string) => {
@@ -921,6 +934,17 @@ export default function ChatsPage() {
         () => canCloseAfterCoachReply(messages),
         [messages],
     );
+    const lastParentMessageAt = useMemo(
+        () => latestParentMessageAt(messages),
+        [messages],
+    );
+    const parentActivityLabel = useMemo(
+        () => formatParentMessageActivity(lastParentMessageAt, activityNow),
+        [activityNow, lastParentMessageAt],
+    );
+    const parentActivityTooltip = lastParentMessageAt
+        ? `Latest stored parent message: ${formatTime(lastParentMessageAt)}. Telegram bots do not receive a parent's online or typing status.`
+        : "Telegram bots do not receive a parent's online or typing status. This label updates after the parent sends a message.";
     const selectedConversationName = selectedConversationSummary ? contactName(selectedConversationSummary) : "this parent";
     const selectedConversationIsLoading = Boolean(
         selectedId
@@ -1028,9 +1052,25 @@ export default function ChatsPage() {
                             ) : (
                                 <>
                                     <header className="chats-thread-header">
-                                        <div>
+                                        <div className="chats-thread-contact">
                                             <h2>{contactName(selectedConversation)}</h2>
-                                            <p>{selectedConversation.contact?.username ? `@${selectedConversation.contact.username}` : "No Telegram username"} · Telegram ID {selectedConversation.contact?.telegram_user_id || "Unavailable"}</p>
+                                            <p className="chats-thread-identity">{selectedConversation.contact?.username ? `@${selectedConversation.contact.username}` : "No Telegram username"} · Telegram ID {selectedConversation.contact?.telegram_user_id || "Unavailable"}</p>
+                                            <span
+                                                className="chats-parent-activity"
+                                                tabIndex={0}
+                                                title={parentActivityTooltip}
+                                                aria-describedby="chats-parent-activity-tooltip"
+                                            >
+                                                <span>{parentActivityLabel}</span>
+                                                <span className="chats-parent-activity__info" aria-hidden="true">i</span>
+                                                <span
+                                                    id="chats-parent-activity-tooltip"
+                                                    className="chats-parent-activity__tooltip"
+                                                    role="tooltip"
+                                                >
+                                                    {parentActivityTooltip}
+                                                </span>
+                                            </span>
                                         </div>
                                         <span className={`chats-status chats-status--${selectedConversation.status}`}>{statusLabels[selectedConversation.status]}</span>
                                     </header>
