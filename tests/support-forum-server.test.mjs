@@ -21,6 +21,10 @@ const CONVERSATION_LINKS = [
     `Open on website: ${SITE_URL}/chats?conversation=${CONVERSATION_ID}`,
 ].join("\n");
 
+function parentForumMessage(parentName, message) {
+    return `${parentName}:\n\n${message}`;
+}
+
 function createMemoryDatabase() {
     const tables = {
         support_messages: [],
@@ -250,7 +254,7 @@ function createTelegramTransport() {
     };
 }
 
-test("AI and system replies mirror without changing an open topic's workflow state", async () => {
+test("AI and System labels mirror verbatim without changing an open topic's workflow state", async () => {
     const { database, tables } = createMemoryDatabase();
     const telegram = createTelegramTransport();
     const common = {
@@ -264,24 +268,41 @@ test("AI and system replies mirror without changing an open topic's workflow sta
     topic.topic_name = "Brendan · #7CDA7535";
 
     const callCountBeforeMirror = telegram.calls.length;
-    const result = await mirrorSupportForumAutomatedMessage(database, {
+    const aiResult = await mirrorSupportForumAutomatedMessage(database, {
         ...common,
         text: "AI assistant:\n\nWeekend training continues as usual.",
     });
+    const systemResult = await mirrorSupportForumAutomatedMessage(database, {
+        ...common,
+        text: "System:\n\nThis conversation is closed.",
+    });
 
-    assert.equal(result.mirrored, true);
-    assert.equal(result.topic.display_state, "needs_reply");
+    assert.equal(aiResult.mirrored, true);
+    assert.equal(aiResult.topic.display_state, "needs_reply");
+    assert.equal(systemResult.mirrored, true);
+    assert.equal(systemResult.topic.display_state, "needs_reply");
     assert.equal(topic.topic_name, "Brendan · #7CDA7535");
     const mirrorCalls = telegram.calls.slice(callCountBeforeMirror);
-    assert.deepEqual(mirrorCalls, [{
-        method: "sendMessage",
-        payload: {
-            chat_id: FORUM_CHAT_ID,
-            message_thread_id: 44,
-            text: "AI assistant:\n\nWeekend training continues as usual.",
-            disable_notification: true,
+    assert.deepEqual(mirrorCalls, [
+        {
+            method: "sendMessage",
+            payload: {
+                chat_id: FORUM_CHAT_ID,
+                message_thread_id: 44,
+                text: "AI assistant:\n\nWeekend training continues as usual.",
+                disable_notification: true,
+            },
         },
-    }]);
+        {
+            method: "sendMessage",
+            payload: {
+                chat_id: FORUM_CHAT_ID,
+                message_thread_id: 44,
+                text: "System:\n\nThis conversation is closed.",
+                disable_notification: true,
+            },
+        },
+    ]);
 });
 
 test("forum orchestration is idempotent and keeps one topic per parent", async () => {
@@ -575,7 +596,7 @@ test("canonical parent text is mirrored once and an escalated retry upgrades the
     assert.deepEqual(sentMessages[1].payload, {
         chat_id: FORUM_CHAT_ID,
         message_thread_id: 44,
-        text: parentMessage.content,
+        text: parentForumMessage("Brendan", parentMessage.content),
     });
     assert.equal(
         telegram.calls.filter((call) => call.method === "pinChatMessage").length,
@@ -588,7 +609,7 @@ test("canonical parent text is mirrored once and an escalated retry upgrades the
     assert.equal(tables.telegram_support_forum_notifications.length, 1);
 });
 
-test("stored parent slash commands are mirrored into the support forum verbatim", async () => {
+test("stored parent slash commands are mirrored with the parent's name", async () => {
     const { database, tables } = createMemoryDatabase();
     const telegram = createTelegramTransport();
     const commands = ["/start", "/help", "/status", "/close"];
@@ -613,12 +634,15 @@ test("stored parent slash commands are mirrored into the support forum verbatim"
         assert.equal(result.duplicate, false);
     }
 
+    const expectedMirrors = commands.map((command) =>
+        parentForumMessage("Brendan", command)
+    );
     const mirroredText = telegram.calls
         .filter((call) => call.method === "sendMessage")
         .map((call) => call.payload.text)
-        .filter((text) => commands.includes(text));
+        .filter((text) => expectedMirrors.includes(text));
 
-    assert.deepEqual(mirroredText, commands);
+    assert.deepEqual(mirroredText, expectedMirrors);
     assert.equal(tables.telegram_support_forum_notifications.length, commands.length);
 });
 
@@ -677,7 +701,10 @@ test("a rapid second parent message waits for topic provisioning instead of bein
             .map((call) => call.payload.text),
         [
             CONVERSATION_LINKS,
-            "One more question while the topic is opening.",
+            parentForumMessage(
+                "Brendan",
+                "One more question while the topic is opening.",
+            ),
         ],
     );
 });
@@ -706,7 +733,10 @@ test("out-of-order Telegram completions never move the forum reply target backwa
         const method = String(url).split("/").at(-1);
         const payload = JSON.parse(init.body);
         calls.push({ method, payload });
-        if (method === "sendMessage" && payload.text === olderMessage.content) {
+        if (
+            method === "sendMessage"
+            && payload.text === parentForumMessage("Brendan", olderMessage.content)
+        ) {
             await new Promise((resolve) => setTimeout(resolve, 80));
             completions.push(olderMessage.id);
             return new Response(JSON.stringify({
@@ -717,7 +747,10 @@ test("out-of-order Telegram completions never move the forum reply target backwa
                 headers: { "Content-Type": "application/json" },
             });
         }
-        if (method === "sendMessage" && payload.text === newerMessage.content) {
+        if (
+            method === "sendMessage"
+            && payload.text === parentForumMessage("Brendan", newerMessage.content)
+        ) {
             completions.push(newerMessage.id);
             return new Response(JSON.stringify({
                 ok: true,
@@ -784,7 +817,10 @@ test("out-of-order Telegram completions never move the forum reply target backwa
         calls.filter(
             (call) =>
                 call.method === "sendMessage"
-                && [olderMessage.content, newerMessage.content]
+                && [
+                    parentForumMessage("Brendan", olderMessage.content),
+                    parentForumMessage("Brendan", newerMessage.content),
+                ]
                     .includes(call.payload.text),
         ).length,
         2,
@@ -826,7 +862,8 @@ test("a delivered duplicate repairs a missing forum reply target without reposti
         telegram.calls.filter(
             (call) =>
                 call.method === "sendMessage"
-                && call.payload.text === parentMessage.content,
+                && call.payload.text
+                    === parentForumMessage("Brendan", parentMessage.content),
         ).length,
         1,
     );
@@ -855,7 +892,10 @@ test("a delayed AI mirror cannot downgrade a newer needs-reply topic state", asy
         const method = String(url).split("/").at(-1);
         const payload = JSON.parse(init.body);
         calls.push({ method, payload });
-        if (method === "sendMessage" && payload.text === parentMessage.content) {
+        if (
+            method === "sendMessage"
+            && payload.text === parentForumMessage("Brendan", parentMessage.content)
+        ) {
             markParentDeliveryStarted();
             await parentDeliveryGate;
             return new Response(JSON.stringify({
@@ -938,7 +978,10 @@ test("a definite temporary Telegram rejection is safely reclaimed and retried", 
         const method = String(url).split("/").at(-1);
         const payload = JSON.parse(init.body);
         calls.push({ method, payload });
-        if (method === "sendMessage" && payload.text === parentMessage.content) {
+        if (
+            method === "sendMessage"
+            && payload.text === parentForumMessage("Brendan", parentMessage.content)
+        ) {
             parentDeliveryAttempts += 1;
             if (parentDeliveryAttempts === 1) {
                 return new Response(JSON.stringify({
@@ -1046,7 +1089,8 @@ test("an ambiguous Telegram failure is never reclaimed because delivery may have
         telegram.calls.filter(
             (call) =>
                 call.method === "sendMessage"
-                && call.payload.text === parentMessage.content,
+                && call.payload.text
+                    === parentForumMessage("Brendan", parentMessage.content),
         ).length,
         0,
     );
@@ -1087,7 +1131,10 @@ test("canonical parent photos are mirrored with their stored caption and file re
         chat_id: FORUM_CHAT_ID,
         message_thread_id: 44,
         photo: photoFileId,
-        caption: "My son got scratched during training.",
+        caption: parentForumMessage(
+            "Brendan",
+            "My son got scratched during training.",
+        ),
         protect_content: true,
     });
     assert.equal(

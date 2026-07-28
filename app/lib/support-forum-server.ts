@@ -17,7 +17,10 @@ import {
     type ForumDisplayState,
     type TelegramSupportForumTopicRecord,
 } from "./telegram-support-forum";
-import { extractSupportImageFileId } from "./support-image-server";
+import {
+    extractSupportImageFileId,
+    MAX_SUPPORT_TELEGRAM_PHOTO_CAPTION_CHARACTERS,
+} from "./support-image-server";
 import { formatSupportConversationLinks } from "./support-links";
 
 export type SupportForumDatabaseClient = {
@@ -90,6 +93,8 @@ const FORUM_NOTIFICATION_RETRY_DELAYS_MS = [100, 250, 500];
 const TOPIC_DELETION_PENDING_CODE = "topic_deletion_pending";
 const TOPIC_DELETED_TOMBSTONE_CODE =
     "topic_deleted_pending_conversation_delete";
+const TELEGRAM_FORUM_MESSAGE_MAX_CHARACTERS = 4_096;
+const TELEGRAM_FORUM_PARENT_LABEL_MAX_CHARACTERS = 80;
 
 function hasOwn(object: object, key: string) {
     return Object.prototype.hasOwnProperty.call(object, key);
@@ -136,6 +141,37 @@ function positiveInteger(value: unknown) {
             ? value.trim()
             : "";
     return /^[1-9][0-9]*$/.test(normalized) ? normalized : "";
+}
+
+function truncateUnicode(value: string, maximum: number) {
+    return Array.from(value).slice(0, Math.max(0, maximum)).join("");
+}
+
+function parentForumLabel(value: unknown) {
+    const normalized = String(value || "")
+        .normalize("NFKC")
+        .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/:+$/g, "")
+        .trim();
+    return truncateUnicode(
+        normalized || "Parent",
+        TELEGRAM_FORUM_PARENT_LABEL_MAX_CHARACTERS,
+    ) || "Parent";
+}
+
+function formatParentForumMessage(
+    parentName: unknown,
+    content: unknown,
+    maximum: number,
+) {
+    const label = `${parentForumLabel(parentName)}:`;
+    const body = String(content || "").trim();
+    if (!body) return truncateUnicode(label, maximum);
+    const prefix = `${label}\n\n`;
+    const bodyLimit = maximum - Array.from(prefix).length;
+    return `${prefix}${truncateUnicode(body, bodyLimit)}`;
 }
 
 function cleanDisplayName(value: unknown) {
@@ -931,7 +967,13 @@ export async function mirrorSupportForumParentMessage(
         ...input,
         conversationId,
         expectedParentMessageId,
-        alertText: content,
+        alertText: formatParentForumMessage(
+            input.parentName,
+            content,
+            photoFileId
+                ? MAX_SUPPORT_TELEGRAM_PHOTO_CAPTION_CHARACTERS
+                : TELEGRAM_FORUM_MESSAGE_MAX_CHARACTERS,
+        ),
         photoFileId,
         latestSenderType: "parent" as const,
         displayState: parentMessageForumDisplayState(input.status),
