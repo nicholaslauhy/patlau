@@ -17,6 +17,43 @@ export const SUPPORT_IMAGE_TRIAGE_CATEGORIES = [
     "unreadable",
 ] as const;
 
+/**
+ * Strict Structured Outputs supports only a subset of JSON Schema. Keep this
+ * schema in one tested location so unsupported keywords cannot silently break
+ * every image request. Duplicate categories are normalised by
+ * `parseSupportImageTriage` after the response is received.
+ */
+export const SUPPORT_IMAGE_TRIAGE_RESPONSE_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+        categories: {
+            type: "array",
+            minItems: 1,
+            items: { type: "string", enum: SUPPORT_IMAGE_TRIAGE_CATEGORIES },
+        },
+        confidence: { type: "number", minimum: 0, maximum: 1 },
+        readable: { type: "boolean" },
+        summary: { type: "string" },
+    },
+    required: ["categories", "confidence", "readable", "summary"],
+} as const;
+
+export const SUPPORT_IMAGE_INPUT_DETAIL = "original" as const;
+export const DEFAULT_SUPPORT_IMAGE_MODEL = "gpt-5.6-terra";
+
+export function selectSupportImageModel(
+    dedicatedImageModel: unknown,
+    supportModel: unknown,
+) {
+    for (const value of [dedicatedImageModel, supportModel]) {
+        if (typeof value === "string" && value.trim()) {
+            return value.trim();
+        }
+    }
+    return DEFAULT_SUPPORT_IMAGE_MODEL;
+}
+
 export type SupportImageTriageCategory = typeof SUPPORT_IMAGE_TRIAGE_CATEGORIES[number];
 export type SupportImageTriageDecision =
     | "escalate_immediately"
@@ -27,6 +64,47 @@ export type SupportImageProcessingDecision =
     | "retry"
     | "superseded"
     | "coach_active";
+export type SupportImageFailureStage =
+    | "telegram_download"
+    | "openai_configuration"
+    | "openai_request"
+    | "openai_response"
+    | "openai_output"
+    | "unknown";
+
+const SAFE_DIAGNOSTIC_VALUE = /^[a-z0-9_.-]{1,80}$/i;
+
+/**
+ * Produces bounded operational metadata for image failures. Callers must pass
+ * only codes and response metadata, never an Error message, caption, image,
+ * token, request body, or model output.
+ */
+export function supportImageFailureDiagnostic(input: {
+    stage: SupportImageFailureStage;
+    code?: unknown;
+    status?: unknown;
+    param?: unknown;
+}) {
+    const status = typeof input.status === "number"
+        && Number.isInteger(input.status)
+        && input.status >= 100
+        && input.status <= 599
+        ? input.status
+        : undefined;
+    const safeValue = (value: unknown) =>
+        typeof value === "string" && SAFE_DIAGNOSTIC_VALUE.test(value)
+            ? value
+            : undefined;
+    const code = safeValue(input.code);
+    const param = safeValue(input.param);
+
+    return {
+        stage: input.stage,
+        ...(status === undefined ? {} : { status }),
+        ...(code ? { code } : {}),
+        ...(param ? { param } : {}),
+    };
+}
 
 /**
  * The compact, JSON-safe response shape requested from an image-capable model.

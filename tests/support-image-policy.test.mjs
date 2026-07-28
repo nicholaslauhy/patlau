@@ -4,8 +4,35 @@ import {
     decideSupportImageTriage,
     decideSupportImageProcessingContext,
     parseSupportImageTriage,
+    selectSupportImageModel,
+    SUPPORT_IMAGE_INPUT_DETAIL,
+    SUPPORT_IMAGE_TRIAGE_CATEGORIES,
+    SUPPORT_IMAGE_TRIAGE_RESPONSE_SCHEMA,
+    supportImageFailureDiagnostic,
     triageSupportImageCaption,
 } from "../app/lib/support-image-policy.ts";
+
+test("image triage response schema uses only supported strict-schema keywords", () => {
+    assert.equal(
+        Object.hasOwn(SUPPORT_IMAGE_TRIAGE_RESPONSE_SCHEMA.properties.categories, "uniqueItems"),
+        false,
+    );
+    assert.deepEqual(
+        SUPPORT_IMAGE_TRIAGE_RESPONSE_SCHEMA.properties.categories.items.enum,
+        SUPPORT_IMAGE_TRIAGE_CATEGORIES,
+    );
+    assert.deepEqual(
+        SUPPORT_IMAGE_TRIAGE_RESPONSE_SCHEMA.required,
+        ["categories", "confidence", "readable", "summary"],
+    );
+});
+
+test("image model configuration prefers the dedicated model and preserves small-image detail", () => {
+    assert.equal(selectSupportImageModel("vision-model", "support-model"), "vision-model");
+    assert.equal(selectSupportImageModel(" ", "support-model"), "support-model");
+    assert.equal(selectSupportImageModel(undefined, undefined), "gpt-5.6-terra");
+    assert.equal(SUPPORT_IMAGE_INPUT_DETAIL, "original");
+});
 
 test("image triage parser accepts validated model JSON, including fenced output", () => {
     assert.deepEqual(
@@ -19,11 +46,54 @@ test("image triage parser accepts validated model JSON, including fenced output"
     );
 });
 
+test("image triage parser deduplicates categories after structured output", () => {
+    assert.deepEqual(
+        parseSupportImageTriage({
+            categories: ["schedule", "schedule", "date"],
+            confidence: 0.9,
+            readable: true,
+            summary: "A routine schedule question.",
+        }),
+        {
+            categories: ["schedule", "date"],
+            confidence: 0.9,
+            readable: true,
+            summary: "A routine schedule question.",
+        },
+    );
+});
+
 test("image triage parser rejects malformed or unsupported model output", () => {
     assert.equal(parseSupportImageTriage("not json"), null);
     assert.equal(parseSupportImageTriage({ categories: ["invented"], confidence: 0.8, readable: true }), null);
     assert.equal(parseSupportImageTriage({ categories: ["venue"], confidence: 1.2, readable: true }), null);
     assert.equal(parseSupportImageTriage({ categories: [], confidence: 0.8, readable: true }), null);
+});
+
+test("image failure diagnostics retain only bounded non-sensitive metadata", () => {
+    assert.deepEqual(
+        supportImageFailureDiagnostic({
+            stage: "openai_response",
+            status: 400,
+            code: "invalid_json_schema",
+            param: "text.format.schema",
+        }),
+        {
+            stage: "openai_response",
+            status: 400,
+            code: "invalid_json_schema",
+            param: "text.format.schema",
+        },
+    );
+    assert.deepEqual(
+        supportImageFailureDiagnostic({
+            stage: "openai_response",
+            status: 999,
+            code: "unsafe\ncaption contents",
+            param: "x".repeat(100),
+        }),
+        { stage: "openai_response" },
+    );
 });
 
 test("safety-sensitive image topics are escalated immediately", () => {
