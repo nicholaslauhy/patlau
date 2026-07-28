@@ -3,8 +3,10 @@ import test from "node:test";
 import {
     MAX_SUPPORT_IMAGE_PIXELS,
     MAX_SUPPORT_IMAGE_SIDE,
+    MAX_SUPPORT_TELEGRAM_PHOTO_CAPTION_CHARACTERS,
     MAX_SUPPORT_TELEGRAM_IMAGE_BYTES,
     SupportImageDownloadError,
+    buildSupportForumPhotoAlertCaption,
     detectSupportImageMimeType,
     downloadSupportTelegramImage,
     extractSupportImageFileId,
@@ -116,6 +118,42 @@ test("internal Telegram image refs round-trip and never leak as public sources",
         null,
     );
     assert.throws(() => supportImageSourceRefs("line\nbreak"), TypeError);
+});
+
+test("forum photo captions replace the placeholder while preserving secure links", () => {
+    const links = [
+        "",
+        "",
+        "Open in PatLau app: https://patlaubmt.vercel.app/open-in-app/chats?conversation=7cda7535-f22d-405e-a996-12f9c30db44d",
+        "Open on website: https://patlaubmt.vercel.app/chats?conversation=7cda7535-f22d-405e-a996-12f9c30db44d",
+    ].join("\n");
+    const caption = buildSupportForumPhotoAlertCaption({
+        parentName: "Brendan",
+        reason: "A parent image may involve an injury or safety concern.",
+        storedMessageContent: "[Photo]\nMy child has a scratch.",
+        links,
+    });
+
+    assert.match(caption, /Parent: Brendan/);
+    assert.match(caption, /Parent caption:\nMy child has a scratch\./);
+    assert.doesNotMatch(caption, /Parent sent a photo/i);
+    assert.ok(caption.endsWith(links));
+    assert.ok(
+        Array.from(caption).length
+            <= MAX_SUPPORT_TELEGRAM_PHOTO_CAPTION_CHARACTERS,
+    );
+
+    const bounded = buildSupportForumPhotoAlertCaption({
+        parentName: "Brendan",
+        reason: "Review required. ".repeat(200),
+        storedMessageContent: `[Photo]\n${"🙂".repeat(1_000)}`,
+        links,
+    });
+    assert.ok(
+        Array.from(bounded).length
+            <= MAX_SUPPORT_TELEGRAM_PHOTO_CAPTION_CHARACTERS,
+    );
+    assert.ok(bounded.endsWith(links));
 });
 
 test("Telegram file paths are accepted only as safe relative paths", () => {

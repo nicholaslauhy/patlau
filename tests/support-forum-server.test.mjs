@@ -175,7 +175,7 @@ function createTelegramTransport() {
         calls.push({ method, payload });
         const result = method === "createForumTopic"
             ? { message_thread_id: 44, name: payload.name, icon_color: 7322096 }
-            : method === "sendMessage"
+            : method === "sendMessage" || method === "sendPhoto"
                 ? { message_id: 700 + calls.length }
                 : true;
         return new Response(JSON.stringify({ ok: true, result }), {
@@ -312,6 +312,49 @@ test("forum orchestration is idempotent and keeps one topic per parent", async (
     assert.equal(
         telegram.calls.filter((call) => call.method === "createForumTopic").length,
         2,
+    );
+});
+
+test("photo alerts are delivered once inside the mapped parent topic", async () => {
+    const { database, tables } = createMemoryDatabase();
+    const telegram = createTelegramTransport();
+    const input = {
+        conversationId: CONVERSATION_ID,
+        parentName: "Brendan",
+        expectedParentMessageId: 92,
+        alertText: [
+            "Parent chat needs attention",
+            "Parent: Brendan",
+            "Reason: A photo may involve an injury.",
+        ].join("\n\n"),
+        photoFileId: "AgACAgUAAxkBAAIBQ2_photo-id_123",
+        status: "escalated",
+        latestSenderType: "parent",
+        ...telegram.options,
+    };
+
+    const first = await notifySupportForum(database, input);
+    const duplicate = await notifySupportForum(database, input);
+    const photoCalls = telegram.calls.filter((call) => call.method === "sendPhoto");
+
+    assert.equal(first.delivered, true);
+    assert.equal(duplicate.delivered, true);
+    assert.equal(duplicate.duplicate, true);
+    assert.equal(photoCalls.length, 1);
+    assert.equal(
+        telegram.calls.filter((call) => call.method === "sendMessage").length,
+        0,
+    );
+    assert.deepEqual(photoCalls[0].payload, {
+        chat_id: FORUM_CHAT_ID,
+        message_thread_id: 44,
+        photo: input.photoFileId,
+        caption: input.alertText,
+        protect_content: true,
+    });
+    assert.equal(
+        String(tables.telegram_support_forum_notifications[0].telegram_message_id),
+        String(first.telegramMessageId),
     );
 });
 

@@ -43,6 +43,12 @@ export interface TelegramSupportAdminReplyReceiptRecord {
     updated_at: string;
 }
 
+export interface LatestSupportParentMessageContext {
+    id: string;
+    content: string;
+    sourceRefs: unknown;
+}
+
 export const TELEGRAM_SUPPORT_ADMIN_FORCE_REPLY_MARKUP = Object.freeze({
     force_reply: true,
     selective: false,
@@ -106,6 +112,28 @@ export async function loadLatestSupportParentMessageId(
         .maybeSingle();
     if (error) throw error;
     return data?.id == null ? null : String(data.id);
+}
+
+export async function loadLatestSupportParentMessageContext(
+    database: SupportDatabaseClient,
+    conversationId: string,
+): Promise<LatestSupportParentMessageContext | null> {
+    const { data, error } = await database
+        .from("support_messages")
+        .select("id,content,source_refs")
+        .eq("conversation_id", conversationId)
+        .eq("sender_type", "parent")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    if (error) throw error;
+    if (data?.id == null) return null;
+    return {
+        id: String(data.id),
+        content: typeof data.content === "string" ? data.content : "",
+        sourceRefs: data.source_refs,
+    };
 }
 
 export async function storeTelegramSupportAdminNotification(

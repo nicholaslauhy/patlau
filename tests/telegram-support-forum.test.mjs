@@ -11,6 +11,7 @@ import {
     finishTelegramSupportForumReplyReceipt,
     getConfiguredTelegramSupportForumChatId,
     getTelegramSupportForumSetupError,
+    getTelegramSupportForumTopicIconCustomEmojiId,
     isTelegramSupportForumConfigured,
     loadForumTopicByConversation,
     loadForumTopicByThread,
@@ -19,6 +20,7 @@ import {
     reopenTelegramSupportForumTopic,
     resolveTelegramSupportForumReplyTarget,
     sendTelegramSupportForumMessage,
+    sendTelegramSupportForumPhoto,
 } from "../app/lib/telegram-support-forum.ts";
 
 const FORUM_CHAT_ID = "-1003904915951";
@@ -74,9 +76,21 @@ test("conversation status maps to clear topic states and safe 128-character titl
         state: "needs_reply",
     });
     assert.ok(Array.from(title).length <= 128);
-    assert.match(title, /^🔴 Needs reply · Brendan/);
+    assert.match(title, /^Brendan/);
     assert.match(title, /#7CDA7535$/);
     assert.doesNotMatch(title, /[\n\u0000]/);
+    assert.match(
+        getTelegramSupportForumTopicIconCustomEmojiId("needs_reply"),
+        /^[1-9][0-9]+$/,
+    );
+    assert.equal(
+        getTelegramSupportForumTopicIconCustomEmojiId("coach_active"),
+        getTelegramSupportForumTopicIconCustomEmojiId("waiting_parent"),
+    );
+    assert.notEqual(
+        getTelegramSupportForumTopicIconCustomEmojiId("needs_reply"),
+        getTelegramSupportForumTopicIconCustomEmojiId("closed"),
+    );
 });
 
 test("only authorized plain text in a configured forum topic becomes a reply", () => {
@@ -154,7 +168,9 @@ test("Bot API helpers call the forum methods with the exact group and topic payl
 
     const created = await createTelegramSupportForumTopic({
         chatId: FORUM_CHAT_ID,
-        name: "🔴 Needs reply · Brendan · #7CDA75",
+        name: "Brendan · #7CDA75",
+        iconCustomEmojiId:
+            getTelegramSupportForumTopicIconCustomEmojiId("needs_reply"),
         ...transport,
     });
     assert.equal(created.message_thread_id, 44);
@@ -168,7 +184,9 @@ test("Bot API helpers call the forum methods with the exact group and topic payl
     await editTelegramSupportForumTopic({
         chatId: FORUM_CHAT_ID,
         messageThreadId: 44,
-        name: "🟡 Waiting for parent · Brendan · #7CDA75",
+        name: "Brendan · #7CDA75",
+        iconCustomEmojiId:
+            getTelegramSupportForumTopicIconCustomEmojiId("waiting_parent"),
         ...transport,
     });
     await closeTelegramSupportForumTopic({
@@ -201,18 +219,78 @@ test("Bot API helpers call the forum methods with the exact group and topic payl
         "setMessageReaction",
         "deleteForumTopic",
     ]);
+    assert.equal(
+        calls[0].body.icon_custom_emoji_id,
+        getTelegramSupportForumTopicIconCustomEmojiId("needs_reply"),
+    );
     assert.deepEqual(calls[1].body, {
         chat_id: FORUM_CHAT_ID,
         message_thread_id: 44,
         text: "Anything typed here is sent to this parent.",
         disable_notification: true,
     });
+    assert.equal(
+        calls[2].body.icon_custom_emoji_id,
+        getTelegramSupportForumTopicIconCustomEmojiId("waiting_parent"),
+    );
     assert.deepEqual(calls[5].body, {
         chat_id: FORUM_CHAT_ID,
         message_id: 701,
         reaction: [{ type: "emoji", emoji: "✅" }],
         is_big: false,
     });
+});
+
+test("forum photo delivery reuses a protected Telegram file and bounds the caption", async () => {
+    const calls = [];
+    const fetchImpl = async (url, init) => {
+        calls.push({
+            method: String(url).split("/").at(-1),
+            body: JSON.parse(init.body),
+        });
+        return new Response(JSON.stringify({
+            ok: true,
+            result: { message_id: 702 },
+        }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+        });
+    };
+    const longCaption = `Parent photo\n${"🙂".repeat(1_100)}`;
+
+    const message = await sendTelegramSupportForumPhoto({
+        chatId: FORUM_CHAT_ID,
+        messageThreadId: 44,
+        photoFileId: "AgACAgUAAxkBAAIBQ2_photo-id_123",
+        caption: longCaption,
+        disableNotification: true,
+        token: "123456:test-token",
+        fetchImpl,
+    });
+
+    assert.equal(message.message_id, 702);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "sendPhoto");
+    assert.equal(Array.from(calls[0].body.caption).length, 1_024);
+    assert.deepEqual({
+        ...calls[0].body,
+        caption: "<bounded caption>",
+    }, {
+        chat_id: FORUM_CHAT_ID,
+        message_thread_id: 44,
+        photo: "AgACAgUAAxkBAAIBQ2_photo-id_123",
+        caption: "<bounded caption>",
+        protect_content: true,
+        disable_notification: true,
+    });
+    assert.throws(() => sendTelegramSupportForumPhoto({
+        chatId: FORUM_CHAT_ID,
+        messageThreadId: 44,
+        photoFileId: "line\nbreak",
+        caption: "Parent photo",
+        token: "123456:test-token",
+        fetchImpl,
+    }), /valid Telegram photo file ID/);
 });
 
 function createQueryResultDatabase(result) {
@@ -259,7 +337,7 @@ test("topic mappings load only from the configured group and current topic state
         telegram_forum_chat_id: FORUM_CHAT_ID,
         telegram_message_thread_id: 44,
         header_message_id: 45,
-        topic_name: "🔴 Needs reply · Brendan · #7CDA7535",
+        topic_name: "Brendan · #7CDA7535",
         lifecycle_status: "open",
         display_state: "needs_reply",
         expected_parent_message_id: 91,

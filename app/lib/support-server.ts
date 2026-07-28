@@ -6,12 +6,16 @@ import {
     resolveTelegramSupportAdminRecipients,
 } from "./telegram-support-admin-policy";
 import {
-    loadLatestSupportParentMessageId,
+    loadLatestSupportParentMessageContext,
     storeTelegramSupportAdminNotification,
     TELEGRAM_SUPPORT_ADMIN_FORCE_REPLY_MARKUP,
 } from "./telegram-support-admin-replies";
 import { formatSupportConversationLinks } from "./support-links";
 import { notifySupportForum } from "./support-forum-server";
+import {
+    buildSupportForumPhotoAlertCaption,
+    extractSupportImageFileId,
+} from "./support-image-server";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -154,11 +158,25 @@ export async function notifySupportAdmins(
     const notification = `Parent chat needs attention\n\nParent: ${parentName}\nReason: ${reason}\n\nLatest message:\n${message.slice(0, 700)}\n\nReply directly to this alert to answer the parent.${links}`;
     const forumNotification = `Parent chat needs attention\n\nParent: ${parentName}\nReason: ${reason}\n\nLatest message:\n${message.slice(0, 700)}\n\nType a normal message in this topic to answer this parent. They receive only your message exactly as written.${links}`;
     let expectedParentMessageId: string | null = null;
+    let photoFileId: string | null = null;
+    let photoForumNotification: string | null = null;
     try {
-        expectedParentMessageId = await loadLatestSupportParentMessageId(
+        const latestParentMessage = await loadLatestSupportParentMessageContext(
             supportAdmin,
             conversationId,
         );
+        expectedParentMessageId = latestParentMessage?.id || null;
+        photoFileId = extractSupportImageFileId(
+            latestParentMessage?.sourceRefs,
+        );
+        if (photoFileId && latestParentMessage) {
+            photoForumNotification = buildSupportForumPhotoAlertCaption({
+                parentName,
+                reason,
+                storedMessageContent: latestParentMessage.content,
+                links,
+            });
+        }
     } catch {
         // Alert delivery must remain available while the reply mapping is an
         // additive feature. A missing parent reference makes a later direct
@@ -172,7 +190,8 @@ export async function notifySupportAdmins(
                 conversationId,
                 parentName,
                 expectedParentMessageId,
-                alertText: forumNotification,
+                alertText: photoForumNotification || forumNotification,
+                photoFileId,
                 status: "escalated",
                 latestSenderType: "parent",
             });

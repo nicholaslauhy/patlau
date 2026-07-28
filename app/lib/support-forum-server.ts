@@ -7,8 +7,10 @@ import {
     deriveTelegramSupportForumDisplayState,
     editTelegramSupportForumTopic,
     getConfiguredTelegramSupportForumChatId,
+    getTelegramSupportForumTopicIconCustomEmojiId,
     reopenTelegramSupportForumTopic,
     sendTelegramSupportForumMessage,
+    sendTelegramSupportForumPhoto,
     TelegramSupportForumApiError,
     type ForumDisplayState,
     type TelegramSupportForumTopicRecord,
@@ -464,6 +466,10 @@ export async function ensureSupportForumTopic(
         const created = await createTelegramSupportForumTopic({
             chatId: forumChatId,
             name: topicName,
+            iconCustomEmojiId:
+                getTelegramSupportForumTopicIconCustomEmojiId(
+                    safeProvisioningState,
+                ),
             ...transport(input),
         });
         createdThreadId = created.message_thread_id;
@@ -559,11 +565,16 @@ async function applyRemoteTopicState(
             if (!isHarmlessTelegramStateError(error)) throw error;
         });
     }
-    if (topic.topic_name !== name) {
+    if (
+        topic.topic_name !== name
+        || topic.display_state !== input.state
+    ) {
         await editTelegramSupportForumTopic({
             chatId: forumChatId,
             messageThreadId,
             name,
+            iconCustomEmojiId:
+                getTelegramSupportForumTopicIconCustomEmojiId(input.state),
             ...telegramTransport,
         }).catch((error) => {
             if (!isHarmlessTelegramStateError(error)) throw error;
@@ -600,6 +611,7 @@ export async function notifySupportForum(
         parentName?: string | null;
         expectedParentMessageId: string | number;
         alertText: string;
+        photoFileId?: string | null;
         status?: SupportStatus;
         latestSenderType?: SupportMessageSender | null;
     } & ForumTransportOptions,
@@ -711,12 +723,20 @@ export async function notifySupportForum(
             ...input,
             state: "needs_reply",
         });
-        remoteMessage = await sendTelegramSupportForumMessage({
-            chatId: topic.telegram_forum_chat_id,
-            messageThreadId: topic.telegram_message_thread_id!,
-            text: alertText,
-            ...transport(input),
-        });
+        remoteMessage = input.photoFileId
+            ? await sendTelegramSupportForumPhoto({
+                chatId: topic.telegram_forum_chat_id,
+                messageThreadId: topic.telegram_message_thread_id!,
+                photoFileId: input.photoFileId,
+                caption: alertText,
+                ...transport(input),
+            })
+            : await sendTelegramSupportForumMessage({
+                chatId: topic.telegram_forum_chat_id,
+                messageThreadId: topic.telegram_message_thread_id!,
+                text: alertText,
+                ...transport(input),
+            });
     } catch (error) {
         const errorCode = telegramErrorCode(error, "notify");
         await updateNotification(database, claimed.id, {

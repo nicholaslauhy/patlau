@@ -4,6 +4,7 @@ const TELEGRAM_PHOTO_SOURCE_REF_PREFIX = `${INTERNAL_SOURCE_REF_ROOT}telegram-ph
 export const MAX_SUPPORT_TELEGRAM_IMAGE_BYTES = 5 * 1024 * 1024;
 export const MAX_SUPPORT_IMAGE_PIXELS = 25_000_000;
 export const MAX_SUPPORT_IMAGE_SIDE = 12_000;
+export const MAX_SUPPORT_TELEGRAM_PHOTO_CAPTION_CHARACTERS = 1024;
 
 const MAX_TELEGRAM_FILE_ID_LENGTH = 512;
 const MAX_TELEGRAM_FILE_PATH_LENGTH = 1024;
@@ -48,6 +49,12 @@ function validTelegramFileId(value: unknown): value is string {
         && value.length > 0
         && value.length <= MAX_TELEGRAM_FILE_ID_LENGTH
         && /^[\x21-\x7e]+$/.test(value);
+}
+
+export function isValidSupportTelegramImageFileId(
+    value: unknown,
+): value is string {
+    return validTelegramFileId(value);
 }
 
 function optionalPositiveInteger(value: unknown) {
@@ -161,6 +168,39 @@ export function extractSupportImageFileId(refs: unknown): string | null {
         extracted = decoded;
     }
     return extracted;
+}
+
+function truncateUnicode(value: string, maximum: number) {
+    return Array.from(value).slice(0, Math.max(0, maximum)).join("");
+}
+
+function storedSupportPhotoCaption(content: string) {
+    const prefix = "[Photo]\n";
+    return content.startsWith(prefix)
+        ? truncateUnicode(content.slice(prefix.length).trim(), 220)
+        : "";
+}
+
+export function buildSupportForumPhotoAlertCaption(input: {
+    parentName: string;
+    reason: string;
+    storedMessageContent: string;
+    links: string;
+}) {
+    const parentName = truncateUnicode(input.parentName.trim() || "Parent", 80);
+    const reason = truncateUnicode(input.reason.trim(), 320);
+    const parentCaption = storedSupportPhotoCaption(input.storedMessageContent);
+    const prefix = [
+        "Parent chat needs attention",
+        `Parent: ${parentName}`,
+        `Reason: ${reason}`,
+        ...(parentCaption ? [`Parent caption:\n${parentCaption}`] : []),
+    ].join("\n\n");
+    const suffix = `\n\nType a normal message in this topic to answer this parent. They receive only your message exactly as written.${input.links}`;
+    const availablePrefixLength =
+        MAX_SUPPORT_TELEGRAM_PHOTO_CAPTION_CHARACTERS
+        - Array.from(suffix).length;
+    return `${truncateUnicode(prefix, availablePrefixLength).trimEnd()}${suffix}`;
 }
 
 /**

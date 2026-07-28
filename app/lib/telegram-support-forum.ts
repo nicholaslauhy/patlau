@@ -1,3 +1,8 @@
+import {
+    isValidSupportTelegramImageFileId,
+    MAX_SUPPORT_TELEGRAM_PHOTO_CAPTION_CHARACTERS,
+} from "./support-image-server";
+
 type SupportDatabaseClient = {
     from: (table: string) => any;
 };
@@ -78,12 +83,17 @@ const FORUM_CHAT_ID_PATTERN = /^-100[1-9][0-9]{5,16}$/;
 const POSITIVE_TELEGRAM_ID_PATTERN = /^[1-9][0-9]{0,19}$/;
 const TOPIC_NAME_MAX_LENGTH = 128;
 
-const FORUM_STATE_LABELS: Record<ForumDisplayState, string> = Object.freeze({
-    needs_reply: "🔴 Needs reply",
-    coach_active: "🟠 Coach active",
-    waiting_parent: "🟡 Waiting for parent",
-    ai_handling: "🤖 AI handling",
-    closed: "✅ Closed",
+// Telegram's fallback topic icon is a speech bubble containing the first
+// letter of the topic name. Use Telegram's allowed default custom emoji icons
+// instead so each topic has one clean status signal without an extra N/C badge.
+// These IDs come from the Bot API getForumTopicIconStickers method.
+const FORUM_STATE_ICON_CUSTOM_EMOJI_IDS: Record<ForumDisplayState, string> =
+    Object.freeze({
+        needs_reply: "5379748062124056162", // Red attention icon.
+        coach_active: "5312536423851630001", // Yellow in-progress icon.
+        waiting_parent: "5312536423851630001",
+        ai_handling: "5312536423851630001",
+        closed: "5237699328843200968", // Green completed icon.
 });
 
 function normalizePositiveTelegramId(value: unknown) {
@@ -197,21 +207,26 @@ export function deriveTelegramSupportForumDisplayState(
     return "ai_handling";
 }
 
+export function getTelegramSupportForumTopicIconCustomEmojiId(
+    state: ForumDisplayState,
+) {
+    return FORUM_STATE_ICON_CUSTOM_EMOJI_IDS[state]
+        || FORUM_STATE_ICON_CUSTOM_EMOJI_IDS.ai_handling;
+}
+
 export function buildTelegramSupportForumTopicTitle(input: {
     conversationId: string;
     parentName?: string | null;
     state: ForumDisplayState;
 }) {
-    const label = FORUM_STATE_LABELS[input.state] || FORUM_STATE_LABELS.ai_handling;
     const suffix = ` · #${stableConversationSuffix(input.conversationId)}`;
-    const fixedLength = unicodeLength(label) + unicodeLength(suffix) + 3;
     const parent = sanitizeSingleLine(
         input.parentName,
         "Parent",
-        Math.max(1, TOPIC_NAME_MAX_LENGTH - fixedLength),
+        Math.max(1, TOPIC_NAME_MAX_LENGTH - unicodeLength(suffix)),
     );
     return truncateUnicode(
-        `${label} · ${parent}${suffix}`,
+        `${parent}${suffix}`,
         TOPIC_NAME_MAX_LENGTH,
     );
 }
@@ -366,10 +381,17 @@ export function createTelegramSupportForumTopic(input: {
     chatId: string;
     name: string;
     iconColor?: number;
+    iconCustomEmojiId?: string;
 } & TelegramSupportForumTransportOptions) {
     const chatId = getConfiguredTelegramSupportForumChatId(input.chatId);
     if (!chatId) throw new Error("A valid Telegram forum supergroup ID is required.");
     const name = sanitizeSingleLine(input.name, "Parent support", TOPIC_NAME_MAX_LENGTH);
+    const iconCustomEmojiId = input.iconCustomEmojiId === undefined
+        ? ""
+        : normalizePositiveTelegramId(input.iconCustomEmojiId);
+    if (input.iconCustomEmojiId !== undefined && !iconCustomEmojiId) {
+        throw new Error("The Telegram topic icon must be a valid custom emoji ID.");
+    }
     return callTelegramSupportForumApi<{
         message_thread_id: number;
         name: string;
@@ -379,6 +401,9 @@ export function createTelegramSupportForumTopic(input: {
         chat_id: chatId,
         name,
         ...(Number.isInteger(input.iconColor) ? { icon_color: input.iconColor } : {}),
+        ...(iconCustomEmojiId
+            ? { icon_custom_emoji_id: iconCustomEmojiId }
+            : {}),
     }, input);
 }
 
@@ -403,16 +428,56 @@ export function sendTelegramSupportForumMessage(input: {
     }, input);
 }
 
+export function sendTelegramSupportForumPhoto(input: {
+    chatId: string;
+    messageThreadId: string | number;
+    photoFileId: string;
+    caption: string;
+    replyMarkup?: Record<string, unknown>;
+    disableNotification?: boolean;
+} & TelegramSupportForumTransportOptions) {
+    const target = normalizedForumTarget(input);
+    if (!isValidSupportTelegramImageFileId(input.photoFileId)) {
+        throw new Error("A valid Telegram photo file ID is required.");
+    }
+    const caption = truncateUnicode(
+        String(input.caption || "").trim(),
+        MAX_SUPPORT_TELEGRAM_PHOTO_CAPTION_CHARACTERS,
+    );
+    if (!caption) throw new Error("A Telegram forum photo caption cannot be empty.");
+    return callTelegramSupportForumApi<Record<string, any>>("sendPhoto", {
+        chat_id: target.chatId,
+        message_thread_id: target.messageThreadId,
+        photo: input.photoFileId,
+        caption,
+        protect_content: true,
+        ...(input.replyMarkup ? { reply_markup: input.replyMarkup } : {}),
+        ...(typeof input.disableNotification === "boolean"
+            ? { disable_notification: input.disableNotification }
+            : {}),
+    }, input);
+}
+
 export function editTelegramSupportForumTopic(input: {
     chatId: string;
     messageThreadId: string | number;
     name: string;
+    iconCustomEmojiId?: string;
 } & TelegramSupportForumTransportOptions) {
     const target = normalizedForumTarget(input);
+    const iconCustomEmojiId = input.iconCustomEmojiId === undefined
+        ? ""
+        : normalizePositiveTelegramId(input.iconCustomEmojiId);
+    if (input.iconCustomEmojiId !== undefined && !iconCustomEmojiId) {
+        throw new Error("The Telegram topic icon must be a valid custom emoji ID.");
+    }
     return callTelegramSupportForumApi<boolean>("editForumTopic", {
         chat_id: target.chatId,
         message_thread_id: target.messageThreadId,
         name: sanitizeSingleLine(input.name, "Parent support", TOPIC_NAME_MAX_LENGTH),
+        ...(iconCustomEmojiId
+            ? { icon_custom_emoji_id: iconCustomEmojiId }
+            : {}),
     }, input);
 }
 

@@ -4,6 +4,8 @@ import {
     TELEGRAM_SUPPORT_ADMIN_FORCE_REPLY_MARKUP,
     claimTelegramSupportAdminReplyReceipt,
     extractTelegramSupportAdminReply,
+    loadLatestSupportParentMessageContext,
+    loadLatestSupportParentMessageId,
     storeTelegramSupportAdminNotification,
     telegramSupportAdminNotificationIsExpired,
 } from "../app/lib/telegram-support-admin-replies.ts";
@@ -64,6 +66,58 @@ test("administrator alerts use Telegram ForceReply without adding parent-facing 
         selective: false,
         input_field_placeholder: "Type Coach Patrick's reply to the parent",
     });
+});
+
+test("latest parent context exposes only the stored message fields needed for alert delivery", async () => {
+    const selections = [];
+    const database = {
+        from(table) {
+            assert.equal(table, "support_messages");
+            const query = {
+                select(fields) {
+                    selections.push(fields);
+                    query.fields = fields;
+                    return query;
+                },
+                eq() {
+                    return query;
+                },
+                order() {
+                    return query;
+                },
+                limit() {
+                    return query;
+                },
+                async maybeSingle() {
+                    return query.fields === "id"
+                        ? { data: { id: 187 }, error: null }
+                        : {
+                            data: {
+                                id: 187,
+                                content: "[Photo]\nSmall scratch on a finger",
+                                source_refs: ["patlau-internal:telegram-photo:v1:opaque"],
+                            },
+                            error: null,
+                        };
+                },
+            };
+            return query;
+        },
+    };
+
+    assert.deepEqual(
+        await loadLatestSupportParentMessageContext(database, notification.conversation_id),
+        {
+            id: "187",
+            content: "[Photo]\nSmall scratch on a finger",
+            sourceRefs: ["patlau-internal:telegram-photo:v1:opaque"],
+        },
+    );
+    assert.equal(
+        await loadLatestSupportParentMessageId(database, notification.conversation_id),
+        "187",
+    );
+    assert.deepEqual(selections, ["id,content,source_refs", "id"]);
 });
 
 test("notification expiry is deterministic and fails closed for invalid timestamps", () => {
