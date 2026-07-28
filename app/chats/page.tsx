@@ -14,10 +14,7 @@ import type {
 } from "../../types/support";
 import { chatReturnPath } from "../lib/auth-return";
 import { canCloseAfterCoachReply } from "../lib/support-conversation-policy";
-import {
-    formatParentMessageActivity,
-    latestParentMessageAt,
-} from "../lib/support-parent-activity";
+import { telegramReceiptPresentation } from "../lib/support-telegram-receipts";
 import { normaliseCoachReferences } from "../lib/telegram-support-flow";
 import "../styles.css";
 import "../dashboard/dashboard.css";
@@ -142,37 +139,13 @@ function TelegramReceipt({ message }: { message: SupportMessage }) {
     const deliveryStatus = String(
         message.telegram_delivery_status || "",
     ).toLowerCase();
-    const details = status === "parent_replied"
-        ? {
-            icon: "\u2713\u2713",
-            label: "Parent replied afterwards",
-            title: message.telegram_receipt_at
-                ? `The parent sent a later message at ${formatTime(message.telegram_receipt_at)}. Telegram does not expose passive read receipts to bots.`
-                : "The parent sent a later message. Telegram does not expose passive read receipts to bots.",
-        }
-        : status === "sent"
-            ? {
-                icon: "\u2713",
-                label: "Sent to Telegram",
-                title: "Telegram accepted the message. Telegram does not expose whether the parent has passively read it.",
-            }
-            : status === "sending"
-                ? {
-                    icon: "\u2026",
-                    label: "Sending to Telegram",
-                    title: "The message is waiting to be sent to Telegram.",
-                }
-                : {
-                    icon: "!",
-                    label: deliveryStatus === "blocked"
-                        ? "Parent blocked the bot"
-                        : deliveryStatus === "not_sent"
-                            ? "Not sent"
-                            : "Delivery failed",
-                    title: deliveryStatus === "blocked"
-                        ? "Telegram could not deliver this because the parent blocked the bot."
-                        : "Telegram did not confirm that this message was sent.",
-                };
+    const details = telegramReceiptPresentation(
+        status,
+        deliveryStatus,
+        message.telegram_receipt_at
+            ? formatTime(message.telegram_receipt_at)
+            : undefined,
+    );
 
     return (
         <div
@@ -427,7 +400,6 @@ export default function ChatsPage() {
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
     const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
-    const [activityNow, setActivityNow] = useState(() => Date.now());
     busyRef.current = busy;
 
     const [knowledgeForm, setKnowledgeForm] = useState({
@@ -504,14 +476,6 @@ export default function ChatsPage() {
         if (quoteHighlightFrameRef.current !== null) {
             window.cancelAnimationFrame(quoteHighlightFrameRef.current);
         }
-    }, []);
-
-    useEffect(() => {
-        const interval = window.setInterval(
-            () => setActivityNow(Date.now()),
-            30_000,
-        );
-        return () => window.clearInterval(interval);
     }, []);
 
     const selectConversation = useCallback((conversationId: string) => {
@@ -934,17 +898,6 @@ export default function ChatsPage() {
         () => canCloseAfterCoachReply(messages),
         [messages],
     );
-    const lastParentMessageAt = useMemo(
-        () => latestParentMessageAt(messages),
-        [messages],
-    );
-    const parentActivityLabel = useMemo(
-        () => formatParentMessageActivity(lastParentMessageAt, activityNow),
-        [activityNow, lastParentMessageAt],
-    );
-    const parentActivityTooltip = lastParentMessageAt
-        ? `Latest stored parent message: ${formatTime(lastParentMessageAt)}. Telegram bots do not receive a parent's online or typing status.`
-        : "Telegram bots do not receive a parent's online or typing status. This label updates after the parent sends a message.";
     const selectedConversationName = selectedConversationSummary ? contactName(selectedConversationSummary) : "this parent";
     const selectedConversationIsLoading = Boolean(
         selectedId
@@ -1055,22 +1008,6 @@ export default function ChatsPage() {
                                         <div className="chats-thread-contact">
                                             <h2>{contactName(selectedConversation)}</h2>
                                             <p className="chats-thread-identity">{selectedConversation.contact?.username ? `@${selectedConversation.contact.username}` : "No Telegram username"} · Telegram ID {selectedConversation.contact?.telegram_user_id || "Unavailable"}</p>
-                                            <span
-                                                className="chats-parent-activity"
-                                                tabIndex={0}
-                                                title={parentActivityTooltip}
-                                                aria-describedby="chats-parent-activity-tooltip"
-                                            >
-                                                <span>{parentActivityLabel}</span>
-                                                <span className="chats-parent-activity__info" aria-hidden="true">i</span>
-                                                <span
-                                                    id="chats-parent-activity-tooltip"
-                                                    className="chats-parent-activity__tooltip"
-                                                    role="tooltip"
-                                                >
-                                                    {parentActivityTooltip}
-                                                </span>
-                                            </span>
                                         </div>
                                         <span className={`chats-status chats-status--${selectedConversation.status}`}>{statusLabels[selectedConversation.status]}</span>
                                     </header>

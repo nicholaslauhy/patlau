@@ -176,11 +176,6 @@
 .chats-thread-contact { min-width:0; max-width:100%; }
 .chats-thread-header h2 { margin:0; font-size:1.05rem; font-weight:750; }
 .chats-thread-header p { margin:0.18rem 0 0; overflow-wrap:anywhere; color:var(--muted-foreground); font-size:0.7rem; }
-.chats-parent-activity { position:relative; width:fit-content; max-width:100%; display:inline-flex; align-items:center; gap:0.38rem; margin-top:0.48rem; padding:0.28rem 0.48rem; border:1px solid #dbe4ec; border-radius:999px; background:#f8fafc; color:#526579; font-size:0.62rem; font-weight:700; line-height:1.25; cursor:help; }
-.chats-parent-activity:focus-visible { outline:2px solid #0f766e; outline-offset:2px; }
-.chats-parent-activity__info { width:15px; height:15px; flex:0 0 auto; display:grid; place-items:center; border:1px solid #8da0b3; border-radius:999px; color:#61768a; font-size:0.52rem; font-weight:850; line-height:1; }
-.chats-parent-activity__tooltip { position:absolute; z-index:20; top:calc(100% + 0.45rem); left:0; width:min(290px,calc(100vw - 3rem)); padding:0.55rem 0.65rem; visibility:hidden; border:1px solid #cbd9e5; border-radius:9px; background:#10263b; box-shadow:0 8px 24px rgba(15,31,50,0.18); color:#fff; font-size:0.62rem; font-weight:600; line-height:1.45; opacity:0; pointer-events:none; transform:translateY(-3px); transition:opacity 140ms ease,transform 140ms ease,visibility 140ms ease; }
-.chats-parent-activity:hover .chats-parent-activity__tooltip,.chats-parent-activity:focus .chats-parent-activity__tooltip,.chats-parent-activity:focus-within .chats-parent-activity__tooltip { visibility:visible; opacity:1; transform:translateY(0); }
 .chats-escalation { display:flex; gap:0.5rem; padding:0.6rem 1rem; background:#fff5f5; color:#991b1b; font-size:0.7rem; }
 .chats-mode { display:flex; align-items:center; gap:0.7rem; padding:0.72rem 1rem; border-bottom:1px solid var(--border-solid); background:#f0f9ff; color:#075985; }
 .chats-mode__icon { width:34px; height:34px; flex:0 0 auto; display:grid; place-items:center; border:1px solid currentColor; border-radius:10px; background:#dbeafe; color:#1d4ed8; font-size:0.68rem; font-weight:850; }
@@ -246,6 +241,7 @@
 .chats-telegram-receipt--parent_replied .chats-telegram-receipt__icon { color:#0d9488; }
 .chats-telegram-receipt--sent .chats-telegram-receipt__icon { color:#3b82f6; }
 .chats-telegram-receipt--sending { color:#64748b; }
+.chats-telegram-receipt--sending .chats-telegram-receipt__icon { min-width:1.25rem; letter-spacing:0; }
 .chats-telegram-receipt--failed,.chats-telegram-receipt--failed .chats-telegram-receipt__icon { color:#b91c1c; }
 .chats-image-preview { display:grid; gap:0.45rem; width:fit-content; max-width:100%; margin-top:0.65rem; color:#0f766e; font-size:0.62rem; font-weight:750; }
 .chats-image-preview__image-link { display:block; max-width:100%; border-radius:10px; }
@@ -371,5 +367,4 @@
 
 @media (prefers-reduced-motion: reduce) {
     .chats-bubble.is-quote-target { animation:none; outline-color:#0ea5e9; }
-    .chats-parent-activity__tooltip { transition:none; }
 }
