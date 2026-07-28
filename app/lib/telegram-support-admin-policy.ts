@@ -14,6 +14,13 @@ export interface TelegramSupportAdminRecord extends TelegramSupportAdminRow {
     updated_at?: string | null;
 }
 
+export interface TelegramSupportAdminRecipient {
+    id: string | null;
+    telegramChatId: string;
+    displayName: string;
+    deploymentFallback: boolean;
+}
+
 export function normalizeTelegramSupportChatId(value: unknown) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -63,6 +70,44 @@ export function resolveTelegramSupportAdminChatIds(
     }
 
     return [...new Set(activeIds)];
+}
+
+export function resolveTelegramSupportAdminRecipients(
+    rows: Array<Partial<TelegramSupportAdminRecord>>,
+    fallbackValue?: string | null,
+): TelegramSupportAdminRecipient[] {
+    const fallbackId = normalizeTelegramSupportChatId(fallbackValue);
+    const validFallback = TELEGRAM_SUPPORT_CHAT_ID_PATTERN.test(fallbackId);
+    const recipients = new Map<string, TelegramSupportAdminRecipient>();
+
+    for (const row of rows) {
+        const telegramChatId = normalizeTelegramSupportChatId(row.telegram_chat_id);
+        if (!TELEGRAM_SUPPORT_CHAT_ID_PATTERN.test(telegramChatId)) continue;
+        const deploymentFallback = validFallback && telegramChatId === fallbackId;
+        if (row.active !== true && !deploymentFallback) continue;
+
+        recipients.set(telegramChatId, {
+            id: typeof row.id === 'string' && row.id ? row.id : null,
+            telegramChatId,
+            displayName: typeof row.display_name === 'string' && row.display_name.trim()
+                ? row.display_name.trim()
+                : deploymentFallback
+                    ? 'Primary Telegram administrator'
+                    : 'Telegram administrator',
+            deploymentFallback,
+        });
+    }
+
+    if (validFallback && !recipients.has(fallbackId)) {
+        recipients.set(fallbackId, {
+            id: null,
+            telegramChatId: fallbackId,
+            displayName: 'Primary Telegram administrator',
+            deploymentFallback: true,
+        });
+    }
+
+    return [...recipients.values()];
 }
 
 export function maskTelegramSupportChatId(value: string) {

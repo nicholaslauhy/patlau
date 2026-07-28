@@ -156,6 +156,14 @@ function SupportImagePreview({
     const [imageUrl, setImageUrl] = useState("");
     const [retryNonce, setRetryNonce] = useState(0);
     const [requested, setRequested] = useState(false);
+    const viewButtonRef = useRef<HTMLButtonElement>(null);
+
+    const closeImage = useCallback(() => {
+        setRequested(false);
+        setState("idle");
+        setImageUrl("");
+        window.setTimeout(() => viewButtonRef.current?.focus(), 0);
+    }, []);
 
     useEffect(() => {
         if (!requested) return;
@@ -194,17 +202,40 @@ function SupportImagePreview({
     if (state === "idle") {
         return (
             <div className="chats-image-state chats-image-state--sensitive">
-                <button type="button" onClick={() => setRequested(true)}>View parent image</button>
+                <button
+                    ref={viewButtonRef}
+                    type="button"
+                    onClick={() => setRequested(true)}
+                >
+                    View parent image
+                </button>
                 <span>Loads only when you choose to view it.</span>
             </div>
         );
     }
     if (state === "loading") {
-        return <div className="chats-image-state" role="status">Loading parent image…</div>;
+        return (
+            <div
+                className="chats-image-state"
+                role="status"
+                onKeyDown={(event) => {
+                    if (event.key === "Escape") closeImage();
+                }}
+            >
+                <span>Loading parent image…</span>
+                <button type="button" onClick={closeImage}>Cancel</button>
+            </div>
+        );
     }
     if (state === "error") {
         return (
-            <div className="chats-image-state chats-image-state--error" role="status">
+            <div
+                className="chats-image-state chats-image-state--error"
+                role="status"
+                onKeyDown={(event) => {
+                    if (event.key === "Escape") closeImage();
+                }}
+            >
                 <span>Could not load this parent image.</span>
                 <button
                     type="button"
@@ -215,15 +246,39 @@ function SupportImagePreview({
                 >
                     Try again
                 </button>
+                <button type="button" onClick={closeImage}>Close image</button>
             </div>
         );
     }
 
     return (
-        <a className="chats-image-preview" href={imageUrl} target="_blank" rel="noreferrer" aria-label="Open parent image at full size">
-            <img src={imageUrl} alt="Image sent by parent" />
-            <span>Open full size</span>
-        </a>
+        <div
+            className="chats-image-preview"
+            onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeImage();
+                }
+            }}
+        >
+            <a
+                className="chats-image-preview__image-link"
+                href={imageUrl}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open parent image at full size"
+            >
+                <img src={imageUrl} alt="Image sent by parent" />
+            </a>
+            <div className="chats-image-preview__actions">
+                <a href={imageUrl} target="_blank" rel="noreferrer">
+                    Open full size
+                </a>
+                <button type="button" onClick={closeImage}>
+                    Close image
+                </button>
+            </div>
+        </div>
     );
 }
 

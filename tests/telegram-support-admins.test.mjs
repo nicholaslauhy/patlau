@@ -5,6 +5,7 @@ import {
     fanOutTelegramSupportNotification,
     maskTelegramSupportChatId,
     resolveTelegramSupportAdminChatIds,
+    resolveTelegramSupportAdminRecipients,
     validateTelegramSupportAdminInput,
 } from '../app/lib/telegram-support-admin-policy.ts';
 
@@ -48,6 +49,41 @@ test('the deployment fallback remains active until its environment variable is r
         ['22334455', '1127073766'],
     );
     assert.deepEqual(resolveTelegramSupportAdminChatIds([], '1127073766'), ['1127073766']);
+});
+
+test('notification recipients retain private administrator identity without duplicating the fallback', () => {
+    assert.deepEqual(
+        resolveTelegramSupportAdminRecipients([
+            {
+                id: 'bff0d4c9-a195-4d47-a9b8-a36f103c531f',
+                telegram_chat_id: '111111',
+                display_name: 'Coach Patrick',
+                active: true,
+            },
+            {
+                id: '669181db-f3e5-407a-b8ca-ccbeb38be60f',
+                telegram_chat_id: '222222',
+                display_name: 'Paused administrator',
+                active: false,
+            },
+        ], '111111'),
+        [{
+            id: 'bff0d4c9-a195-4d47-a9b8-a36f103c531f',
+            telegramChatId: '111111',
+            displayName: 'Coach Patrick',
+            deploymentFallback: true,
+        }],
+    );
+
+    assert.deepEqual(
+        resolveTelegramSupportAdminRecipients([], '333333'),
+        [{
+            id: null,
+            telegramChatId: '333333',
+            displayName: 'Primary Telegram administrator',
+            deploymentFallback: true,
+        }],
+    );
 });
 
 test('notification fan-out attempts every unique admin when one delivery fails', async () => {

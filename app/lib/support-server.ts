@@ -2,10 +2,14 @@ import { createClient, type User } from "@supabase/supabase-js";
 import type { SupportStatus } from "../../types/support";
 import { getStoredUserRole } from "./server-auth";
 import {
-    fanOutTelegramSupportNotification,
     normalizeTelegramSupportChatId,
-    resolveTelegramSupportAdminChatIds,
+    resolveTelegramSupportAdminRecipients,
 } from "./telegram-support-admin-policy";
+import {
+    loadLatestSupportParentMessageId,
+    storeTelegramSupportAdminNotification,
+    TELEGRAM_SUPPORT_ADMIN_FORCE_REPLY_MARKUP,
+} from "./telegram-support-admin-replies";
 import { formatSupportConversationLinks } from "./support-links";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -107,17 +111,22 @@ export async function setSupportTelegramKeyboard(
 }
 
 export async function getTelegramSupportAdminChatIds() {
+    const recipients = await getTelegramSupportAdminRecipients();
+    return recipients.map((recipient) => recipient.telegramChatId);
+}
+
+export async function getTelegramSupportAdminRecipients() {
     const fallbackChatId = process.env.TELEGRAM_PARENT_SUPPORT_ADMIN_CHAT_ID;
     const { data, error } = await supportAdmin
         .from("telegram_support_admins")
-        .select("telegram_chat_id,active");
+        .select("id,telegram_chat_id,display_name,active");
 
     if (error) {
         console.error("Could not load the Telegram support administrator list; using the deployment fallback.");
-        return resolveTelegramSupportAdminChatIds([], fallbackChatId);
+        return resolveTelegramSupportAdminRecipients([], fallbackChatId);
     }
 
-    return resolveTelegramSupportAdminChatIds(data || [], fallbackChatId);
+    return resolveTelegramSupportAdminRecipients(data || [], fallbackChatId);
 }
 
 export async function isTelegramSupportAdmin(chatId: string) {
@@ -133,26 +142,64 @@ export async function notifySupportAdmins(
     message: string,
     reason: string,
 ) {
-    const chatIds = await getTelegramSupportAdminChatIds();
-    if (chatIds.length === 0) {
+    const recipients = await getTelegramSupportAdminRecipients();
+    if (recipients.length === 0) {
         throw new Error("No active Telegram support notification administrator is configured.");
     }
     const links = formatSupportConversationLinks(
         conversationId,
         process.env.NEXT_PUBLIC_SITE_URL,
     );
-    const notification = `Parent chat needs attention\n\nParent: ${parentName}\nReason: ${reason}\n\nLatest message:\n${message.slice(0, 700)}${links}`;
-    const result = await fanOutTelegramSupportNotification(
-        chatIds,
-        (chatId) => sendSupportTelegramMessage(chatId, notification),
-    );
+    const notification = `Parent chat needs attention\n\nParent: ${parentName}\nReason: ${reason}\n\nLatest message:\n${message.slice(0, 700)}\n\nReply directly to this alert to answer the parent.${links}`;
+    let expectedParentMessageId: string | null = null;
+    try {
+        expectedParentMessageId = await loadLatestSupportParentMessageId(
+            supportAdmin,
+            conversationId,
+        );
+    } catch {
+        // Alert delivery must remain available while the reply mapping is an
+        // additive feature. A missing parent reference makes a later direct
+        // reply fail closed rather than risking a response to stale context.
+        console.error("Could not identify the parent message for a Telegram support alert.");
+    }
+
+    let mappingFailures = 0;
+    const deliveries = await Promise.allSettled(recipients.map(async (recipient) => {
+        const telegramMessage = await sendSupportTelegramMessage(
+            recipient.telegramChatId,
+            notification,
+            TELEGRAM_SUPPORT_ADMIN_FORCE_REPLY_MARKUP,
+        );
+        try {
+            await storeTelegramSupportAdminNotification(supportAdmin, {
+                recipient,
+                telegramMessageId: telegramMessage.message_id,
+                conversationId,
+                expectedParentMessageId,
+            });
+        } catch {
+            mappingFailures += 1;
+            console.error("Could not store a Telegram support administrator reply mapping.");
+        }
+        return telegramMessage;
+    }));
+    const result = {
+        attempted: deliveries.length,
+        delivered: deliveries.filter((delivery) => delivery.status === "fulfilled").length,
+        failed: deliveries.filter((delivery) => delivery.status === "rejected").length,
+    };
 
     if (result.failed > 0) {
         console.error(`Telegram support notification delivery failed for ${result.failed} administrator(s).`);
     }
+    if (mappingFailures > 0) {
+        console.error(`Direct Telegram replies are unavailable for ${mappingFailures} delivered administrator alert(s).`);
+    }
     if (result.attempted > 0 && result.delivered === 0) {
         throw new Error("Telegram could not deliver the support notification to any administrator.");
     }
+    return { ...result, mappingFailures };
 }
 
 export async function recordSupportStatus(
