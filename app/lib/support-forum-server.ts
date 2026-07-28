@@ -3,11 +3,13 @@ import {
     buildTelegramSupportForumTopicTitle,
     closeTelegramSupportForumTopic,
     createTelegramSupportForumTopic,
+    deleteTelegramSupportForumMessage,
     deleteTelegramSupportForumTopic,
     deriveTelegramSupportForumDisplayState,
     editTelegramSupportForumTopic,
     getConfiguredTelegramSupportForumChatId,
     getTelegramSupportForumTopicIconCustomEmojiId,
+    pinTelegramSupportForumMessage,
     reopenTelegramSupportForumTopic,
     sendTelegramSupportForumMessage,
     sendTelegramSupportForumPhoto,
@@ -15,6 +17,8 @@ import {
     type ForumDisplayState,
     type TelegramSupportForumTopicRecord,
 } from "./telegram-support-forum";
+import { extractSupportImageFileId } from "./support-image-server";
+import { formatSupportConversationLinks } from "./support-links";
 
 export type SupportForumDatabaseClient = {
     from: (table: string) => any;
@@ -27,6 +31,7 @@ type ForumTransportOptions = {
     forumChatId?: string | null;
     token?: string | null;
     fetchImpl?: TelegramFetch;
+    siteUrl?: string | null;
 };
 
 type ForumResultBase = {
@@ -80,6 +85,8 @@ const TURNS_TABLE = "telegram_support_forum_reply_turns";
 const PROVISIONING_STALE_AFTER_MS = 60_000;
 const NOTIFICATION_STALE_AFTER_MS = 60_000;
 const DELETION_TOMBSTONE_RECOVERY_AFTER_MS = 60_000;
+const FORUM_PROVISIONING_RETRY_DELAYS_MS = [75, 150, 300, 600];
+const FORUM_NOTIFICATION_RETRY_DELAYS_MS = [100, 250, 500];
 const TOPIC_DELETION_PENDING_CODE = "topic_deletion_pending";
 const TOPIC_DELETED_TOMBSTONE_CODE =
     "topic_deleted_pending_conversation_delete";
@@ -108,6 +115,14 @@ function transport(input: ForumTransportOptions) {
         ...(configuredBotToken(input) ? { token: configuredBotToken(input) } : {}),
         ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
     };
+}
+
+function configuredSiteUrl(input: ForumTransportOptions) {
+    return String(
+        hasOwn(input, "siteUrl")
+            ? input.siteUrl || ""
+            : process.env.NEXT_PUBLIC_SITE_URL || "",
+    ).trim();
 }
 
 function cleanIdentifier(value: unknown) {
@@ -230,6 +245,31 @@ async function updateTopic(
     return { topic: data || null, error };
 }
 
+async function advanceExpectedParentMessage(
+    database: SupportForumDatabaseClient,
+    topic: TelegramSupportForumTopicRecord,
+    deliveredMessageId: string,
+) {
+    // Only a successfully delivered parent message may become the reply
+    // target. The conditional update is a database-side compare-and-set, so
+    // an older Telegram request that finishes late cannot move the pointer
+    // backwards after a newer message has already completed.
+    const nextMessageId = positiveInteger(deliveredMessageId);
+    const advanced = await database
+        .from(TOPICS_TABLE)
+        .update({ expected_parent_message_id: nextMessageId })
+        .eq("id", topic.id)
+        .or(
+            `expected_parent_message_id.is.null,expected_parent_message_id.lt.${nextMessageId}`,
+        )
+        .select("*")
+        .maybeSingle();
+    if (advanced.error || advanced.data) {
+        return { topic: advanced.data || null, error: advanced.error };
+    }
+    return loadAnyForumTopic(database, topic.conversation_id);
+}
+
 async function markProvisioningFailed(
     database: SupportForumDatabaseClient,
     topic: TelegramSupportForumTopicRecord,
@@ -312,6 +352,195 @@ function provisionResultForExisting(
         reason: "Forum topic provisioning previously failed and will not be retried automatically.",
         errorCode: topic.last_error_code || "topic_provisioning_failed",
     };
+}
+
+const FORUM_HEADER_PIN_PENDING_CODE = "forum_header_pin_pending";
+const FORUM_HEADER_PIN_FAILED_CODE = "forum_header_pin_failed";
+
+function clearTopicErrorUnlessHeaderPinNeedsRetry(
+    topic: TelegramSupportForumTopicRecord,
+) {
+    return (
+        topic.last_error_code === FORUM_HEADER_PIN_PENDING_CODE
+        || topic.last_error_code === FORUM_HEADER_PIN_FAILED_CODE
+    )
+        ? {}
+        : { last_error_code: null };
+}
+
+async function ensureSupportForumHeader(
+    database: SupportForumDatabaseClient,
+    provision: ForumProvisionResult,
+    input: ForumTransportOptions,
+): Promise<ForumProvisionResult> {
+    if (provision.state !== "ready" || !provision.topic) return provision;
+
+    let topic = provision.topic;
+    let headerMessageId = positiveInteger(topic.header_message_id);
+    let shouldPin = (
+        topic.last_error_code === FORUM_HEADER_PIN_PENDING_CODE
+        || topic.last_error_code === FORUM_HEADER_PIN_FAILED_CODE
+    );
+    const telegramTransport = transport(input);
+
+    if (!headerMessageId) {
+        const headerText = formatSupportConversationLinks(
+            topic.conversation_id,
+            configuredSiteUrl(input),
+        ).trim();
+        if (!headerText) {
+            return {
+                ...provision,
+                state: "failed",
+                fallbackRequired: true,
+                reason: "The secure PatLau app and website links could not be created for the forum topic.",
+                errorCode: "forum_header_links_unavailable",
+            };
+        }
+
+        let remoteHeader: Record<string, any>;
+        try {
+            remoteHeader = await sendTelegramSupportForumMessage({
+                chatId: topic.telegram_forum_chat_id,
+                messageThreadId: topic.telegram_message_thread_id!,
+                text: headerText,
+                disableNotification: true,
+                ...telegramTransport,
+            });
+        } catch (error) {
+            return {
+                ...provision,
+                state: "failed",
+                fallbackRequired: true,
+                reason: `Telegram could not create the forum links header: ${errorText(error)}`,
+                errorCode: telegramErrorCode(error, "notify"),
+            };
+        }
+
+        const sentHeaderMessageId = positiveInteger(remoteHeader?.message_id);
+        if (!sentHeaderMessageId) {
+            return {
+                ...provision,
+                state: "failed",
+                fallbackRequired: true,
+                reason: "Telegram created a forum links header without a valid message ID.",
+                errorCode: "forum_header_message_id_missing",
+            };
+        }
+
+        const claimedHeader = await database
+            .from(TOPICS_TABLE)
+            .update({
+                header_message_id: sentHeaderMessageId,
+                last_error_code: FORUM_HEADER_PIN_PENDING_CODE,
+            })
+            .eq("id", topic.id)
+            .is("header_message_id", null)
+            .select("*")
+            .maybeSingle();
+
+        if (claimedHeader.error) {
+            await deleteTelegramSupportForumMessage({
+                chatId: topic.telegram_forum_chat_id,
+                messageId: sentHeaderMessageId,
+                ...telegramTransport,
+            }).catch(() => null);
+            return {
+                ...provision,
+                state: "failed",
+                fallbackRequired: true,
+                reason: "The forum links header could not be recorded safely.",
+                errorCode: databaseErrorCode(
+                    claimedHeader.error,
+                    "forum_header_mapping_failed",
+                ),
+            };
+        }
+
+        if (claimedHeader.data) {
+            topic = claimedHeader.data;
+            headerMessageId = sentHeaderMessageId;
+            shouldPin = true;
+        } else {
+            const winner = await loadAnyForumTopic(
+                database,
+                topic.conversation_id,
+            );
+            await deleteTelegramSupportForumMessage({
+                chatId: topic.telegram_forum_chat_id,
+                messageId: sentHeaderMessageId,
+                ...telegramTransport,
+            }).catch(() => null);
+            const winnerHeaderMessageId = positiveInteger(
+                winner.topic?.header_message_id,
+            );
+            if (winner.error || !winner.topic || !winnerHeaderMessageId) {
+                return {
+                    ...provision,
+                    state: "failed",
+                    fallbackRequired: true,
+                    reason: "Another request reserved the forum links header, but its mapping could not be verified.",
+                    errorCode: databaseErrorCode(
+                        winner.error,
+                        "forum_header_mapping_unavailable",
+                    ),
+                };
+            }
+            topic = winner.topic;
+            headerMessageId = winnerHeaderMessageId;
+            shouldPin = (
+                topic.last_error_code === FORUM_HEADER_PIN_PENDING_CODE
+                || topic.last_error_code === FORUM_HEADER_PIN_FAILED_CODE
+            );
+        }
+    }
+
+    if (!shouldPin) {
+        return { ...provision, topic };
+    }
+
+    try {
+        await pinTelegramSupportForumMessage({
+            chatId: topic.telegram_forum_chat_id,
+            messageId: headerMessageId!,
+            disableNotification: true,
+            ...telegramTransport,
+        });
+        const pinned = await database
+            .from(TOPICS_TABLE)
+            .update({ last_error_code: null })
+            .eq("id", topic.id)
+            .eq("header_message_id", headerMessageId!)
+            .select("*")
+            .maybeSingle();
+        if (pinned.data) topic = pinned.data;
+        return {
+            ...provision,
+            topic,
+            reason: pinned.error
+                ? "The forum links header was pinned, but its local state could not be finalized."
+                : provision.reason,
+            errorCode: pinned.error
+                ? databaseErrorCode(pinned.error, "forum_header_pin_state_failed")
+                : provision.errorCode,
+        };
+    } catch (error) {
+        const failed = await database
+            .from(TOPICS_TABLE)
+            .update({ last_error_code: FORUM_HEADER_PIN_FAILED_CODE })
+            .eq("id", topic.id)
+            .eq("header_message_id", headerMessageId!)
+            .select("*")
+            .maybeSingle();
+        if (failed.data) topic = failed.data;
+        return {
+            ...provision,
+            topic,
+            fallbackRequired: false,
+            reason: "The forum links header was created, but Telegram could not pin it. Grant the bot Pin Messages permission.",
+            errorCode: FORUM_HEADER_PIN_FAILED_CODE,
+        };
+    }
 }
 
 function isDeletedTopicTombstone(topic: TelegramSupportForumTopicRecord) {
@@ -457,7 +686,11 @@ export async function ensureSupportForumTopic(
             // fresh mapping. The CAS above prevents deleting any newer topic.
             return ensureSupportForumTopic(database, input);
         }
-        return provisionResultForExisting(existing.topic, forumChatId);
+        return ensureSupportForumHeader(
+            database,
+            provisionResultForExisting(existing.topic, forumChatId),
+            input,
+        );
     }
 
     const provisioningTopic = inserted as TelegramSupportForumTopicRecord;
@@ -530,14 +763,14 @@ export async function ensureSupportForumTopic(
         };
     }
 
-    return {
+    return ensureSupportForumHeader(database, {
         state: "ready",
         created: true,
         topic: finalized.data,
         fallbackRequired: false,
         reason: null,
         errorCode: null,
-    };
+    }, input);
 }
 
 async function applyRemoteTopicState(
@@ -604,6 +837,127 @@ async function updateNotification(
     return error;
 }
 
+function parentMessageForumDisplayState(
+    status: SupportStatus | undefined,
+): ForumDisplayState {
+    return status === "escalated" || status === "human_active"
+        ? "needs_reply"
+        : "ai_handling";
+}
+
+function parentPhotoCaption(content: unknown) {
+    const value = String(content || "").trim();
+    if (value === "[Photo]") return "";
+    return value.startsWith("[Photo]\n")
+        ? value.slice("[Photo]\n".length).trim()
+        : value;
+}
+
+/**
+ * Mirrors one canonical stored parent message into its private Telegram forum
+ * topic. The row is reloaded by both identifiers so a caller can never attach
+ * content or an opaque Telegram photo reference from another conversation.
+ */
+export async function mirrorSupportForumParentMessage(
+    database: SupportForumDatabaseClient,
+    input: {
+        conversationId: string;
+        parentName?: string | null;
+        expectedParentMessageId: string | number;
+        status?: SupportStatus;
+    } & ForumTransportOptions,
+): Promise<ForumNotificationResult> {
+    const conversationId = cleanIdentifier(input.conversationId);
+    const expectedParentMessageId = positiveInteger(
+        input.expectedParentMessageId,
+    );
+    if (!conversationId || !expectedParentMessageId) {
+        return {
+            delivered: false,
+            duplicate: false,
+            inFlight: false,
+            telegramMessageId: null,
+            topic: null,
+            fallbackRequired: false,
+            reason: "A conversation ID and parent message ID are required.",
+            errorCode: "invalid_parent_message_mirror",
+        };
+    }
+
+    const { data: storedMessage, error } = await database
+        .from("support_messages")
+        .select("id,conversation_id,sender_type,content,source_refs")
+        .eq("id", expectedParentMessageId)
+        .eq("conversation_id", conversationId)
+        .eq("sender_type", "parent")
+        .maybeSingle();
+    if (error || !storedMessage) {
+        return {
+            delivered: false,
+            duplicate: false,
+            inFlight: false,
+            telegramMessageId: null,
+            topic: null,
+            fallbackRequired: false,
+            reason: error
+                ? "The stored parent message could not be loaded safely."
+                : "The stored parent message does not belong to this conversation.",
+            errorCode: error
+                ? databaseErrorCode(error)
+                : "parent_message_mirror_mismatch",
+        };
+    }
+
+    const photoFileId = extractSupportImageFileId(
+        storedMessage.source_refs,
+    );
+    const content = photoFileId
+        ? parentPhotoCaption(storedMessage.content)
+        : String(storedMessage.content || "").trim();
+    if (!photoFileId && !content) {
+        return {
+            delivered: false,
+            duplicate: false,
+            inFlight: false,
+            telegramMessageId: null,
+            topic: null,
+            fallbackRequired: false,
+            reason: "The stored parent message is empty.",
+            errorCode: "empty_parent_message_mirror",
+        };
+    }
+
+    const notificationInput = {
+        ...input,
+        conversationId,
+        expectedParentMessageId,
+        alertText: content,
+        photoFileId,
+        latestSenderType: "parent" as const,
+        displayState: parentMessageForumDisplayState(input.status),
+    };
+    let result = await notifySupportForum(database, notificationInput);
+    let provisioningRetryIndex = 0;
+    let notificationRetryIndex = 0;
+    while (true) {
+        const provisioningMayFinish = result.inFlight && !result.duplicate;
+        const telegramDefinitelyRejected =
+            result.errorCode === "telegram_notify_rejected";
+        if (!provisioningMayFinish && !telegramDefinitelyRejected) break;
+        const retryDelays = telegramDefinitelyRejected
+            ? FORUM_NOTIFICATION_RETRY_DELAYS_MS
+            : FORUM_PROVISIONING_RETRY_DELAYS_MS;
+        const retryIndex = telegramDefinitelyRejected
+            ? notificationRetryIndex++
+            : provisioningRetryIndex++;
+        const delay = retryDelays[retryIndex];
+        if (delay === undefined) break;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        result = await notifySupportForum(database, notificationInput);
+    }
+    return result;
+}
+
 export async function notifySupportForum(
     database: SupportForumDatabaseClient,
     input: {
@@ -614,11 +968,13 @@ export async function notifySupportForum(
         photoFileId?: string | null;
         status?: SupportStatus;
         latestSenderType?: SupportMessageSender | null;
+        displayState?: ForumDisplayState;
     } & ForumTransportOptions,
 ): Promise<ForumNotificationResult> {
     const expectedParentMessageId = positiveInteger(input.expectedParentMessageId);
     const alertText = String(input.alertText || "").trim();
-    if (!expectedParentMessageId || !alertText) {
+    const photoFileId = String(input.photoFileId || "").trim();
+    if (!expectedParentMessageId || (!alertText && !photoFileId)) {
         return {
             delivered: false,
             duplicate: false,
@@ -626,7 +982,7 @@ export async function notifySupportForum(
             telegramMessageId: null,
             topic: null,
             fallbackRequired: true,
-            reason: "A parent message ID and alert text are required.",
+            reason: "A parent message ID and either message text or a photo are required.",
             errorCode: "invalid_notification",
         };
     }
@@ -644,9 +1000,49 @@ export async function notifySupportForum(
             errorCode: provision.errorCode,
         };
     }
-    const topic = provision.topic;
+    let topic = provision.topic;
+    const requestedState = input.displayState
+        || deriveTelegramSupportForumDisplayState(
+            input.status || "escalated",
+            input.latestSenderType,
+        );
+    let topicName = topic.topic_name;
+    let statePersistenceError: any = null;
+    // An AI-owned parent-message request may finish after the conversation has
+    // already escalated or Coach Patrick has replied. It must never repaint a
+    // newer red/yellow/green topic state back to the AI state. Explicit
+    // Return-to-AI transitions remain handled by syncSupportForumState().
+    if (requestedState !== "ai_handling") {
+        try {
+            topicName = await applyRemoteTopicState(topic, {
+                ...input,
+                state: requestedState,
+            });
+            const preparedTopic = await updateTopic(database, topic.id, {
+                topic_name: topicName,
+                lifecycle_status: requestedState === "closed" ? "closed" : "open",
+                display_state: requestedState,
+                closed_at: requestedState === "closed"
+                    ? new Date().toISOString()
+                    : null,
+            });
+            statePersistenceError = preparedTopic.error;
+            if (preparedTopic.topic) topic = preparedTopic.topic;
+        } catch (error) {
+            return {
+                delivered: false,
+                duplicate: false,
+                inFlight: false,
+                telegramMessageId: null,
+                topic,
+                fallbackRequired: true,
+                reason: `Telegram could not prepare the parent topic: ${errorText(error)}`,
+                errorCode: telegramErrorCode(error, "sync"),
+            };
+        }
+    }
 
-    const { data: claimed, error: claimError } = await database
+    const reservation = await database
         .from(NOTIFICATIONS_TABLE)
         .insert({
             topic_id: topic.id,
@@ -655,6 +1051,9 @@ export async function notifySupportForum(
         })
         .select("*")
         .single();
+    let claimed = reservation.data;
+    const claimError = reservation.error;
+    let duplicateClaim = false;
 
     if (claimError || !claimed) {
         if (!isUniqueViolation(claimError)) {
@@ -688,46 +1087,116 @@ export async function notifySupportForum(
             };
         }
         if (existing.delivery_status === "delivered") {
+            const pointerUpdate = await advanceExpectedParentMessage(
+                database,
+                topic,
+                expectedParentMessageId,
+            );
+            const finalTopic = pointerUpdate.topic || topic;
+            const persistenceError = statePersistenceError
+                || pointerUpdate.error;
             return {
                 delivered: true,
                 duplicate: true,
                 inFlight: false,
                 telegramMessageId: existing.telegram_message_id || null,
-                topic,
+                topic: finalTopic,
                 fallbackRequired: false,
-                reason: null,
-                errorCode: null,
+                reason: persistenceError
+                    ? "Telegram has this parent message, but its local topic state could not be fully updated."
+                    : null,
+                errorCode: persistenceError
+                    ? databaseErrorCode(persistenceError)
+                    : null,
             };
         }
-        const inFlight = existing.delivery_status === "sending"
-            && ageInMilliseconds(existing.updated_at || existing.created_at)
-                <= NOTIFICATION_STALE_AFTER_MS;
+        if (
+            existing.delivery_status === "failed"
+            && existing.failure_code === "telegram_notify_rejected"
+        ) {
+            // Telegram explicitly rejected the previous request, so it is
+            // known not to have created a remote message. Reclaim only that
+            // exact failed state. Ambiguous network failures and stale
+            // "sending" claims are deliberately never retried because doing
+            // so could create a duplicate parent message in the forum.
+            const reclaimed = await database
+                .from(NOTIFICATIONS_TABLE)
+                .update({
+                    delivery_status: "sending",
+                    telegram_message_id: null,
+                    delivered_at: null,
+                    failure_code: null,
+                })
+                .eq("id", existing.id)
+                .eq("delivery_status", "failed")
+                .eq("failure_code", "telegram_notify_rejected")
+                .select("*")
+                .maybeSingle();
+            if (reclaimed.error) {
+                return {
+                    delivered: false,
+                    duplicate: true,
+                    inFlight: false,
+                    telegramMessageId: null,
+                    topic,
+                    fallbackRequired: true,
+                    reason: "The rejected forum alert could not be reserved for a safe retry.",
+                    errorCode: databaseErrorCode(reclaimed.error),
+                };
+            }
+            if (!reclaimed.data) {
+                return {
+                    delivered: false,
+                    duplicate: true,
+                    inFlight: true,
+                    telegramMessageId: null,
+                    topic,
+                    fallbackRequired: false,
+                    reason: "Another request is retrying this rejected forum alert.",
+                    errorCode: null,
+                };
+            }
+            claimed = reclaimed.data;
+            duplicateClaim = true;
+        } else {
+            const inFlight = existing.delivery_status === "sending"
+                && ageInMilliseconds(existing.updated_at || existing.created_at)
+                    <= NOTIFICATION_STALE_AFTER_MS;
+            return {
+                delivered: false,
+                duplicate: true,
+                inFlight,
+                telegramMessageId: existing.telegram_message_id || null,
+                topic,
+                fallbackRequired: !inFlight,
+                reason: inFlight
+                    ? "Another request is delivering this forum alert."
+                    : "This forum alert previously failed or became stale; use the private fallback.",
+                errorCode: existing.failure_code || (inFlight ? null : "forum_notification_stalled"),
+            };
+        }
+    }
+
+    if (!claimed) {
         return {
             delivered: false,
-            duplicate: true,
-            inFlight,
-            telegramMessageId: existing.telegram_message_id || null,
+            duplicate: duplicateClaim,
+            inFlight: false,
+            telegramMessageId: null,
             topic,
-            fallbackRequired: !inFlight,
-            reason: inFlight
-                ? "Another request is delivering this forum alert."
-                : "This forum alert previously failed or became stale; use the private fallback.",
-            errorCode: existing.failure_code || (inFlight ? null : "forum_notification_stalled"),
+            fallbackRequired: true,
+            reason: "The forum alert reservation was not available for delivery.",
+            errorCode: "forum_notification_claim_unavailable",
         };
     }
 
     let remoteMessage: Record<string, any> | null = null;
-    let topicName = topic.topic_name;
     try {
-        topicName = await applyRemoteTopicState(topic, {
-            ...input,
-            state: "needs_reply",
-        });
-        remoteMessage = input.photoFileId
+        remoteMessage = photoFileId
             ? await sendTelegramSupportForumPhoto({
                 chatId: topic.telegram_forum_chat_id,
                 messageThreadId: topic.telegram_message_thread_id!,
-                photoFileId: input.photoFileId,
+                photoFileId,
                 caption: alertText,
                 ...transport(input),
             })
@@ -743,16 +1212,9 @@ export async function notifySupportForum(
             delivery_status: "failed",
             failure_code: errorCode,
         }).catch(() => null);
-        await updateTopic(database, topic.id, {
-            topic_name: topicName,
-            lifecycle_status: "open",
-            display_state: "needs_reply",
-            expected_parent_message_id: expectedParentMessageId,
-            closed_at: null,
-        }).catch(() => null);
         return {
             delivered: false,
-            duplicate: false,
+            duplicate: duplicateClaim,
             inFlight: false,
             telegramMessageId: null,
             topic,
@@ -770,27 +1232,20 @@ export async function notifySupportForum(
         delivered_at: deliveredAt,
         failure_code: null,
     });
-    const topicUpdate = await updateTopic(database, topic.id, {
-        topic_name: topicName,
-        lifecycle_status: "open",
-        display_state: "needs_reply",
-        expected_parent_message_id: expectedParentMessageId,
-        last_error_code: null,
-        closed_at: null,
-    });
-    const finalTopic = topicUpdate.topic || {
-        ...topic,
-        topic_name: topicName,
-        lifecycle_status: "open",
-        display_state: "needs_reply",
-        expected_parent_message_id: expectedParentMessageId,
-        closed_at: null,
-    } as TelegramSupportForumTopicRecord;
-    const persistenceError = notificationUpdateError || topicUpdate.error;
+    let finalTopic = topic;
+    const pointerUpdate = await advanceExpectedParentMessage(
+        database,
+        finalTopic,
+        expectedParentMessageId,
+    );
+    if (pointerUpdate.topic) finalTopic = pointerUpdate.topic;
+    const persistenceError = notificationUpdateError
+        || pointerUpdate.error
+        || statePersistenceError;
 
     return {
         delivered: true,
-        duplicate: false,
+        duplicate: duplicateClaim,
         inFlight: false,
         telegramMessageId,
         topic: finalTopic,
@@ -906,7 +1361,7 @@ export async function syncSupportForumState(
         lifecycle_status: closed ? "closed" : "open",
         display_state: state,
         closed_at: closed ? new Date().toISOString() : null,
-        last_error_code: null,
+        ...clearTopicErrorUnlessHeaderPinNeedsRetry(topic),
     });
     if (updated.error) {
         return {
@@ -1033,7 +1488,7 @@ export async function mirrorSupportForumCoachReply(
         lifecycle_status: "open",
         display_state: "waiting_parent",
         closed_at: null,
-        last_error_code: null,
+        ...clearTopicErrorUnlessHeaderPinNeedsRetry(topic),
     });
     return {
         mirrored: true,
