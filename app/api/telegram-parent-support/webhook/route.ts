@@ -79,6 +79,7 @@ import {
     claimSupportForumTurn,
     deleteSupportForumTopicBeforeConversation,
     mirrorSupportForumCoachReply,
+    mirrorSupportForumParentMessage,
     syncSupportForumState,
 } from "../../../lib/support-forum-server";
 import {
@@ -159,7 +160,7 @@ async function saveInbound(
     content: string,
     sourceRefs: string[] = [],
     replyToMessageId: string | number | null = null,
-) {
+): Promise<{ messageRowId: string; inserted: boolean }> {
     const { data, error } = await insertSupportMessageWithReplyFallback(
         supportAdmin,
         {
@@ -173,9 +174,50 @@ async function saveInbound(
         },
         replyToMessageId,
     );
-    if (error?.code === "23505") return false;
+    if (error?.code === "23505") {
+        const { data: existing, error: existingError } = await supportAdmin
+            .from("support_messages")
+            .select("id")
+            .eq("conversation_id", conversationId)
+            .eq("telegram_message_id", telegramMessageId)
+            .maybeSingle();
+        if (existingError) throw existingError;
+        if (!existing?.id) {
+            throw new Error("Could not recover the stored duplicate parent message.");
+        }
+        return { messageRowId: String(existing.id), inserted: false };
+    }
     if (error) throw error;
-    return String(data.id);
+    return { messageRowId: String(data.id), inserted: true };
+}
+
+async function mirrorStoredParentMessageToForum(
+    conversation: { id: string; status?: SupportStatus | string },
+    name: string,
+    messageId: string | number,
+) {
+    try {
+        const result = await mirrorSupportForumParentMessage(supportAdmin, {
+            conversationId: conversation.id,
+            parentName: name,
+            expectedParentMessageId: messageId,
+            status: conversation.status as SupportStatus | undefined,
+        });
+        if (
+            !result.delivered
+            && !result.duplicate
+            && result.errorCode
+            && result.errorCode !== "forum_unconfigured"
+        ) {
+            console.error(
+                `A parent message could not be mirrored to the Telegram support forum (${result.errorCode}).`,
+            );
+        }
+    } catch {
+        // Supabase remains the canonical conversation history. A forum outage
+        // must not prevent the parent from receiving an AI or Coach response.
+        console.error("A parent message could not be mirrored to the Telegram support forum.");
+    }
 }
 
 async function resolveParentReplyTarget(
@@ -208,7 +250,8 @@ const AI_OWNED_STATUSES: SupportStatus[] = [
 
 type InboundImageClaim =
     | { claimed: true; messageRowId: number; lease: string; insertedNew: boolean }
-    | { claimed: false; retry: boolean };
+    | { claimed: false; retry: true }
+    | { claimed: false; retry: false; messageRowId: number };
 
 function newImageProcessingLease() {
     return `image_processing:${Date.now()}:${randomUUID()}`;
@@ -255,7 +298,7 @@ async function claimInboundImage(
     if (existingError) throw existingError;
     if (!existing) return { claimed: false, retry: true };
     if (existing.telegram_delivery_status === "received") {
-        return { claimed: false, retry: false };
+        return { claimed: false, retry: false, messageRowId: Number(existing.id) };
     }
 
     const startedAt = imageLeaseStartedAt(existing.telegram_delivery_status);
@@ -1493,9 +1536,13 @@ async function handleTelegramSupportImage(
         replyToMessageId,
     );
     if (!claim.claimed) {
-        return "retry" in claim && claim.retry
-            ? { ok: false, retry: true }
-            : { ok: true, duplicate: true };
+        if (!("messageRowId" in claim)) return { ok: false, retry: true };
+        await mirrorStoredParentMessageToForum(
+            conversation,
+            parentName(message.from),
+            claim.messageRowId,
+        );
+        return { ok: true, duplicate: true };
     }
 
     const preview = caption ? `[Photo] ${caption}` : "[Photo]";
@@ -1508,6 +1555,11 @@ async function handleTelegramSupportImage(
     }
 
     const name = parentName(message.from);
+    await mirrorStoredParentMessageToForum(
+        conversation,
+        name,
+        claim.messageRowId,
+    );
     const initialInterruption = await imageProcessingInterruption(
         conversation,
         claim,
@@ -2631,19 +2683,31 @@ export async function POST(request: Request) {
                 const placeholder = imageSentAsFile
                     ? "[Image sent as a file — ask the parent to resend it using Telegram's Photo option]"
                     : "[Non-text Telegram message]";
-                const inserted = await saveInbound(
+                const savedInbound = await saveInbound(
                     conversation.id,
                     String(message.message_id),
                     placeholder,
                     [],
                     parentReplyToMessageId,
                 );
-                if (!inserted) return NextResponse.json({ ok: true, duplicate: true });
+                if (!savedInbound.inserted) {
+                    await mirrorStoredParentMessageToForum(
+                        conversation,
+                        parentName(message.from),
+                        savedInbound.messageRowId,
+                    );
+                    return NextResponse.json({ ok: true, duplicate: true });
+                }
                 await supportAdmin.from("support_conversations").update({
                     last_message_at: new Date().toISOString(),
                     last_message_preview: placeholder,
                     unread_count: Number(conversation.unread_count || 0) + 1,
                 }).eq("id", conversation.id);
+                await mirrorStoredParentMessageToForum(
+                    conversation,
+                    parentName(message.from),
+                    savedInbound.messageRowId,
+                );
                 if (conversation.status === "human_active") {
                     try {
                         await clearCoachCloseControls(conversation.id, chatId);
@@ -2689,14 +2753,19 @@ export async function POST(request: Request) {
                 || parentRaisesComplaint(commandArguments)
             )
         ) {
-            const inboundMessageId = await saveInbound(
+            const savedInbound = await saveInbound(
                 conversation.id,
                 String(message.message_id),
                 text,
                 [],
                 parentReplyToMessageId,
             );
-            if (!inboundMessageId) {
+            if (!savedInbound.inserted) {
+                await mirrorStoredParentMessageToForum(
+                    conversation,
+                    parentName(message.from),
+                    savedInbound.messageRowId,
+                );
                 return NextResponse.json({ ok: true, duplicate: true });
             }
             await supportAdmin.from("support_conversations").update({
@@ -2704,6 +2773,11 @@ export async function POST(request: Request) {
                 last_message_preview: text.slice(0, 180),
                 unread_count: Number(conversation.unread_count || 0) + 1,
             }).eq("id", conversation.id);
+            await mirrorStoredParentMessageToForum(
+                conversation,
+                parentName(message.from),
+                savedInbound.messageRowId,
+            );
 
             if (parentRaisesInjuryOrSafetyConcern(commandArguments)) {
                 const escalated = await escalate(
@@ -2843,14 +2917,22 @@ export async function POST(request: Request) {
             return NextResponse.json({ ok: true });
         }
 
-        const inboundMessageId = await saveInbound(
+        const savedInbound = await saveInbound(
             conversation.id,
             String(message.message_id),
             text,
             [],
             parentReplyToMessageId,
         );
-        if (!inboundMessageId) return NextResponse.json({ ok: true, duplicate: true });
+        if (!savedInbound.inserted) {
+            await mirrorStoredParentMessageToForum(
+                conversation,
+                parentName(message.from),
+                savedInbound.messageRowId,
+            );
+            return NextResponse.json({ ok: true, duplicate: true });
+        }
+        const inboundMessageId = savedInbound.messageRowId;
         await supportAdmin.from("support_conversations").update({
             last_message_at: new Date().toISOString(),
             last_message_preview: text.slice(0, 180),
@@ -2858,6 +2940,11 @@ export async function POST(request: Request) {
         }).eq("id", conversation.id);
 
         const name = parentName(message.from);
+        await mirrorStoredParentMessageToForum(
+            conversation,
+            name,
+            inboundMessageId,
+        );
         if (["escalated", "human_active"].includes(conversation.status)) {
             if (conversation.status === "human_active") {
                 try {

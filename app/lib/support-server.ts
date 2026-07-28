@@ -12,10 +12,7 @@ import {
 } from "./telegram-support-admin-replies";
 import { formatSupportConversationLinks } from "./support-links";
 import { notifySupportForum } from "./support-forum-server";
-import {
-    buildSupportForumPhotoAlertCaption,
-    extractSupportImageFileId,
-} from "./support-image-server";
+import { extractSupportImageFileId } from "./support-image-server";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -156,10 +153,9 @@ export async function notifySupportAdmins(
         process.env.NEXT_PUBLIC_SITE_URL,
     );
     const notification = `Parent chat needs attention\n\nParent: ${parentName}\nReason: ${reason}\n\nLatest message:\n${message.slice(0, 700)}\n\nReply directly to this alert to answer the parent.${links}`;
-    const forumNotification = `Parent chat needs attention\n\nParent: ${parentName}\nReason: ${reason}\n\nLatest message:\n${message.slice(0, 700)}\n\nType a normal message in this topic to answer this parent. They receive only your message exactly as written.${links}`;
     let expectedParentMessageId: string | null = null;
     let photoFileId: string | null = null;
-    let photoForumNotification: string | null = null;
+    let forumParentMessage = message.slice(0, 3_900).trim();
     try {
         const latestParentMessage = await loadLatestSupportParentMessageContext(
             supportAdmin,
@@ -170,12 +166,11 @@ export async function notifySupportAdmins(
             latestParentMessage?.sourceRefs,
         );
         if (photoFileId && latestParentMessage) {
-            photoForumNotification = buildSupportForumPhotoAlertCaption({
-                parentName,
-                reason,
-                storedMessageContent: latestParentMessage.content,
-                links,
-            });
+            forumParentMessage = latestParentMessage.content.startsWith("[Photo]\n")
+                ? latestParentMessage.content.slice("[Photo]\n".length).trim()
+                : "";
+        } else if (latestParentMessage) {
+            forumParentMessage = latestParentMessage.content.slice(0, 3_900).trim();
         }
     } catch {
         // Alert delivery must remain available while the reply mapping is an
@@ -190,7 +185,7 @@ export async function notifySupportAdmins(
                 conversationId,
                 parentName,
                 expectedParentMessageId,
-                alertText: photoForumNotification || forumNotification,
+                alertText: forumParentMessage,
                 photoFileId,
                 status: "escalated",
                 latestSenderType: "parent",
