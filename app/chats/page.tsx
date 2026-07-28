@@ -13,6 +13,10 @@ import type {
     SupportStatus,
 } from "../../types/support";
 import { chatReturnPath } from "../lib/auth-return";
+import {
+    chatScrollEdges,
+    countNewlyAppendedMessageIds,
+} from "../lib/support-chat-scroll";
 import { canCloseAfterCoachReply } from "../lib/support-conversation-policy";
 import { telegramReceiptPresentation } from "../lib/support-telegram-receipts";
 import { normaliseCoachReferences } from "../lib/telegram-support-flow";
@@ -362,7 +366,12 @@ function SupportImagePreview({
 
 export default function ChatsPage() {
     const router = useRouter();
-    const messageEndRef = useRef<HTMLDivElement>(null);
+    const messagesViewportRef = useRef<HTMLDivElement>(null);
+    const messageSnapshotRef = useRef<{
+        conversationId: string;
+        ids: number[];
+    }>({ conversationId: "", ids: [] });
+    const shouldFollowMessagesRef = useRef(true);
     const selectedIdRef = useRef("");
     const conversationRequestRef = useRef(0);
     const foregroundConversationIdRef = useRef("");
@@ -400,6 +409,9 @@ export default function ChatsPage() {
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
     const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
+    const [newMessagesBelow, setNewMessagesBelow] = useState(0);
+    const [canScrollToTop, setCanScrollToTop] = useState(false);
+    const [canScrollToBottom, setCanScrollToBottom] = useState(false);
     busyRef.current = busy;
 
     const [knowledgeForm, setKnowledgeForm] = useState({
@@ -478,6 +490,31 @@ export default function ChatsPage() {
         }
     }, []);
 
+    const updateMessageScrollState = useCallback(() => {
+        const viewport = messagesViewportRef.current;
+        if (!viewport) return;
+        const { atTop, atBottom } = chatScrollEdges(viewport);
+        shouldFollowMessagesRef.current = atBottom;
+        setCanScrollToTop(!atTop);
+        setCanScrollToBottom(!atBottom);
+        if (atBottom) setNewMessagesBelow(0);
+    }, []);
+
+    const scrollMessagesTo = useCallback((
+        edge: "top" | "bottom",
+        behavior: ScrollBehavior = "smooth",
+    ) => {
+        const viewport = messagesViewportRef.current;
+        if (!viewport) return;
+        const movingToBottom = edge === "bottom";
+        shouldFollowMessagesRef.current = movingToBottom;
+        if (movingToBottom) setNewMessagesBelow(0);
+        viewport.scrollTo({
+            top: movingToBottom ? viewport.scrollHeight : 0,
+            behavior,
+        });
+    }, []);
+
     const selectConversation = useCallback((conversationId: string) => {
         if (!conversationId) return;
         if (conversationId === selectedIdRef.current) return;
@@ -495,6 +532,11 @@ export default function ChatsPage() {
         setDeleteTarget(null);
         setDeleteConversationError("");
         setError("");
+        messageSnapshotRef.current = { conversationId, ids: [] };
+        shouldFollowMessagesRef.current = true;
+        setNewMessagesBelow(0);
+        setCanScrollToTop(false);
+        setCanScrollToBottom(false);
     }, []);
 
     const loadSummary = useCallback(async (showLoader = false) => {
@@ -694,8 +736,34 @@ export default function ChatsPage() {
     }, [authorized, loadConversation, loadSummary, tab]);
 
     useEffect(() => {
-        messageEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    }, [messages]);
+        const conversationId = selectedIdRef.current;
+        const currentIds = messages.map((message) => message.id);
+        const previousSnapshot = messageSnapshotRef.current;
+        const sameConversation =
+            previousSnapshot.conversationId === conversationId;
+        const addedMessageCount = sameConversation
+            ? countNewlyAppendedMessageIds(previousSnapshot.ids, currentIds)
+            : 0;
+        messageSnapshotRef.current = { conversationId, ids: currentIds };
+
+        const viewport = messagesViewportRef.current;
+        if (!viewport) return;
+        const shouldFollow =
+            !sameConversation || shouldFollowMessagesRef.current;
+        const frame = window.requestAnimationFrame(() => {
+            if (shouldFollow) {
+                viewport.scrollTo({
+                    top: viewport.scrollHeight,
+                    behavior: "auto",
+                });
+                setNewMessagesBelow(0);
+            } else if (addedMessageCount > 0) {
+                setNewMessagesBelow((count) => count + addedMessageCount);
+            }
+            updateMessageScrollState();
+        });
+        return () => window.cancelAnimationFrame(frame);
+    }, [messages, selectedId, updateMessageScrollState]);
 
     const runAction = async (payload: Record<string, unknown>, message?: string) => {
         setBusy(true);
@@ -1054,49 +1122,90 @@ export default function ChatsPage() {
                                                 Delete conversation
                                             </button>
                                         </div>
-                                    <div className="chats-messages" aria-live="polite">
-                                        {messages.map((message, index) => {
-                                            const sender = senderDetails[message.sender_type];
-                                            const priorResponder = previousResponder(messages, index);
-                                            const startsHumanTakeover = message.sender_type === "superuser" && priorResponder !== "superuser";
-                                            const resumesAi = message.sender_type === "ai" && priorResponder === "superuser";
+                                    <div className="chats-message-view">
+                                        <nav className="chats-message-navigation" aria-label="Conversation navigation">
+                                            <span>Conversation messages</span>
+                                            <div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => scrollMessagesTo("top")}
+                                                    disabled={!canScrollToTop}
+                                                >
+                                                    <span aria-hidden="true">↑</span>
+                                                    Bring to top
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => scrollMessagesTo("bottom")}
+                                                    disabled={!canScrollToBottom}
+                                                >
+                                                    <span aria-hidden="true">↓</span>
+                                                    Bring to bottom
+                                                </button>
+                                            </div>
+                                        </nav>
+                                        <div
+                                            ref={messagesViewportRef}
+                                            className="chats-messages"
+                                            aria-label="Conversation messages"
+                                            aria-live="polite"
+                                            tabIndex={0}
+                                            onScroll={updateMessageScrollState}
+                                        >
+                                            {messages.map((message, index) => {
+                                                const sender = senderDetails[message.sender_type];
+                                                const priorResponder = previousResponder(messages, index);
+                                                const startsHumanTakeover = message.sender_type === "superuser" && priorResponder !== "superuser";
+                                                const resumesAi = message.sender_type === "ai" && priorResponder === "superuser";
 
-                                            return (
-                                                <Fragment key={message.id}>
-                                                    {(startsHumanTakeover || resumesAi) && (
-                                                        <div className={`chats-handoff chats-handoff--${startsHumanTakeover ? "human" : "ai"}`}>
-                                                            <span aria-hidden="true">{startsHumanTakeover ? "P" : "AI"}</span>
-                                                            <strong>{startsHumanTakeover ? "Coach Patrick joined the conversation" : "AI assistant resumed the conversation"}</strong>
-                                                        </div>
-                                                    )}
-                                                    <article
-                                                        id={`support-message-${message.id}`}
-                                                        className={`chats-bubble chats-bubble--${message.sender_type}${highlightedMessageId === message.id ? " is-quote-target" : ""}`}
-                                                        tabIndex={-1}
-                                                    >
-                                                        <div className="chats-bubble-meta">
-                                                            <span className="chats-sender">
-                                                                <strong>{message.sender_type === "parent" ? contactName(selectedConversation) : sender.label}</strong>
-                                                                <span className={`chats-sender-badge chats-sender-badge--${message.sender_type}`}>{sender.badge}</span>
-                                                            </span>
-                                                            <time>{formatTime(message.created_at)}</time>
-                                                        </div>
-                                                        {message.reply_preview && (
-                                                            <MessageReplyPreview
-                                                                preview={message.reply_preview}
-                                                                parentLabel={contactName(selectedConversation)}
-                                                                onOpenOriginal={openQuotedMessage}
-                                                            />
+                                                return (
+                                                    <Fragment key={message.id}>
+                                                        {(startsHumanTakeover || resumesAi) && (
+                                                            <div className={`chats-handoff chats-handoff--${startsHumanTakeover ? "human" : "ai"}`}>
+                                                                <span aria-hidden="true">{startsHumanTakeover ? "P" : "AI"}</span>
+                                                                <strong>{startsHumanTakeover ? "Coach Patrick joined the conversation" : "AI assistant resumed the conversation"}</strong>
+                                                            </div>
                                                         )}
-                                                        <p>{displayMessageContent(message)}</p>
-                                                        {message.has_image && <SupportImagePreview messageId={message.id} getToken={token} />}
-                                                        {message.source_refs?.length > 0 && <small>Sources: {message.source_refs.join(", ")}</small>}
-                                                        <TelegramReceipt message={message} />
-                                                    </article>
-                                                </Fragment>
-                                            );
-                                        })}
-                                        <div ref={messageEndRef} />
+                                                        <article
+                                                            id={`support-message-${message.id}`}
+                                                            className={`chats-bubble chats-bubble--${message.sender_type}${highlightedMessageId === message.id ? " is-quote-target" : ""}`}
+                                                            tabIndex={-1}
+                                                        >
+                                                            <div className="chats-bubble-meta">
+                                                                <span className="chats-sender">
+                                                                    <strong>{message.sender_type === "parent" ? contactName(selectedConversation) : sender.label}</strong>
+                                                                    <span className={`chats-sender-badge chats-sender-badge--${message.sender_type}`}>{sender.badge}</span>
+                                                                </span>
+                                                                <time>{formatTime(message.created_at)}</time>
+                                                            </div>
+                                                            {message.reply_preview && (
+                                                                <MessageReplyPreview
+                                                                    preview={message.reply_preview}
+                                                                    parentLabel={contactName(selectedConversation)}
+                                                                    onOpenOriginal={openQuotedMessage}
+                                                                />
+                                                            )}
+                                                            <p>{displayMessageContent(message)}</p>
+                                                            {message.has_image && <SupportImagePreview messageId={message.id} getToken={token} />}
+                                                            {message.source_refs?.length > 0 && <small>Sources: {message.source_refs.join(", ")}</small>}
+                                                            <TelegramReceipt message={message} />
+                                                        </article>
+                                                    </Fragment>
+                                                );
+                                            })}
+                                        </div>
+                                        {newMessagesBelow > 0 && (
+                                            <button
+                                                type="button"
+                                                className="chats-new-messages"
+                                                onClick={() => scrollMessagesTo("bottom")}
+                                                aria-live="polite"
+                                            >
+                                                <span className="chats-new-messages__count">{newMessagesBelow}</span>
+                                                <span>{newMessagesBelow === 1 ? "new message below" : "new messages below"}</span>
+                                                <span aria-hidden="true">↓</span>
+                                            </button>
+                                        )}
                                     </div>
                                     {["resolved", "closed_parent"].includes(selectedConversation.status) ? (
                                         <div className={`chats-reply-closed chats-reply-closed--${selectedConversation.status}`} role="status" aria-live="polite">
