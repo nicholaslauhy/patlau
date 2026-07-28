@@ -9,6 +9,11 @@ type SupportDatabaseClient = {
 
 type SupportMessageSender = "parent" | "ai" | "superuser" | "system";
 type SupportMessageDirection = "inbound" | "outbound";
+type SupportTelegramReceiptStatus =
+    | "sending"
+    | "sent"
+    | "parent_replied"
+    | "failed";
 
 export interface PublicSupportReplyPreview {
     message_id: number;
@@ -27,6 +32,8 @@ export interface PublicSupportMessageProjection {
     source_refs: string[];
     has_image: boolean;
     telegram_delivery_status: string | null;
+    telegram_receipt_status: SupportTelegramReceiptStatus | null;
+    telegram_receipt_at: string | null;
     created_at: string;
     reply_preview: PublicSupportReplyPreview | null;
 }
@@ -61,6 +68,92 @@ function positiveSafeInteger(value: unknown) {
     if (!normalized) return null;
     const parsed = Number(normalized);
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function positiveBigInt(value: unknown) {
+    const normalized = positiveIntegerString(value);
+    if (!normalized) return null;
+    try {
+        return BigInt(normalized);
+    } catch {
+        return null;
+    }
+}
+
+function firstParentActivityAfter(
+    rows: Array<Record<string, any>>,
+    message: Record<string, any>,
+) {
+    const conversationId = String(message.conversation_id || "");
+    const storedMessageId = positiveIntegerString(message.id);
+    const telegramMessageId = positiveBigInt(message.telegram_message_id);
+    if (!conversationId || (!storedMessageId && telegramMessageId === null)) {
+        return null;
+    }
+
+    for (const candidate of rows) {
+        if (
+            String(candidate.conversation_id || "") !== conversationId
+            || candidate.direction !== "inbound"
+            || candidate.sender_type !== "parent"
+        ) {
+            continue;
+        }
+
+        const directlyReplied = Boolean(
+            storedMessageId
+            && positiveIntegerString(candidate.reply_to_message_id)
+                === storedMessageId,
+        );
+        const parentTelegramMessageId =
+            positiveBigInt(candidate.telegram_message_id);
+        const interactedLater = Boolean(
+            telegramMessageId !== null
+            && parentTelegramMessageId !== null
+            && parentTelegramMessageId > telegramMessageId,
+        );
+        if (directlyReplied || interactedLater) {
+            return String(candidate.created_at || "") || null;
+        }
+    }
+    return null;
+}
+
+function publicTelegramReceipt(
+    rows: Array<Record<string, any>>,
+    message: Record<string, any>,
+): {
+    status: SupportTelegramReceiptStatus | null;
+    at: string | null;
+} {
+    if (message.direction !== "outbound") {
+        return { status: null, at: null };
+    }
+
+    const deliveryStatus = String(
+        message.telegram_delivery_status || "",
+    ).trim().toLowerCase();
+    if (["pending", "processing", "sending"].includes(deliveryStatus)) {
+        return { status: "sending", at: null };
+    }
+    if (["failed", "blocked", "not_sent"].includes(deliveryStatus)) {
+        return { status: "failed", at: null };
+    }
+    if (
+        !["sent", "sent_unverified_context", "delivered"].includes(
+            deliveryStatus,
+        )
+    ) {
+        return { status: null, at: null };
+    }
+
+    // Telegram's Bot API has no passive read-receipt update. A later parent
+    // message is the strongest automatic acknowledgement available, so expose
+    // it explicitly as a reply rather than incorrectly claiming "Read".
+    const parentActivityAt = firstParentActivityAfter(rows, message);
+    return parentActivityAt
+        ? { status: "parent_replied", at: parentActivityAt }
+        : { status: "sent", at: null };
 }
 
 function missingReplyColumnError(error: any) {
@@ -231,6 +324,7 @@ export function buildPublicSupportMessages(
         const replyPreview = target
             ? publicReplyPreview(message, target)
             : null;
+        const telegramReceipt = publicTelegramReceipt(rows, message);
 
         return {
             id: Number(message.id),
@@ -247,6 +341,8 @@ export function buildPublicSupportMessages(
                 typeof message.telegram_delivery_status === "string"
                     ? message.telegram_delivery_status
                     : null,
+            telegram_receipt_status: telegramReceipt.status,
+            telegram_receipt_at: telegramReceipt.at,
             created_at: String(message.created_at || ""),
             reply_preview: replyPreview,
         };

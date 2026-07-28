@@ -366,3 +366,84 @@ test("public projections whitelist fields and map only same-conversation replies
     assert.equal(buildPublicSupportMessage({ id: 999 }, rows), null);
     assert.deepEqual(buildPublicSupportMessages(null), []);
 });
+
+test("public Telegram receipts distinguish delivery from later parent activity", () => {
+    const rows = [
+        message({
+            id: 20,
+            direction: "outbound",
+            sender_type: "superuser",
+            telegram_message_id: "600",
+            telegram_delivery_status: "sent",
+            created_at: "2026-07-28T02:00:00.000Z",
+        }),
+        message({
+            id: 21,
+            telegram_message_id: "601",
+            created_at: "2026-07-28T02:01:00.000Z",
+        }),
+        message({
+            id: 22,
+            direction: "outbound",
+            sender_type: "ai",
+            telegram_message_id: "602",
+            telegram_delivery_status: "sent",
+            created_at: "2026-07-28T02:02:00.000Z",
+        }),
+        message({
+            id: 23,
+            direction: "outbound",
+            sender_type: "superuser",
+            telegram_message_id: "603",
+            telegram_delivery_status: "pending",
+            created_at: "2026-07-28T02:03:00.000Z",
+        }),
+        message({
+            id: 24,
+            direction: "outbound",
+            sender_type: "superuser",
+            telegram_message_id: "604",
+            telegram_delivery_status: "blocked",
+            created_at: "2026-07-28T02:04:00.000Z",
+        }),
+        message({
+            id: 25,
+            conversation_id: "conversation-b",
+            telegram_message_id: "999999",
+            created_at: "2026-07-28T02:05:00.000Z",
+        }),
+        message({
+            id: 26,
+            direction: "outbound",
+            sender_type: "superuser",
+            telegram_message_id: null,
+            telegram_delivery_status: "sent",
+            created_at: "2026-07-28T02:06:00.000Z",
+        }),
+        message({
+            id: 27,
+            telegram_message_id: null,
+            reply_to_message_id: 26,
+            created_at: "2026-07-28T02:07:00.000Z",
+        }),
+    ];
+
+    const projected = buildPublicSupportMessages(rows);
+    assert.deepEqual(
+        projected.map((item) => [
+            item.id,
+            item.telegram_receipt_status,
+            item.telegram_receipt_at,
+        ]),
+        [
+            [20, "parent_replied", "2026-07-28T02:01:00.000Z"],
+            [21, null, null],
+            [22, "sent", null],
+            [23, "sending", null],
+            [24, "failed", null],
+            [25, null, null],
+            [26, "parent_replied", "2026-07-28T02:07:00.000Z"],
+            [27, null, null],
+        ],
+    );
+});

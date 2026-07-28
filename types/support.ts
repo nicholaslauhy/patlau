@@ -6,6 +6,12 @@ export type SupportStatus =
     | "resolved"
     | "closed_parent";
 
+export type SupportTelegramReceiptStatus =
+    | "sending"
+    | "sent"
+    | "parent_replied"
+    | "failed";
+
 export interface SupportContact {
     id: string;
     telegram_chat_id: string;
@@ -49,6 +55,8 @@ export interface SupportMessage {
         has_image: boolean;
     } | null;
     telegram_delivery_status: string | null;
+    telegram_receipt_status: SupportTelegramReceiptStatus | null;
+    telegram_receipt_at: string | null;
     created_at: string;
 }
 

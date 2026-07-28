@@ -131,6 +131,59 @@ function MessageReplyPreview({
     );
 }
 
+function TelegramReceipt({ message }: { message: SupportMessage }) {
+    const status = message.telegram_receipt_status;
+    if (!status) return null;
+
+    const deliveryStatus = String(
+        message.telegram_delivery_status || "",
+    ).toLowerCase();
+    const details = status === "parent_replied"
+        ? {
+            icon: "\u2713\u2713",
+            label: "Parent replied afterwards",
+            title: message.telegram_receipt_at
+                ? `The parent sent a later message at ${formatTime(message.telegram_receipt_at)}. Telegram does not expose passive read receipts to bots.`
+                : "The parent sent a later message. Telegram does not expose passive read receipts to bots.",
+        }
+        : status === "sent"
+            ? {
+                icon: "\u2713",
+                label: "Sent to Telegram",
+                title: "Telegram accepted the message. Telegram does not expose whether the parent has passively read it.",
+            }
+            : status === "sending"
+                ? {
+                    icon: "\u2026",
+                    label: "Sending to Telegram",
+                    title: "The message is waiting to be sent to Telegram.",
+                }
+                : {
+                    icon: "!",
+                    label: deliveryStatus === "blocked"
+                        ? "Parent blocked the bot"
+                        : deliveryStatus === "not_sent"
+                            ? "Not sent"
+                            : "Delivery failed",
+                    title: deliveryStatus === "blocked"
+                        ? "Telegram could not deliver this because the parent blocked the bot."
+                        : "Telegram did not confirm that this message was sent.",
+                };
+
+    return (
+        <div
+            className={`chats-telegram-receipt chats-telegram-receipt--${status}`}
+            title={details.title}
+            aria-label={details.title}
+        >
+            <span className="chats-telegram-receipt__icon" aria-hidden="true">
+                {details.icon}
+            </span>
+            <span>{details.label}</span>
+        </div>
+    );
+}
+
 function highlightSearchMatch(value: string, query: string): ReactNode {
     const term = query.trim();
     if (!term) return value;
@@ -1061,6 +1114,7 @@ export default function ChatsPage() {
                                                         <p>{displayMessageContent(message)}</p>
                                                         {message.has_image && <SupportImagePreview messageId={message.id} getToken={token} />}
                                                         {message.source_refs?.length > 0 && <small>Sources: {message.source_refs.join(", ")}</small>}
+                                                        <TelegramReceipt message={message} />
                                                     </article>
                                                 </Fragment>
                                             );
