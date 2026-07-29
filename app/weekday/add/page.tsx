@@ -7,6 +7,7 @@ import { createBrowserClient } from '@supabase/ssr';
 import AppHeader from './../../components/AppHeader';
 import './../../styles.css';
 import './../../dashboard/dashboard.css';
+import './weekday-add.css';
 
 const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -22,6 +23,10 @@ interface WeekdaySchedule {
 }
 
 const WEEKDAY_OPTIONS: WeekdayName[] = ['Monday', 'Wednesday', 'Thursday'];
+const SESSION_DURATION_OPTIONS = Array.from(
+    { length: 16 },
+    (_, index) => (index + 1) / 4,
+);
 const DEFAULT_HOURLY_RATE = 80;
 
 const getUserRole = (user: any): UserRole => {
@@ -241,8 +246,11 @@ export default function AddWeekdayStudentPage() {
                                 );
 
                                 return (
-                                    <div key={`${schedule.day}-${index}`} className="session-row">
-                                        <label className="session-field">
+                                    <div
+                                        key={`${schedule.day}-${index}`}
+                                        className="session-row weekday-session-row"
+                                    >
+                                        <label className="session-field weekday-session-field--day">
                                             <span className="session-field__label">Training day</span>
                                             <select
                                                 className="filter-input"
@@ -255,26 +263,28 @@ export default function AddWeekdayStudentPage() {
                                             </select>
                                         </label>
 
-                                        <label className="session-field">
+                                        <label className="session-field weekday-session-field--duration">
                                             <span className="session-field__label">Session length</span>
-                                            <div className="input-with-suffix">
-                                                <input
-                                                    className="filter-input"
-                                                    type="number"
-                                                    min="0.25"
-                                                    step="0.25"
-                                                    value={schedule.duration_hours}
-                                                    onChange={(event) =>
-                                                        updateSchedule(index, { duration_hours: Number(event.target.value) })
-                                                    }
-                                                />
-                                                <span className="input-suffix">hours</span>
-                                            </div>
+                                            <select
+                                                className="filter-input weekday-duration-select"
+                                                value={schedule.duration_hours}
+                                                onChange={(event) =>
+                                                    updateSchedule(index, {
+                                                        duration_hours: Number(event.target.value),
+                                                    })
+                                                }
+                                            >
+                                                {SESSION_DURATION_OPTIONS.map((duration) => (
+                                                    <option key={duration} value={duration}>
+                                                        {duration} {duration === 1 ? 'hour' : 'hours'}
+                                                    </option>
+                                                ))}
+                                            </select>
                                         </label>
 
                                         <button
                                             type="button"
-                                            className="delete-btn"
+                                            className="delete-btn weekday-session-remove"
                                             onClick={() => removeSchedule(index)}
                                             disabled={schedules.length === 1}
                                         >

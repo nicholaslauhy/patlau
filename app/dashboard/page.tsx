@@ -408,6 +408,9 @@ export default function DashboardPage() {
   };
 
   const handleAlternateDateAttendance = async (attendanceDate: string) => {
+    if (userRole !== "superuser") {
+      throw new Error("Only superusers can record attendance for another date.");
+    }
     if (!alternateDateStudent) throw new Error("Student not found.");
 
     await recordWeekendAttendance(alternateDateStudent.student_id, attendanceDate);
@@ -965,36 +968,10 @@ export default function DashboardPage() {
                                       Makeup
                                     </button>
 
-                                  </div>
-
-                                  <div
-                                      style={{
-                                        display: "flex",
-                                        gap: 6,
-                                        alignItems: "center",
-                                        justifyContent: "flex-start",
-                                        width: "100%",
-                                      }}
-                                  >
-                                    <button
-                                        type="button"
-                                        className="alternate-date-btn"
-                                        style={{ flex: "1.35 1 0", padding: "6px 10px" }}
-                                        onClick={() => setAlternateDateStudent(student)}
-                                        disabled={finished}
-                                        title={
-                                          finished
-                                              ? "Subscription lessons completed"
-                                              : "Mark attendance for an earlier date"
-                                        }
-                                    >
-                                      Another date
-                                    </button>
-
                                     <button
                                         type="button"
                                         className="undo-btn"
-                                        style={{ flex: "1 1 0", padding: "6px 10px" }}
+                                        style={{ flex: "0 0 auto", padding: "6px 10px" }}
                                         onClick={() => handleDeleteLastAttendance(student.student_id)}
                                         disabled={(student.attended ?? 0) + (student.missed ?? 0) === 0}
                                         title={
@@ -1005,31 +982,54 @@ export default function DashboardPage() {
                                     >
                                       Undo
                                     </button>
-
-                                    {isSuperuser && (
-                                      <>
-                                        <button
-                                            type="button"
-                                            className="reset-btn"
-                                            style={{ flex: "1 1 0", padding: "6px 10px" }}
-                                            onClick={() => handleResetCourse(student.student_id)}
-                                        >
-                                          Reset
-                                        </button>
-
-                                        <button
-                                            type="button"
-                                            className="delete-btn"
-                                            style={{ flex: "1 1 0", padding: "6px 10px" }}
-                                            onClick={() =>
-                                                deleteStudent(student.student_id, student.student_name)
-                                            }
-                                        >
-                                          Delete
-                                        </button>
-                                      </>
-                                    )}
                                   </div>
+
+                                  {isSuperuser && (
+                                    <div
+                                        style={{
+                                          display: "flex",
+                                          gap: 6,
+                                          alignItems: "center",
+                                          justifyContent: "flex-start",
+                                          width: "100%",
+                                        }}
+                                    >
+                                      <button
+                                          type="button"
+                                          className="alternate-date-btn"
+                                          style={{ flex: "1.35 1 0", padding: "6px 10px" }}
+                                          onClick={() => setAlternateDateStudent(student)}
+                                          disabled={finished}
+                                          title={
+                                            finished
+                                                ? "Subscription lessons completed"
+                                                : "Mark attendance for an earlier date"
+                                          }
+                                      >
+                                        Another date
+                                      </button>
+
+                                      <button
+                                          type="button"
+                                          className="reset-btn"
+                                          style={{ flex: "1 1 0", padding: "6px 10px" }}
+                                          onClick={() => handleResetCourse(student.student_id)}
+                                      >
+                                        Reset
+                                      </button>
+
+                                      <button
+                                          type="button"
+                                          className="delete-btn"
+                                          style={{ flex: "1 1 0", padding: "6px 10px" }}
+                                          onClick={() =>
+                                              deleteStudent(student.student_id, student.student_name)
+                                          }
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </td>
                               <td className="attendance-history">
@@ -1054,11 +1054,13 @@ export default function DashboardPage() {
             )}
           </div>
 
-          <AlternateAttendanceDateModal
-              student={alternateDateStudent}
-              onClose={() => setAlternateDateStudent(null)}
-              onConfirm={handleAlternateDateAttendance}
-          />
+          {isSuperuser && (
+              <AlternateAttendanceDateModal
+                  student={alternateDateStudent}
+                  onClose={() => setAlternateDateStudent(null)}
+                  onConfirm={handleAlternateDateAttendance}
+              />
+          )}
 
           {userRole === "superuser" && (
               <CrossProgrammeMakeupModal

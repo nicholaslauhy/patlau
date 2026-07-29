@@ -1,0 +1,269 @@
+.operations-page .operations-customise-button {
+    min-width: 92px;
+    padding: 0.62rem 0.9rem;
+    border: 1px solid #99d5cc;
+    border-radius: 10px;
+    background: #ecfdf8;
+    color: #0f766e;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.operations-page .operations-customise-button:hover {
+    border-color: #48a99d;
+    background: #ddf8f1;
+}
+
+.operations-page .operations-workflow-editor {
+    display: grid;
+    gap: 1rem;
+}
+
+.operations-page .operations-workflow-editor__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.8rem 0.9rem;
+    border: 1px solid #dce7ef;
+    border-radius: 12px;
+    background: #f7fafc;
+}
+
+.operations-page .operations-workflow-editor__header > div {
+    display: grid;
+    gap: 0.2rem;
+}
+
+.operations-page .operations-workflow-editor__header strong,
+.operations-page .operations-available-workflows > strong {
+    color: #24384c;
+    font-size: 0.84rem;
+}
+
+.operations-page .operations-workflow-editor__header span:not(.operations-workflow-count) {
+    color: #64748b;
+    font-size: 0.74rem;
+    line-height: 1.4;
+}
+
+.operations-page .operations-workflow-count {
+    flex: 0 0 auto;
+    padding: 0.36rem 0.62rem;
+    border-radius: 999px;
+    background: #dff3fb;
+    color: #1c628a;
+    font-size: 0.75rem;
+    font-weight: 850;
+}
+
+.operations-page .operations-selected-workflows {
+    min-height: 94px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.7rem;
+    padding: 0.8rem;
+    border: 1px dashed #a9c5d7;
+    border-radius: 14px;
+    background: #f3f8fb;
+}
+
+.operations-page .operations-workflow-choice {
+    --metric-color: #1677c8;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.78rem;
+    border: 1px solid #d8e4ec;
+    border-left: 4px solid var(--metric-color);
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 42, 68, 0.06);
+    cursor: grab;
+}
+
+.operations-page .operations-workflow-choice:hover {
+    border-color: #b8ccd9;
+    border-left-color: var(--metric-color);
+    box-shadow: 0 4px 12px rgba(15, 42, 68, 0.08);
+}
+
+.operations-page .operations-workflow-choice.is-dragging {
+    opacity: 0.45;
+    transform: scale(0.985);
+}
+
+.operations-page .operations-workflow-choice__handle {
+    color: var(--metric-color);
+    font-size: 1rem;
+    font-weight: 900;
+    letter-spacing: -0.2em;
+}
+
+.operations-page .operations-workflow-choice__copy {
+    min-width: 0;
+}
+
+.operations-page .operations-workflow-choice__copy strong,
+.operations-page .operations-workflow-choice__copy small {
+    display: block;
+}
+
+.operations-page .operations-workflow-choice__copy strong {
+    overflow: hidden;
+    color: #1f3347;
+    font-size: 0.83rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.operations-page .operations-workflow-choice__copy small {
+    margin-top: 0.18rem;
+    overflow: hidden;
+    color: #6a7d8f;
+    font-size: 0.69rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.operations-page .operations-workflow-choice__controls {
+    display: flex;
+    gap: 0.28rem;
+}
+
+.operations-page .operations-workflow-choice__controls button,
+.operations-page .operations-available-workflow button {
+    min-width: 29px;
+    height: 29px;
+    padding: 0;
+    border: 1px solid #d4e0e8;
+    border-radius: 8px;
+    background: #f6f9fb;
+    color: #40566b;
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 850;
+    cursor: pointer;
+}
+
+.operations-page .operations-workflow-choice__controls button:hover:not(:disabled),
+.operations-page .operations-available-workflow button:hover:not(:disabled) {
+    border-color: #9db8ca;
+    background: #eaf4fa;
+}
+
+.operations-page .operations-workflow-choice__controls button:disabled,
+.operations-page .operations-available-workflow button:disabled {
+    opacity: 0.34;
+    cursor: not-allowed;
+}
+
+.operations-page .operations-workflow-choice__controls .operations-workflow-choice__remove {
+    border-color: #fecdd3;
+    background: #fff1f2;
+    color: #be123c;
+}
+
+.operations-page .operations-available-workflows {
+    display: grid;
+    gap: 0.65rem;
+    padding: 0.9rem;
+    border: 1px solid #e1e9ef;
+    border-radius: 14px;
+    background: #fbfcfd;
+}
+
+.operations-page .operations-available-workflows > div {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.55rem;
+}
+
+.operations-page .operations-available-workflow {
+    --metric-color: #1677c8;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.55rem;
+    min-height: 44px;
+    padding: 0.42rem 0.44rem 0.42rem 0.7rem;
+    border: 1px solid #dce6ed;
+    border-left: 3px solid var(--metric-color);
+    border-radius: 10px;
+    background: #fff;
+    color: #34495e;
+    font-size: 0.73rem;
+    font-weight: 750;
+    cursor: grab;
+}
+
+.operations-page .operations-available-workflow > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.operations-page .operations-available-workflow button {
+    min-width: 44px;
+    height: 27px;
+    padding: 0 0.55rem;
+    color: var(--metric-color);
+}
+
+.operations-page .operations-available-workflows__empty {
+    color: #64748b;
+    font-size: 0.75rem;
+}
+
+.operations-page .operations-workflow-empty {
+    grid-column: 1 / -1;
+    display: grid;
+    min-height: 66px;
+    place-items: center;
+    border: 1px dashed #c1d2de;
+    border-radius: 12px;
+    color: #64748b;
+    font-size: 0.78rem;
+    text-align: center;
+}
+
+.operations-page .operations-tone--blue { --metric-color: #1677c8; }
+.operations-page .operations-tone--green { --metric-color: #168765; }
+.operations-page .operations-tone--purple { --metric-color: #7950b3; }
+.operations-page .operations-tone--amber { --metric-color: #d97706; }
+.operations-page .operations-tone--teal { --metric-color: #0f766e; }
+.operations-page .operations-tone--slate { --metric-color: #526477; }
+
+@media (max-width: 1050px) {
+    .operations-page .operations-available-workflows > div {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .operations-page .operations-customise-button {
+        width: 100%;
+    }
+
+    .operations-page .operations-workflow-editor__header {
+        align-items: flex-start;
+    }
+
+    .operations-page .operations-selected-workflows,
+    .operations-page .operations-available-workflows > div {
+        grid-template-columns: 1fr;
+    }
+
+    .operations-page .operations-workflow-choice {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .operations-page .operations-workflow-choice__controls {
+        grid-column: 2;
+    }
+}

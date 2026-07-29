@@ -1,5 +1,6 @@
 export type WeekendLessonDay = 'Saturday' | 'Sunday';
 export type WeekendAttendanceStatus = 'mark' | 'missed' | 'makeup';
+export type WeekendAttendanceAction = 'mark' | 'missed' | 'undo';
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
@@ -87,6 +88,22 @@ export const isLessonDateForDay = (dateKey: string, studentDay: string) => {
     if (studentDay === 'Sunday') return date.getDay() === 0;
     return false;
 };
+
+export const canUseWeekendAttendanceDate = ({
+    role,
+    action,
+    dateKey,
+    todayDateKey = singaporeDateKey(),
+}: {
+    role: string | null | undefined;
+    action: WeekendAttendanceAction;
+    dateKey: string;
+    todayDateKey?: string;
+}) => (
+    action !== 'mark'
+    || dateKey === todayDateKey
+    || role === 'superuser'
+);
 
 export function validateAlternateAttendanceDate({
     dateKey,

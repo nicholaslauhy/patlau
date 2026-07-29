@@ -89,7 +89,7 @@ export default function Login() {
             const requestedPath = safeChatReturnPath(
                 new URLSearchParams(window.location.search).get('next')
             );
-            router.replace(requestedPath || '/dashboard');
+            router.replace(requestedPath || '/operations');
         } catch (err) {
             console.error('Login error:', err);
             setError('Login failed — please try again.');

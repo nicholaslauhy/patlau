@@ -21,6 +21,7 @@ interface NavItem {
 }
 
 const SECTION_COLORS: Record<string, string> = {
+    '/operations': '#0f766e',
     '/app/weekend': '#1677c8',
     '/app/weekday': '#1677c8',
     '/app/matchplay': '#7950b3',
@@ -335,6 +336,12 @@ export default function AppHeader({ title, userName, userRole, mode = 'dashboard
             <nav className="app-header__nav" aria-label="Primary navigation">
                 {mode === 'dashboard' ? (
                     <>
+                        <Link
+                            href="/operations"
+                            className={`app-header__nav-button${pathname === '/operations' ? ' is-active' : ''}`}
+                        >
+                            Operations
+                        </Link>
                         {userRole === 'superuser' && (
                             <>
                                 <Link

@@ -51,6 +51,7 @@ Members receive the limited navigation and data access intended for coaches or r
 | `/` | Sign in with an email address or username. |
 | `/reset` | Request and verify a six-digit recovery code or set a new password from a valid recovery session. |
 | `/signup` | Account-registration flow where enabled. |
+| `/operations` | Role-aware, read-only command centre for Weekend readiness, permitted admin workflows, and superuser follow-ups. |
 | `/dashboard` | Search and filter weekend students, manage attendance, edit permitted student fields, and access programme navigation. |
 | `/add` | Add a weekend student. |
 | `/attendance` | Detailed weekend attendance and student-management view. |

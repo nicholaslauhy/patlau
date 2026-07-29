@@ -7,6 +7,7 @@ import {
 } from '../../../lib/audit-server';
 import {
     attendanceRecordDateKey,
+    canUseWeekendAttendanceDate,
     parseWeekendAttendanceRecord,
     singaporeDateKey,
     validateAlternateAttendanceDate,
@@ -118,6 +119,32 @@ export async function POST(request: NextRequest) {
             return NextResponse.json(
                 { error: 'Refresh the table before undoing attendance.' },
                 { status: 409 },
+            );
+        }
+        if (!canUseWeekendAttendanceDate({
+            role: caller.role,
+            action: requestedAction,
+            dateKey: attendanceDate,
+        })) {
+            await writeAuditEvent({
+                request,
+                actor: caller,
+                eventKind: 'security',
+                category: 'attendance',
+                eventType: details.eventType,
+                action: details.auditAction,
+                outcome: 'denied',
+                summary: 'A non-superuser attempted to record Weekend attendance for another date.',
+                targetTable: 'students',
+                targetRecordId: { student_id: studentId },
+                metadata: {
+                    attendance_date: attendanceDate,
+                    reason: 'alternate_date_requires_superuser',
+                },
+            });
+            return NextResponse.json(
+                { error: 'Only superusers can record attendance for another date.' },
+                { status: 403 },
             );
         }
 

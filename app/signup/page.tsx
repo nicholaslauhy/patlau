@@ -97,7 +97,7 @@ export default function SignUp() {
         return;
       }
 
-      router.push('/dashboard');
+      router.push('/operations');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Signup failed';
       setError(errorMessage);

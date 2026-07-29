@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
     attendanceRecordDateKey,
     attendanceRecordOccupiedDateKeys,
+    canUseWeekendAttendanceDate,
     findLatestAvailableLessonDate,
     isLessonDateForDay,
     parseWeekendAttendanceRecord,
@@ -10,6 +11,27 @@ import {
     validateAlternateAttendanceDate,
     validateCurrentWeekendAttendanceDate,
 } from '../app/lib/weekend-attendance-date.ts';
+
+test('only superusers can record Weekend attendance for another date', () => {
+    const shared = {
+        action: 'mark',
+        dateKey: '2026-07-24',
+        todayDateKey: '2026-07-25',
+    };
+
+    assert.equal(canUseWeekendAttendanceDate({ ...shared, role: 'member' }), false);
+    assert.equal(canUseWeekendAttendanceDate({ ...shared, role: 'admin' }), false);
+    assert.equal(canUseWeekendAttendanceDate({ ...shared, role: 'superuser' }), true);
+    assert.equal(
+        canUseWeekendAttendanceDate({
+            role: 'member',
+            action: 'mark',
+            dateKey: '2026-07-25',
+            todayDateKey: '2026-07-25',
+        }),
+        true,
+    );
+});
 
 test('alternate Weekend attendance accepts any unused date strictly before today', () => {
     assert.equal(isLessonDateForDay('2026-07-25', 'Saturday'), true);
